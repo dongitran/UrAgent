@@ -15,6 +15,7 @@ import {
   getGitHubInstallationTokenOrThrow,
   getInstallationNameFromReq,
   getGitHubAccessTokenOrThrow,
+  verifyRequestAuth,
 } from "../[..._path]/utils";
 import { NextRequest, NextResponse } from "next/server";
 import { RestartRunRequest } from "./types";
@@ -105,6 +106,15 @@ async function createNewSession(
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    // Verify authentication first
+    const authResult = await verifyRequestAuth(request);
+    if (!authResult.authenticated) {
+      return NextResponse.json(
+        { error: "Unauthorized: " + (authResult.error || "Not authenticated") },
+        { status: 401 },
+      );
+    }
+
     const reqCopy = request.clone();
     const body: RestartRunRequest = await reqCopy.json();
     const { managerThreadId, plannerThreadId, programmerThreadId } = body;
