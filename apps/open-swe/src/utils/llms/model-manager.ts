@@ -50,6 +50,23 @@ export const PROVIDER_FALLBACK_ORDER = [
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
+/**
+ * Get fallback order based on LLM_MULTI_PROVIDER_ENABLED
+ * When disabled, only use the configured LLM_PROVIDER (no fallback to other providers)
+ */
+function getFallbackOrder(): Provider[] {
+  const multiProviderEnabled = process.env.LLM_MULTI_PROVIDER_ENABLED === 'true';
+  
+  if (multiProviderEnabled) {
+    // Multi-provider mode: fallback to other providers when one fails
+    return [...PROVIDER_FALLBACK_ORDER];
+  }
+  
+  // Single provider mode: only use the configured provider
+  const provider = (process.env.LLM_PROVIDER || 'openai') as Provider;
+  return [provider];
+}
+
 export interface ModelManagerConfig {
   /*
    * Failures before opening circuit
@@ -65,7 +82,7 @@ export interface ModelManagerConfig {
 export const DEFAULT_MODEL_MANAGER_CONFIG: ModelManagerConfig = {
   circuitBreakerFailureThreshold: 2, // TBD, need to test
   circuitBreakerTimeoutMs: 180000, // 3 minutes timeout
-  fallbackOrder: [...PROVIDER_FALLBACK_ORDER],
+  fallbackOrder: getFallbackOrder(),
 };
 
 const MAX_RETRIES = 3;
