@@ -12,8 +12,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Open SWE",
-  description: "Open SWE UX by LangChain",
+  title: "UrAgent",
+  description: "UrAgent - AI Coding Agent",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",

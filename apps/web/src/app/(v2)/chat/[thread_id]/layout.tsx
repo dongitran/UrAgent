@@ -3,8 +3,8 @@ import "../../../globals.css";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "Open SWE - Thread",
-  description: "Open SWE thread view",
+  title: "UrAgent - Thread",
+  description: "UrAgent thread view",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",
