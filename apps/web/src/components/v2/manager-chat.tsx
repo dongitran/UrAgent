@@ -90,8 +90,12 @@ function extractResponseFromMessage(message: Message): string {
   if (!isAIMessageSDK(message)) {
     return getMessageContentString(message.content);
   }
+  
+  // Handle Anthropic tool_use format in content array
   if (
     Array.isArray(message.content) &&
+    message.content.length > 0 &&
+    message.content[0] &&
     ["input_json_delta", "tool_use"].includes(
       message.content[0].type as string,
     ) &&
@@ -107,7 +111,9 @@ function extractResponseFromMessage(message: Message): string {
       // no-op
     }
   }
-  const toolCall = message.tool_calls?.[0];
+  
+  // Handle tool_calls format (works for both OpenAI and Anthropic)
+  const toolCall = (message as any).tool_calls?.[0];
   const response = toolCall?.args?.response;
 
   if (!toolCall || !response) {
@@ -221,7 +227,7 @@ export function ManagerChat({
                           <span className="text-muted-foreground text-xs font-medium">
                             {message.type === "human"
                               ? githubUser?.login || "You"
-                              : "Open SWE"}
+                              : "UrAgent"}
                           </span>
                           <div className="opacity-0 transition-opacity group-hover:opacity-100">
                             <MessageCopyButton content={messageContentString} />
