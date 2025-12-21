@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { Building2, LogOut, User } from "lucide-react";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { Building2, LogOut, User, KeyRound } from "lucide-react";
 import { GitHubSVG } from "@/components/icons/github";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -27,10 +28,16 @@ export function UserPopover({ className }: UserPopoverProps) {
   const {
     installations,
     currentInstallation,
-    installationsLoading: isLoading,
-    installationsError: error,
+    installationsLoading,
+    installationsError,
     switchInstallation,
   } = useGitHubAppProvider();
+
+  const {
+    user: currentUser,
+    isLoading: userLoading,
+    authProvider,
+  } = useCurrentUser();
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -43,8 +50,15 @@ export function UserPopover({ className }: UserPopoverProps) {
         method: "POST",
       });
       if (response.ok) {
+        const data = await response.json();
         localStorage.removeItem(GITHUB_APP_INSTALLED_KEY);
-        window.location.href = "/";
+        
+        // If Keycloak logout URL is provided, redirect to it
+        if (data.redirectUrl && data.provider === "keycloak") {
+          window.location.href = data.redirectUrl;
+        } else {
+          window.location.href = "/";
+        }
       } else {
         console.error("Logout failed");
       }
@@ -67,7 +81,24 @@ export function UserPopover({ className }: UserPopoverProps) {
     );
   };
 
-  if (isLoading || !currentInstallation) {
+  const getAuthProviderIcon = () => {
+    if (authProvider === "keycloak") {
+      return <KeyRound className="h-3 w-3" />;
+    }
+    if (authProvider === "github") {
+      return <GitHubSVG className="h-3 w-3" />;
+    }
+    return <User className="h-3 w-3" />;
+  };
+
+  const getAuthProviderLabel = () => {
+    if (authProvider === "keycloak") return "SSO";
+    if (authProvider === "github") return "GitHub";
+    return "Default";
+  };
+
+  // Show loading state
+  if (userLoading || installationsLoading) {
     return (
       <Button
         variant="ghost"
@@ -80,7 +111,8 @@ export function UserPopover({ className }: UserPopoverProps) {
     );
   }
 
-  if (error) {
+  // If no user, show error state
+  if (!currentUser) {
     return (
       <Button
         variant="ghost"
@@ -89,7 +121,7 @@ export function UserPopover({ className }: UserPopoverProps) {
         className={cn("h-8 w-8 rounded-full p-0", className)}
       >
         <div className="bg-destructive/20 flex h-6 w-6 items-center justify-center rounded-full">
-          <GitHubSVG className="text-destructive h-3 w-3" />
+          <User className="text-destructive h-3 w-3" />
         </div>
       </Button>
     );
@@ -104,8 +136,8 @@ export function UserPopover({ className }: UserPopoverProps) {
           className={cn("hover:bg-accent h-8 w-8 rounded-full p-0", className)}
         >
           <img
-            src={currentInstallation.avatarUrl}
-            alt={`${currentInstallation.accountName} avatar`}
+            src={currentUser.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.login)}&background=random`}
+            alt={`${currentUser.login} avatar`}
             className="h-6 w-6 rounded-full"
           />
         </Button>
@@ -115,29 +147,36 @@ export function UserPopover({ className }: UserPopoverProps) {
         align="end"
       >
         <div className="p-4">
+          {/* Current User Info */}
           <div className="mb-4 flex items-center gap-3">
             <img
-              src={currentInstallation.avatarUrl}
-              alt={`${currentInstallation.accountName} avatar`}
+              src={currentUser.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.login)}&background=random`}
+              alt={`${currentUser.login} avatar`}
               className="h-10 w-10 rounded-full"
             />
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">
-                {currentInstallation.accountName}
+                {currentUser.name || currentUser.login}
               </div>
               <div className="text-muted-foreground flex items-center gap-1 text-sm">
-                {getAccountIcon(currentInstallation.accountType)}
-                <span className="capitalize">
-                  {currentInstallation.accountType.toLowerCase()}
-                </span>
+                {getAuthProviderIcon()}
+                <span>{getAuthProviderLabel()}</span>
+                {currentUser.email && (
+                  <>
+                    <span className="mx-1">•</span>
+                    <span className="truncate text-xs">{currentUser.email}</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
-          {installations.length > 1 && (
+          {/* GitHub Installation Selector (only show if GitHub auth and multiple installations) */}
+          {authProvider === "github" && installations.length > 1 && currentInstallation && (
             <>
+              <Separator className="mb-4" />
               <div className="mb-4 space-y-2">
-                <label className="text-sm font-medium">Switch Account</label>
+                <label className="text-sm font-medium">GitHub Account</label>
                 <Select
                   value={currentInstallation.id.toString()}
                   onValueChange={handleValueChange}
@@ -174,9 +213,10 @@ export function UserPopover({ className }: UserPopoverProps) {
                   </SelectContent>
                 </Select>
               </div>
-              <Separator className="mb-4" />
             </>
           )}
+
+          <Separator className="mb-4" />
 
           <Button
             variant="ghost"

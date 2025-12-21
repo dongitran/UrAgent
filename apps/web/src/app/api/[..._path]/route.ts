@@ -10,11 +10,12 @@ import {
   getGitHubInstallationTokenOrThrow,
   getInstallationNameFromReq,
   getGitHubAccessTokenOrThrow,
+  verifyRequestAuth,
 } from "./utils";
 import { encryptSecret } from "@openswe/shared/crypto";
 
 // This file acts as a proxy for requests to your LangGraph server.
-// Read the [Going to Production](https://github.com/langchain-ai/agent-chat-ui?tab=readme-ov-file#going-to-production) section for more information.
+// Web server verifies Keycloak/GitHub auth, then proxies to LangGraph internally (no auth needed)
 
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
   initApiPassthrough({
@@ -54,6 +55,12 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
         throw new Error(
           "SECRETS_ENCRYPTION_KEY environment variable is required",
         );
+      }
+
+      // Verify authentication (Keycloak or GitHub or default config)
+      const authResult = await verifyRequestAuth(req);
+      if (!authResult.authenticated) {
+        throw new Error("Unauthorized: " + (authResult.error || "Not authenticated"));
       }
       
       // Get installation ID from cookie or fall back to default from env

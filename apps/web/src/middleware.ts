@@ -4,12 +4,19 @@ import {
   GITHUB_INSTALLATION_ID_COOKIE,
 } from "@openswe/shared/constants";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
+import { KEYCLOAK_ACCESS_TOKEN_COOKIE } from "@/lib/keycloak";
 
 /**
  * Check if default GitHub configuration is available
  * This allows bypassing OAuth flow when env vars are configured
+ * NOTE: Default config is disabled when Keycloak is enabled
  */
 function hasDefaultConfig(): boolean {
+  // If Keycloak is enabled, don't use default config (require Keycloak login)
+  if (isKeycloakEnabled()) {
+    return false;
+  }
+
   const defaultInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
   const defaultInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
   const appId = process.env.GITHUB_APP_ID;
@@ -18,19 +25,68 @@ function hasDefaultConfig(): boolean {
   return !!(defaultInstallationId && defaultInstallationName && appId && privateKey);
 }
 
+/**
+ * Check if Keycloak is enabled
+ */
+function isKeycloakEnabled(): boolean {
+  const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL;
+  const keycloakRealm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM;
+  const keycloakClientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID;
+  
+  return !!(keycloakUrl && keycloakRealm && keycloakClientId);
+}
+
+/**
+ * Check if user has valid Keycloak token
+ */
+function hasKeycloakToken(request: NextRequest): boolean {
+  const token = request.cookies.get(KEYCLOAK_ACCESS_TOKEN_COOKIE)?.value;
+  return !!token;
+}
+
 export async function middleware(request: NextRequest) {
+  // Check if Keycloak is enabled - if so, it's the ONLY auth method
+  const keycloakEnabled = isKeycloakEnabled();
+  
+  if (keycloakEnabled) {
+    // Keycloak is enabled - ONLY accept Keycloak token
+    const hasValidKeycloakToken = hasKeycloakToken(request);
+
+    if (request.nextUrl.pathname === "/") {
+      if (hasValidKeycloakToken) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/chat";
+        return NextResponse.redirect(url);
+      }
+      // Redirect to Keycloak login
+      const url = request.nextUrl.clone();
+      url.pathname = "/api/auth/keycloak/login";
+      return NextResponse.redirect(url);
+    }
+
+    if (request.nextUrl.pathname.startsWith("/chat")) {
+      if (!hasValidKeycloakToken) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/api/auth/keycloak/login";
+        return NextResponse.redirect(url);
+      }
+    }
+
+    return NextResponse.next();
+  }
+
+  // Keycloak NOT enabled - use GitHub OAuth or default config
   const token = request.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
   const installationId = request.cookies.get(
     GITHUB_INSTALLATION_ID_COOKIE,
   )?.value;
   const user = token && installationId ? await verifyGithubUser(token) : null;
-
-  // Check if we have default config (bypass OAuth)
   const useDefaultConfig = hasDefaultConfig();
 
+  const isAuthenticated = !!user || useDefaultConfig;
+
   if (request.nextUrl.pathname === "/") {
-    // If user is authenticated OR we have default config, redirect to chat
-    if (user || useDefaultConfig) {
+    if (isAuthenticated) {
       const url = request.nextUrl.clone();
       url.pathname = "/chat";
       return NextResponse.redirect(url);
@@ -38,8 +94,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (request.nextUrl.pathname.startsWith("/chat")) {
-    // Allow access if user is authenticated OR we have default config
-    if (!user && !useDefaultConfig) {
+    if (!isAuthenticated) {
       const url = request.nextUrl.clone();
       url.pathname = "/";
       return NextResponse.redirect(url);
