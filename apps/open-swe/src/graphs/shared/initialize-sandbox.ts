@@ -37,6 +37,7 @@ type InitializeSandboxState = {
   sandboxSessionId?: string;
   codebaseTree?: string;
   messages?: BaseMessage[];
+  internalMessages?: BaseMessage[];
   dependenciesInstalled?: boolean;
   customRules?: CustomRules;
 };
@@ -93,7 +94,7 @@ export async function initializeSandbox(
     );
   }
 
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
 
   if (!sandboxSessionId) {
     emitStepEvent(
@@ -204,6 +205,7 @@ export async function initializeSandbox(
           sandboxSessionId: existingSandbox.id,
           codebaseTree,
           messages: createEventsMessage(),
+          internalMessages: createEventsMessage(), // Ensure internalMessages has data
           customRules: await getCustomRules(
             existingSandbox,
             absoluteRepoDir,
@@ -220,6 +222,7 @@ export async function initializeSandbox(
           sandboxSessionId: existingSandbox.id,
           codebaseTree: FAILED_TO_GENERATE_TREE_MESSAGE,
           messages: createEventsMessage(),
+          internalMessages: createEventsMessage(), // Ensure internalMessages has data
           customRules: await getCustomRules(
             existingSandbox,
             absoluteRepoDir,
@@ -366,6 +369,7 @@ export async function initializeSandbox(
     targetRepository,
     codebaseTree,
     messages: createEventsMessage(),
+    internalMessages: createEventsMessage(), // Ensure internalMessages has data
     dependenciesInstalled: false,
     customRules: await getCustomRules(sandbox, absoluteRepoDir, config),
     branchName: newBranchName,
@@ -472,11 +476,16 @@ async function initializeSandboxLocal(
   // Create a mock sandbox ID for consistency
   const mockSandboxId = `local-${Date.now()}-${crypto.randomBytes(16).toString("hex")}`;
 
+  // Copy messages to internalMessages if internalMessages would be empty (for direct programmer calls)
+  const eventsMessages = createEventsMessage();
+  const allMessages = [...(state.messages || []), ...eventsMessages];
+  
   return {
     sandboxSessionId: mockSandboxId,
     targetRepository,
     codebaseTree,
-    messages: [...(state.messages || []), ...createEventsMessage()],
+    messages: allMessages,
+    internalMessages: allMessages, // Ensure internalMessages has data for programmer graph
     dependenciesInstalled: false,
     customRules: await getCustomRules(null as any, absoluteRepoDir, config),
     branchName: branchName,

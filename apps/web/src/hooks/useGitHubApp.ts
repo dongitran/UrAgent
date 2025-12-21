@@ -15,6 +15,20 @@ import {
 
 const GITHUB_SELECTED_REPO_KEY = "selected-repository";
 
+/**
+ * Get default repository from environment variables
+ */
+const getDefaultRepositoryFromEnv = (): TargetRepository | null => {
+  const owner = process.env.NEXT_PUBLIC_DEFAULT_REPOSITORY_OWNER;
+  const repo = process.env.NEXT_PUBLIC_DEFAULT_REPOSITORY_NAME;
+  const branch = process.env.NEXT_PUBLIC_DEFAULT_BRANCH || "main";
+
+  if (owner && repo) {
+    return { owner, repo, branch };
+  }
+  return null;
+};
+
 const saveRepositoryToLocalStorage = (repo: TargetRepository | null) => {
   try {
     if (repo) {
@@ -40,7 +54,7 @@ const getRepositoryFromLocalStorage = (): TargetRepository | null => {
         return {
           owner: parsed.owner,
           repo: parsed.repo,
-          // Don't restore branch from localStorage
+          branch: parsed.branch || "main",
         };
       }
     }
@@ -111,6 +125,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
     refreshInstallations,
   } = useGitHubInstallations();
 
+  // Initialize with default repository from env immediately
+  const defaultEnvRepo = getDefaultRepositoryFromEnv();
+
   // Installation and general state
   const [isInstalled, setIsInstalled] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -130,10 +147,11 @@ export function useGitHubApp(): UseGitHubAppReturn {
   const [branchesLoadingMore, setBranchesLoadingMore] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
 
-  // URL state management
-  const [selectedRepositoryParam, setSelectedRepositoryParam] =
-    useQueryState("repo");
+  // URL state management - only branch is in URL, repo is stored in state/localStorage
   const [selectedBranchParam, setSelectedBranchParam] = useQueryState("branch");
+  
+  // Repository selection state (not in URL) - initialize with default from env
+  const [selectedRepositoryState, setSelectedRepositoryState] = useState<TargetRepository | null>(defaultEnvRepo);
 
   // Track if auto-selection has been attempted to prevent re-triggering
   const hasAutoSelectedRef = useRef(false);
@@ -144,23 +162,21 @@ export function useGitHubApp(): UseGitHubAppReturn {
   // Track previous installation ID to detect actual changes
   const previousInstallationIdRef = useRef<string | null>(null);
 
-  const selectedRepository = useMemo(() => {
-    if (!selectedRepositoryParam) return null;
-    try {
-      // Parse "owner/repo" format instead of JSON
-      const parts = selectedRepositoryParam.split("/");
-      if (parts.length === 2) {
-        return {
-          owner: parts[0],
-          repo: parts[1],
-          branch: selectedBranchParam || undefined,
-        } as TargetRepository;
-      }
-      return null;
-    } catch {
-      return null;
+  // Set default branch in URL immediately if we have default repo and no branch param
+  useEffect(() => {
+    if (defaultEnvRepo && !selectedBranchParam) {
+      setSelectedBranchParam(defaultEnvRepo.branch || "main");
     }
-  }, [selectedRepositoryParam, selectedBranchParam]);
+  }, []);
+
+  // Selected repository comes from state, with branch from URL param
+  const selectedRepository = useMemo(() => {
+    if (!selectedRepositoryState) return null;
+    return {
+      ...selectedRepositoryState,
+      branch: selectedBranchParam || selectedRepositoryState.branch || "main",
+    } as TargetRepository;
+  }, [selectedRepositoryState, selectedBranchParam]);
 
   useEffect(() => {
     if (selectedRepository && !branchesLoading) {
@@ -177,7 +193,8 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   const setSelectedRepository = useCallback(
     (repo: TargetRepository | null) => {
-      setSelectedRepositoryParam(repo ? `${repo.owner}/${repo.repo}` : null);
+      // Update state (not URL)
+      setSelectedRepositoryState(repo);
       // Persist to localStorage whenever repository is selected
       saveRepositoryToLocalStorage(repo);
 
@@ -186,7 +203,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setBranchesPage(1);
       setBranchesHasMore(false);
     },
-    [setSelectedRepositoryParam, setSelectedBranchParam],
+    [setSelectedBranchParam],
   );
 
   const setSelectedBranch = (branch: string | null) => {
@@ -368,6 +385,16 @@ export function useGitHubApp(): UseGitHubAppReturn {
     ) {
       hasCheckedLocalStorageRef.current = true;
 
+      // Priority 1: Check for default repository from environment variables
+      const defaultEnvRepo = getDefaultRepositoryFromEnv();
+      if (defaultEnvRepo) {
+        setSelectedRepository(defaultEnvRepo);
+        saveRepositoryToLocalStorage(defaultEnvRepo);
+        hasAutoSelectedRef.current = true;
+        return;
+      }
+
+      // Priority 2: Check localStorage
       const storedRepo = getRepositoryFromLocalStorage();
       if (storedRepo) {
         const existsInResponse = repositories.some(
@@ -392,6 +419,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
                 const targetRepo = {
                   owner: firstRepo.full_name.split("/")[0],
                   repo: firstRepo.full_name.split("/")[1],
+                  branch: firstRepo.default_branch || "main",
                 };
                 setSelectedRepository(targetRepo);
                 saveRepositoryToLocalStorage(targetRepo);
@@ -403,6 +431,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
               const targetRepo = {
                 owner: firstRepo.full_name.split("/")[0],
                 repo: firstRepo.full_name.split("/")[1],
+                branch: firstRepo.default_branch || "main",
               };
               setSelectedRepository(targetRepo);
               saveRepositoryToLocalStorage(targetRepo);
@@ -438,6 +467,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
       const targetRepo = {
         owner: firstRepo.full_name.split("/")[0],
         repo: firstRepo.full_name.split("/")[1],
+        branch: firstRepo.default_branch || "main",
       };
       setSelectedRepository(targetRepo);
       saveRepositoryToLocalStorage(targetRepo);

@@ -251,7 +251,7 @@ export async function takeAction(
         changedFiles,
       });
 
-      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
       const result = await checkoutBranchAndCommit(
         config,
         state.targetRepository,

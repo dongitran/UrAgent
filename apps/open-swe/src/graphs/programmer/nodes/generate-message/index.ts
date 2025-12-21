@@ -220,7 +220,7 @@ async function createToolsAndPrompt(
   const anthropicModelTools = [
     ...sharedTools,
     {
-      type: "text_editor_20250429",
+      type: "text_editor_20250728",
       name: "str_replace_based_edit_tool",
       cache_control: { type: "ephemeral" },
     },
@@ -309,6 +309,34 @@ export async function generateAction(
   const markTaskCompletedTool = createMarkTaskCompletedToolFields();
   const isAnthropicModel = modelName.includes("claude-");
 
+  // Create default taskPlan if not provided (when calling programmer directly without planner)
+  let taskPlanToReturn: TaskPlan | undefined;
+  if (!state.taskPlan) {
+    taskPlanToReturn = {
+      tasks: [{
+        id: "default-task",
+        taskIndex: 0,
+        request: "Execute the user request",
+        title: "Execute Request",
+        createdAt: Date.now(),
+        completed: false,
+        planRevisions: [{
+          revisionIndex: 0,
+          plans: [{
+            index: 0,
+            plan: "Execute the user request",
+            completed: false,
+          }],
+          createdAt: Date.now(),
+          createdBy: "agent",
+        }],
+        activeRevisionIndex: 0,
+      }],
+      activeTaskIndex: 0,
+    };
+    logger.info("Created default taskPlan for direct programmer call");
+  }
+
   const [missingMessages, { taskPlan: latestTaskPlan }] = shouldCreateIssue(
     config,
   )
@@ -371,8 +399,13 @@ export async function generateAction(
     );
   }
 
+  // Safe access for taskPlan - use created default or state taskPlan
+  const effectiveTaskPlan = taskPlanToReturn || state.taskPlan;
+  const activePlanItems = effectiveTaskPlan ? getActivePlanItems(effectiveTaskPlan) : [];
+  const currentTaskPlan = activePlanItems.length > 0 ? getCurrentPlanItem(activePlanItems).plan : "No task plan";
+  
   logger.info("Generated action", {
-    currentTask: getCurrentPlanItem(getActivePlanItems(state.taskPlan)).plan,
+    currentTask: currentTaskPlan,
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),
@@ -383,11 +416,13 @@ export async function generateAction(
   });
 
   const newMessagesList = [...missingMessages, response];
+  // Return taskPlan: prioritize latestTaskPlan from issue, then created default, then nothing
+  const finalTaskPlan = latestTaskPlan || taskPlanToReturn;
   return {
     messages: newMessagesList,
     internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
-    ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
+    ...(finalTaskPlan && { taskPlan: finalTaskPlan }),
     tokenData: trackCachePerformance(response, modelName),
   };
 }

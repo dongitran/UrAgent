@@ -101,12 +101,12 @@ export async function getPlansFromIssue(
       proposedPlan: null,
     };
   }
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
   const issue = await getIssue({
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
     issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
+    githubInstallationToken,
   });
   if (!issue || !issue.body) {
     throw new Error(
@@ -187,12 +187,12 @@ export async function addProposedPlanToIssue(
   config: GraphConfig,
   proposedPlan: string[],
 ) {
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
   const issue = await getIssue({
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
     issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
+    githubInstallationToken,
   });
   if (!issue || !issue.body) {
     throw new Error(
@@ -211,8 +211,7 @@ export async function addProposedPlanToIssue(
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
     issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
+    githubInstallationToken,
     body: newBody,
   });
 }
@@ -222,12 +221,12 @@ export async function addTaskPlanToIssue(
   config: GraphConfig,
   taskPlan: TaskPlan,
 ): Promise<void> {
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
   const issue = await getIssue({
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
     issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
+    githubInstallationToken,
   });
 
   if (!issue || !issue.body) {
@@ -241,8 +240,7 @@ export async function addTaskPlanToIssue(
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
     issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
+    githubInstallationToken,
     body: newBody,
   });
 }

@@ -70,7 +70,7 @@ export async function classifyMessage(
   if (!isLocalMode(config)) {
     // Only create LangGraph client if not in local mode
     langGraphClient = createLangGraphClient({
-      defaultHeaders: getDefaultHeaders(config),
+      defaultHeaders: await getDefaultHeaders(config),
     });
 
     plannerThread = state.plannerSession?.threadId
@@ -220,7 +220,7 @@ export async function classifyMessage(
     );
   }
 
-  const { githubAccessToken } = getGitHubTokensFromConfig(config);
+  const { githubAccessToken } = await getGitHubTokensFromConfig(config);
   let githubIssueId = state.githubIssueId;
 
   const newMessages: BaseMessage[] = [response];

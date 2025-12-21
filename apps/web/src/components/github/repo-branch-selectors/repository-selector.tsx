@@ -31,7 +31,7 @@ interface RepositorySelectorProps {
 // Convert GitHub Repository to TargetRepository format
 const repositoryToTarget = (repo: Repository): TargetRepository => {
   const [owner, repoName] = repo.full_name.split("/");
-  return { owner, repo: repoName };
+  return { owner, repo: repoName, branch: repo.default_branch || "main" };
 };
 
 // TODO: Add utility function for repoSelector while viewing a thread

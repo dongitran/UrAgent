@@ -58,7 +58,7 @@ export async function getMissingMessages(
     return [];
   }
 
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
   const [issue, comments] = await Promise.all([
     getIssue({
       owner: input.targetRepository.owner,

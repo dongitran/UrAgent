@@ -5,14 +5,19 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 
 /**
  * Fetches repositories accessible to the GitHub App installation
- * Requires a valid GitHub installation ID in the cookies. Supports pagination via 'page' query parameter.
+ * Requires a valid GitHub installation ID in the cookies or default from env. Supports pagination via 'page' query parameter.
  */
 export async function GET(request: NextRequest) {
   try {
-    // Get the installation ID from cookies
-    const installationId = request.cookies.get(
+    // Get the installation ID from cookies or fall back to default
+    let installationId = request.cookies.get(
       GITHUB_INSTALLATION_ID_COOKIE,
     )?.value;
+
+    // Fall back to default installation ID from environment
+    if (!installationId) {
+      installationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
+    }
 
     if (!installationId) {
       return NextResponse.json(

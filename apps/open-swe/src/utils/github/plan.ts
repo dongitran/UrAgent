@@ -54,7 +54,7 @@ export async function postGitHubIssueComment(input: {
   }
 
   try {
-    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+    const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
     const existingComments = await getIssueComments({
       owner: targetRepository.owner,
       repo: targetRepository.repo,

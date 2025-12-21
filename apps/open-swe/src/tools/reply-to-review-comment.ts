@@ -36,7 +36,7 @@ export function createReplyToReviewCommentTool(
 ) {
   const replyToReviewCommentTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
-      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
       const { reviewPullNumber } = config.configurable ?? {};
 
       if (!reviewPullNumber) {
@@ -69,7 +69,7 @@ export function createReplyToCommentTool(
 ) {
   const replyToReviewCommentTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
-      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
       const reviewPullNumber = config.configurable?.reviewPullNumber;
       const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
 
@@ -104,7 +104,7 @@ export function createReplyToReviewTool(
 ) {
   const replyToReviewTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
-      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
       const reviewPullNumber = config.configurable?.reviewPullNumber;
       const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
 

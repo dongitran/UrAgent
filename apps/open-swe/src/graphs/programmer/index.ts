@@ -83,7 +83,8 @@ function routeGeneratedAction(
     return "take-action";
   }
 
-  const activePlanItems = getActivePlanItems(state.taskPlan);
+  // Safe access for taskPlan - may be undefined when calling programmer directly
+  const activePlanItems = state.taskPlan ? getActivePlanItems(state.taskPlan) : [];
   const hasRemainingTasks = getRemainingPlanItems(activePlanItems).length > 0;
   // If the model did not generate a tool call, but there are remaining tasks, we should route back to the generate action step.
   // Also add a check ensuring that the last to messages generated have tool calls. Otherwise we can end.
@@ -102,8 +103,9 @@ function routeGeneratedAction(
 function routeGenerateActionsOrEnd(
   state: GraphState,
 ): "generate-conclusion" | "generate-action" {
-  const activePlanItems = getActivePlanItems(state.taskPlan);
-  const allCompleted = activePlanItems.every((p) => p.completed);
+  // Safe access for taskPlan - may be undefined when calling programmer directly
+  const activePlanItems = state.taskPlan ? getActivePlanItems(state.taskPlan) : [];
+  const allCompleted = activePlanItems.length === 0 || activePlanItems.every((p) => p.completed);
   if (allCompleted) {
     return "generate-conclusion";
   }

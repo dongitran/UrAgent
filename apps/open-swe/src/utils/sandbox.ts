@@ -159,7 +159,7 @@ export async function getSandboxWithErrorHandling(
       throw new Error("Failed to create sandbox after 3 attempts");
     }
 
-    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+    const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
 
     // Clone repository
     await cloneRepo(sandbox, targetRepository, {

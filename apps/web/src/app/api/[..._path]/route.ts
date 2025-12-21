@@ -55,25 +55,32 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
           "SECRETS_ENCRYPTION_KEY environment variable is required",
         );
       }
-      const installationIdCookie = req.cookies.get(
+      
+      // Get installation ID from cookie or fall back to default from env
+      let installationId = req.cookies.get(
         GITHUB_INSTALLATION_ID_COOKIE,
       )?.value;
 
-      if (!installationIdCookie) {
+      if (!installationId) {
+        installationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
+      }
+
+      if (!installationId) {
         throw new Error(
           "No GitHub installation ID found. GitHub App must be installed first.",
         );
       }
+      
       const [installationToken, installationName] = await Promise.all([
-        getGitHubInstallationTokenOrThrow(installationIdCookie, encryptionKey),
-        getInstallationNameFromReq(req.clone(), installationIdCookie),
+        getGitHubInstallationTokenOrThrow(installationId, encryptionKey),
+        getInstallationNameFromReq(req.clone(), installationId),
       ]);
 
       return {
         [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
         [GITHUB_INSTALLATION_TOKEN_COOKIE]: installationToken,
         [GITHUB_INSTALLATION_NAME]: installationName,
-        [GITHUB_INSTALLATION_ID]: installationIdCookie,
+        [GITHUB_INSTALLATION_ID]: installationId,
       };
     },
   });

@@ -1,5 +1,4 @@
 import { BranchSelector } from "./branch-selector";
-import { RepositorySelector } from "./repository-selector";
 import { useQueryState } from "nuqs";
 
 export function RepositoryBranchSelectors() {
@@ -10,18 +9,9 @@ export function RepositoryBranchSelectors() {
   const defaultStylesChatStarted =
     "hover:bg-inherit cursor-default hover:cursor-default text-foreground hover:border-gray-300 hover:ring-inherit shadow-none p-0 px-0 py-0 !p-0 !px-0 !py-0";
 
+  // Only show branch selector - repository is fixed from env config
   return (
     <div className="flex items-center gap-1 rounded-md border border-gray-200 p-1 dark:border-gray-700">
-      <div className="flex items-center gap-0">
-        <RepositorySelector
-          chatStarted={chatStarted}
-          buttonClassName={
-            defaultButtonStyles +
-            (chatStarted ? " " + defaultStylesChatStarted : "")
-          }
-        />
-      </div>
-      <span className="text-muted-foreground/70">:</span>
       <div className="flex items-center gap-0">
         <BranchSelector
           chatStarted={chatStarted}

@@ -95,7 +95,7 @@ async function startProgrammerRun(input: {
   const isLocal = isLocalMode(config);
   const defaultHeaders = isLocal
     ? { [LOCAL_MODE_HEADER]: "true" }
-    : getDefaultHeaders(config);
+    : await getDefaultHeaders(config);
 
   // Only regenerate if its not running in local mode, and the GITHUB_PAT is not in the headers
   // If the GITHUB_PAT is in the headers, then it means we're running an eval and this does not need to be regenerated

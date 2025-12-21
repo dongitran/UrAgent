@@ -94,7 +94,7 @@ export async function openPullRequest(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
 
   const { sandbox, codebaseTree, dependenciesInstalled } =
     await getSandboxWithErrorHandling(
