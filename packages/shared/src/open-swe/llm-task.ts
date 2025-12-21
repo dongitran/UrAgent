@@ -27,21 +27,29 @@ export enum LLMTask {
   SUMMARIZER = "summarizer",
 }
 
-// Model defaults - read from env or use hardcoded defaults
-// Priority: OPENAI_*_MODEL (for LiteLLM) > ANTHROPIC_*_MODEL > hardcoded defaults
+/**
+ * Get model configuration from environment variables
+ * 
+ * Configuration:
+ * - LLM_PROVIDER: Provider to use (default: "openai" for LiteLLM gateway)
+ * - {PROVIDER}_{TASK}_MODEL: Per-task models (e.g., OPENAI_PLANNER_MODEL)
+ * 
+ * Priority:
+ * 1. {PROVIDER}_{TASK}_MODEL (per-task models based on LLM_PROVIDER)
+ * 2. Fallback to hardcoded defaults
+ */
 const getModelDefault = (task: string, fallback: string): string => {
-  // First check for OpenAI models (LiteLLM gateway)
-  const openaiEnvKey = `OPENAI_${task.toUpperCase()}_MODEL`;
-  const openaiEnvValue = typeof process !== 'undefined' && process.env ? process.env[openaiEnvKey] : undefined;
-  if (openaiEnvValue) {
-    return `openai:${openaiEnvValue}`;
-  }
+  const env = typeof process !== 'undefined' && process.env ? process.env : {};
   
-  // Then check for Anthropic models
-  const anthropicEnvKey = `ANTHROPIC_${task.toUpperCase()}_MODEL`;
-  const anthropicEnvValue = typeof process !== 'undefined' && process.env ? process.env[anthropicEnvKey] : undefined;
-  if (anthropicEnvValue) {
-    return `anthropic:${anthropicEnvValue}`;
+  // Get provider
+  const provider = env.LLM_PROVIDER || 'openai';
+  
+  // Check for per-task model based on provider
+  const providerPrefix = provider === 'google-genai' ? 'GOOGLE' : provider.toUpperCase();
+  const taskEnvKey = `${providerPrefix}_${task.toUpperCase()}_MODEL`;
+  const taskEnvValue = env[taskEnvKey];
+  if (taskEnvValue) {
+    return `${provider}:${taskEnvValue}`;
   }
   
   return fallback;
