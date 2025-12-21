@@ -13,8 +13,14 @@ import { verifyGithubUser } from "@openswe/shared/github/verify-user";
 
 /**
  * Check if default GitHub configuration is available
+ * NOTE: Default config is disabled when Keycloak is enabled
  */
 function hasDefaultConfig(): boolean {
+  // If Keycloak is enabled, don't use default config (require Keycloak login)
+  if (isKeycloakEnabled()) {
+    return false;
+  }
+
   const defaultInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
   const defaultInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
   const appId = process.env.GITHUB_APP_ID;
@@ -36,47 +42,52 @@ export interface AuthResult {
 
 /**
  * Verify request authentication
- * Checks Keycloak token, GitHub token, or default config
+ * When Keycloak is enabled, ONLY Keycloak token is accepted
+ * Otherwise, checks GitHub token or default config
  */
 export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
-  // Priority 1: Check Keycloak token if enabled
+  // If Keycloak is enabled, it's the ONLY auth method
   if (isKeycloakEnabled()) {
     const keycloakToken = getKeycloakAccessToken(req);
     
-    if (keycloakToken) {
-      // For performance, we decode the token instead of calling introspection endpoint
-      // The token was already validated when it was issued
-      const decoded = decodeKeycloakToken(keycloakToken);
-      
-      if (decoded) {
-        return {
-          authenticated: true,
-          user: {
-            id: decoded.sub,
-            login: decoded.preferred_username,
-            email: decoded.email,
-          },
-          provider: "keycloak",
-        };
-      }
-
-      // If decode fails, try introspection (slower but more reliable)
-      const isValid = await verifyKeycloakToken(keycloakToken);
-      if (isValid) {
-        return {
-          authenticated: true,
-          provider: "keycloak",
-        };
-      }
-
+    if (!keycloakToken) {
       return {
         authenticated: false,
-        error: "Invalid Keycloak token",
+        error: "Keycloak authentication required",
       };
     }
+
+    // Decode the token to get user info
+    const decoded = decodeKeycloakToken(keycloakToken);
+    
+    if (decoded) {
+      return {
+        authenticated: true,
+        user: {
+          id: decoded.sub,
+          login: decoded.preferred_username,
+          email: decoded.email,
+        },
+        provider: "keycloak",
+      };
+    }
+
+    // If decode fails, try verification
+    const isValid = await verifyKeycloakToken(keycloakToken);
+    if (isValid) {
+      return {
+        authenticated: true,
+        provider: "keycloak",
+      };
+    }
+
+    return {
+      authenticated: false,
+      error: "Invalid Keycloak token",
+    };
   }
 
-  // Priority 2: Check GitHub OAuth token
+  // Keycloak NOT enabled - check GitHub OAuth or default config
   const githubToken = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
   if (githubToken) {
     try {
@@ -97,7 +108,7 @@ export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
     }
   }
 
-  // Priority 3: Check default config (development mode)
+  // Check default config (development mode)
   if (hasDefaultConfig()) {
     const installationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
     return {

@@ -10,8 +10,14 @@ import {
 
 /**
  * Check if default GitHub configuration is available
+ * NOTE: Default config is disabled when Keycloak is enabled
  */
 function hasDefaultConfig(): { hasConfig: boolean; installationName?: string } {
+  // If Keycloak is enabled, don't use default config
+  if (isKeycloakEnabled()) {
+    return { hasConfig: false };
+  }
+
   const defaultInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
   const defaultInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
   const appId = process.env.GITHUB_APP_ID;
@@ -23,45 +29,49 @@ function hasDefaultConfig(): { hasConfig: boolean; installationName?: string } {
 
 export async function GET(request: NextRequest) {
   try {
-    // Priority 1: Check Keycloak token if enabled
+    // If Keycloak is enabled, it's the ONLY auth method
     if (isKeycloakEnabled()) {
       const keycloakToken = getKeycloakAccessToken(request);
       
-      if (keycloakToken) {
-        // Try to get user info from Keycloak
-        const userInfo = await getKeycloakUserInfo(keycloakToken);
-        
-        if (userInfo) {
-          return NextResponse.json({
-            user: {
-              id: userInfo.sub,
-              login: userInfo.preferred_username,
-              name: userInfo.name || userInfo.preferred_username,
-              email: userInfo.email,
-              avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(userInfo.preferred_username)}&background=random`,
-            },
-            authProvider: "keycloak",
-          });
-        }
-
-        // Fallback: decode token directly
-        const decoded = decodeKeycloakToken(keycloakToken);
-        if (decoded) {
-          return NextResponse.json({
-            user: {
-              id: decoded.sub,
-              login: decoded.preferred_username,
-              name: decoded.name || decoded.preferred_username,
-              email: decoded.email,
-              avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(decoded.preferred_username)}&background=random`,
-            },
-            authProvider: "keycloak",
-          });
-        }
+      if (!keycloakToken) {
+        return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
       }
+
+      // Try to get user info from Keycloak
+      const userInfo = await getKeycloakUserInfo(keycloakToken);
+      
+      if (userInfo) {
+        return NextResponse.json({
+          user: {
+            id: userInfo.sub,
+            login: userInfo.preferred_username,
+            name: userInfo.name || userInfo.preferred_username,
+            email: userInfo.email,
+            avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(userInfo.preferred_username)}&background=random`,
+          },
+          authProvider: "keycloak",
+        });
+      }
+
+      // Fallback: decode token directly
+      const decoded = decodeKeycloakToken(keycloakToken);
+      if (decoded) {
+        return NextResponse.json({
+          user: {
+            id: decoded.sub,
+            login: decoded.preferred_username,
+            name: decoded.name || decoded.preferred_username,
+            email: decoded.email,
+            avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(decoded.preferred_username)}&background=random`,
+          },
+          authProvider: "keycloak",
+        });
+      }
+
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
 
-    // Priority 2: Check GitHub OAuth token
+    // Keycloak NOT enabled - check GitHub OAuth
     const token = getGitHubToken(request);
     
     if (token && token.access_token) {
@@ -80,7 +90,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Priority 3: Fall back to default config if available
+    // Fall back to default config if available
     const { hasConfig, installationName } = hasDefaultConfig();
     if (hasConfig && installationName) {
       return NextResponse.json({
