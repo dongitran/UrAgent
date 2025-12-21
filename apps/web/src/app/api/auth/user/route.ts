@@ -3,10 +3,48 @@ import { getGitHubToken } from "@/lib/auth";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
 import {
   getKeycloakAccessToken,
+  getKeycloakRefreshToken,
   getKeycloakUserInfo,
   decodeKeycloakToken,
   isKeycloakEnabled,
+  refreshAccessToken,
 } from "@/lib/keycloak";
+
+/**
+ * Check if Keycloak token is expired or about to expire (within 30 seconds)
+ */
+function isTokenExpiredOrExpiring(token: string): boolean {
+  try {
+    const decoded = decodeKeycloakToken(token) as any;
+    if (!decoded || !decoded.exp) {
+      return true;
+    }
+    // Check if token expires within 30 seconds
+    const expiresAt = decoded.exp * 1000;
+    const now = Date.now();
+    return expiresAt - now < 30000; // 30 seconds buffer
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Try to refresh Keycloak token if it's expired
+ */
+async function tryRefreshKeycloakToken(req: NextRequest): Promise<string | null> {
+  const refreshToken = getKeycloakRefreshToken(req);
+  if (!refreshToken) {
+    return null;
+  }
+
+  try {
+    const tokenData = await refreshAccessToken(refreshToken);
+    return tokenData.access_token;
+  } catch (error) {
+    console.error("Failed to refresh Keycloak token:", error);
+    return null;
+  }
+}
 
 /**
  * Check if default GitHub configuration is available
@@ -31,7 +69,15 @@ export async function GET(request: NextRequest) {
   try {
     // If Keycloak is enabled, it's the ONLY auth method
     if (isKeycloakEnabled()) {
-      const keycloakToken = getKeycloakAccessToken(request);
+      let keycloakToken = getKeycloakAccessToken(request);
+      
+      // If no token or token is expired, try to refresh
+      if (!keycloakToken || isTokenExpiredOrExpiring(keycloakToken)) {
+        const refreshedToken = await tryRefreshKeycloakToken(request);
+        if (refreshedToken) {
+          keycloakToken = refreshedToken;
+        }
+      }
       
       if (!keycloakToken) {
         return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

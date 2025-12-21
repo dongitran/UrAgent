@@ -5,11 +5,79 @@ import { encryptSecret } from "@openswe/shared/crypto";
 import { NextRequest } from "next/server";
 import {
   getKeycloakAccessToken,
+  getKeycloakRefreshToken,
   verifyKeycloakToken,
   isKeycloakEnabled,
   decodeKeycloakToken,
+  refreshAccessToken,
 } from "@/lib/keycloak";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
+
+/**
+ * Check if Keycloak token is expired or about to expire (within 30 seconds)
+ */
+function isTokenExpiredOrExpiring(token: string): boolean {
+  try {
+    const decoded = decodeKeycloakToken(token) as any;
+    if (!decoded || !decoded.exp) {
+      return true;
+    }
+    // Check if token expires within 30 seconds
+    const expiresAt = decoded.exp * 1000;
+    const now = Date.now();
+    return expiresAt - now < 30000; // 30 seconds buffer
+  } catch {
+    return true;
+  }
+}
+
+// Cache for refreshed tokens to avoid multiple refresh calls
+const tokenRefreshCache = new Map<string, { token: string; expiresAt: number }>();
+
+/**
+ * Try to refresh Keycloak token if it's expired
+ * Returns the new access token or null if refresh failed
+ */
+async function tryRefreshKeycloakToken(req: NextRequest): Promise<string | null> {
+  const refreshToken = getKeycloakRefreshToken(req);
+  if (!refreshToken) {
+    return null;
+  }
+
+  // Check cache first (use refresh token as key)
+  const cacheKey = refreshToken.substring(0, 32); // Use first 32 chars as key
+  const cached = tokenRefreshCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.token;
+  }
+
+  try {
+    const tokenData = await refreshAccessToken(refreshToken);
+    
+    // Cache the new token
+    const decoded = decodeKeycloakToken(tokenData.access_token) as any;
+    const expiresAt = decoded?.exp ? decoded.exp * 1000 : Date.now() + 300000; // 5 min default
+    tokenRefreshCache.set(cacheKey, {
+      token: tokenData.access_token,
+      expiresAt: expiresAt - 30000, // 30 seconds buffer
+    });
+
+    // Clean up old cache entries
+    if (tokenRefreshCache.size > 100) {
+      const now = Date.now();
+      for (const [key, value] of tokenRefreshCache.entries()) {
+        if (value.expiresAt < now) {
+          tokenRefreshCache.delete(key);
+        }
+      }
+    }
+
+    return tokenData.access_token;
+  } catch (error) {
+    console.error("Failed to refresh Keycloak token:", error);
+    return null;
+  }
+}
 
 /**
  * Check if default GitHub configuration is available
@@ -48,7 +116,15 @@ export interface AuthResult {
 export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
   // If Keycloak is enabled, it's the ONLY auth method
   if (isKeycloakEnabled()) {
-    const keycloakToken = getKeycloakAccessToken(req);
+    let keycloakToken = getKeycloakAccessToken(req);
+    
+    // If no token or token is expired, try to refresh
+    if (!keycloakToken || isTokenExpiredOrExpiring(keycloakToken)) {
+      const refreshedToken = await tryRefreshKeycloakToken(req);
+      if (refreshedToken) {
+        keycloakToken = refreshedToken;
+      }
+    }
     
     if (!keycloakToken) {
       return {
@@ -61,6 +137,15 @@ export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
     const decoded = decodeKeycloakToken(keycloakToken);
     
     if (decoded) {
+      // Check if token is still valid (not expired)
+      const tokenData = decoded as any;
+      if (tokenData.exp && tokenData.exp * 1000 < Date.now()) {
+        return {
+          authenticated: false,
+          error: "Keycloak token expired",
+        };
+      }
+      
       return {
         authenticated: true,
         user: {
