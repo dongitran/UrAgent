@@ -633,6 +633,8 @@ function calculateSimilarity(str1: string, str2: string): number {
  * - If outputs are different, it's not a stuck loop (agent is making progress)
  * 
  * Fixed: Use index-based tracking for output hashes to correctly match calls
+ * 
+ * Enhanced: Also detect parallel call loops (same parallel calls repeated)
  */
 function countConsecutiveIdenticalCalls(toolCalls: ToolCallSignature[], messages?: BaseMessage[]): {
   count: number;
@@ -654,9 +656,42 @@ function countConsecutiveIdenticalCalls(toolCalls: ToolCallSignature[], messages
     
     const lastMessageCalls = toolCallsByMessage[toolCallsByMessage.length - 1];
     
-    // If last message has multiple parallel calls, it's not a simple loop
-    // (agent is doing legitimate parallel work)
+    // Enhanced: Check for parallel call loops (same set of parallel calls repeated)
     if (lastMessageCalls.length > 1) {
+      // Create a signature for the entire parallel call set
+      const lastParallelSignature = lastMessageCalls
+        .map(tc => `${tc.name}:${tc.argsHash}`)
+        .sort()
+        .join("|");
+      
+      let parallelCount = 1;
+      for (let i = toolCallsByMessage.length - 2; i >= 0; i--) {
+        const messageCalls = toolCallsByMessage[i];
+        if (messageCalls.length === lastMessageCalls.length) {
+          const parallelSignature = messageCalls
+            .map(tc => `${tc.name}:${tc.argsHash}`)
+            .sort()
+            .join("|");
+          if (parallelSignature === lastParallelSignature) {
+            parallelCount++;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+      
+      // If parallel calls are repeating, it's still a loop
+      if (parallelCount >= 3) {
+        logger.warn("Detected parallel call loop", {
+          parallelCount,
+          callCount: lastMessageCalls.length,
+          tools: lastMessageCalls.map(tc => tc.name),
+        });
+        return { count: parallelCount, signature: lastMessageCalls[0], hasVaryingOutputs: false };
+      }
+      
       return { count: 1, signature: lastMessageCalls[0], hasVaryingOutputs: false };
     }
     
@@ -868,6 +903,120 @@ function detectReadOnlyLoop(toolCalls: ToolCallSignature[]): boolean {
   }
   
   return readOnlyCount / recentCalls.length >= LOOP_DETECTION_CONFIG.READ_ONLY_THRESHOLD;
+}
+
+/**
+ * Detects "tool switching loop" - agent alternates between different tools for same purpose
+ * Pattern: str_replace fail → apply_patch fail → str_replace fail → apply_patch fail
+ * This is a more sophisticated loop where agent tries different tools but same goal
+ */
+function detectToolSwitchingLoop(toolCalls: ToolCallSignature[], messages: BaseMessage[]): {
+  isToolSwitching: boolean;
+  targetFile: string | null;
+  switchCount: number;
+} {
+  if (toolCalls.length < 4) {
+    return { isToolSwitching: false, targetFile: null, switchCount: 0 };
+  }
+  
+  const toolCallsWithResults = extractToolCallsWithResults(messages);
+  const recentCalls = toolCalls.slice(-10);
+  
+  // Track edit attempts per file with different tools
+  const fileEditAttempts = new Map<string, { tools: Set<string>; failCount: number }>();
+  
+  for (let i = 0; i < recentCalls.length; i++) {
+    const tc = recentCalls[i];
+    const targetFile = extractTargetFile(tc.name, tc.fullArgs);
+    
+    if (!targetFile) continue;
+    
+    // Only track edit tools
+    if (tc.name !== "str_replace_based_edit_tool" && tc.name !== "apply_patch") {
+      continue;
+    }
+    
+    if (!fileEditAttempts.has(targetFile)) {
+      fileEditAttempts.set(targetFile, { tools: new Set(), failCount: 0 });
+    }
+    
+    const attempts = fileEditAttempts.get(targetFile)!;
+    attempts.tools.add(tc.name);
+    
+    // Check if this call failed
+    const result = toolCallsWithResults[i];
+    if (result?.status === "error") {
+      attempts.failCount++;
+    }
+  }
+  
+  // Find file with tool switching pattern (multiple tools, multiple failures)
+  for (const [file, attempts] of fileEditAttempts) {
+    if (attempts.tools.size >= 2 && attempts.failCount >= 3) {
+      return {
+        isToolSwitching: true,
+        targetFile: file,
+        switchCount: attempts.failCount,
+      };
+    }
+  }
+  
+  return { isToolSwitching: false, targetFile: null, switchCount: 0 };
+}
+
+/**
+ * Detects "delayed loop" - same action repeated but not consecutively
+ * Pattern: A→B→C→A→D→E→A→F→G→A (A repeats but with other actions in between)
+ * This catches loops that are spread out over time
+ */
+function detectDelayedLoop(toolCalls: ToolCallSignature[]): {
+  isDelayedLoop: boolean;
+  repeatedSignature: ToolCallSignature | null;
+  occurrences: number;
+} {
+  if (toolCalls.length < 8) {
+    return { isDelayedLoop: false, repeatedSignature: null, occurrences: 0 };
+  }
+  
+  const recentCalls = toolCalls.slice(-20);
+  
+  // Count occurrences of each unique tool call
+  const signatureCounts = new Map<string, { count: number; signature: ToolCallSignature }>();
+  
+  for (const tc of recentCalls) {
+    const key = `${tc.name}:${tc.argsHash}`;
+    if (!signatureCounts.has(key)) {
+      signatureCounts.set(key, { count: 0, signature: tc });
+    }
+    signatureCounts.get(key)!.count++;
+  }
+  
+  // Find the most repeated call
+  let maxCount = 0;
+  let maxSignature: ToolCallSignature | null = null;
+  
+  for (const [, data] of signatureCounts) {
+    if (data.count > maxCount) {
+      maxCount = data.count;
+      maxSignature = data.signature;
+    }
+  }
+  
+  // If same call appears 5+ times in last 20 calls (even non-consecutively), it's suspicious
+  // But only if it's not a legitimate exploration (reading many different files)
+  if (maxCount >= 5 && maxSignature) {
+    // Check if it's a read operation on same file (suspicious)
+    const isReadOp = isReadOnlyToolCall(maxSignature.name, maxSignature.fullArgs);
+    if (isReadOp) {
+      return {
+        isDelayedLoop: true,
+        repeatedSignature: maxSignature,
+        occurrences: maxCount,
+      };
+    }
+  }
+  
+  return { isDelayedLoop: false, repeatedSignature: null, occurrences: 0 };
 }
 
 /**
@@ -1152,6 +1301,12 @@ function determineLoopType(
     return "edit_loop";
   }
   
+  // Check for tool switching loop (str_replace fail → apply_patch fail → ...)
+  const { isToolSwitching } = detectToolSwitchingLoop(toolCalls, messages);
+  if (isToolSwitching) {
+    return "edit_loop";  // Treat as edit_loop since it's the same underlying issue
+  }
+  
   // Check for alternating pattern
   const { isAlternating } = detectAlternatingPattern(toolCalls);
   if (isAlternating) {
@@ -1171,6 +1326,12 @@ function determineLoopType(
   const { isFrequent } = detectFrequencyLoop(toolCalls);
   if (isFrequent) {
     return "frequency";
+  }
+  
+  // Check for delayed loop (same action repeated non-consecutively)
+  const { isDelayedLoop } = detectDelayedLoop(toolCalls);
+  if (isDelayedLoop) {
+    return "similar_calls";  // Treat as similar_calls
   }
   
   // Check for read-only loop
@@ -1357,6 +1518,8 @@ export function detectLoop(messages: BaseMessage[]): LoopDetectionResult {
   const { isAlternating, patternLength, cycleType } = detectAlternatingPattern(toolCalls);
   const { isSimilar, count: similarCount, targetFile, isEditLoop, editCount } = detectSimilarToolCalls(toolCalls);
   const { isFrequent, count: frequencyCount, toolName: frequentTool } = detectFrequencyLoop(toolCalls);
+  const { isToolSwitching, switchCount } = detectToolSwitchingLoop(toolCalls, messages);
+  const { isDelayedLoop, occurrences: delayedCount } = detectDelayedLoop(toolCalls);
   const hasRecentHelp = hasRecentHelpRequest(messages);
   
   // If outputs are varying, reduce the effective count (agent might be making progress)
@@ -1376,7 +1539,7 @@ export function detectLoop(messages: BaseMessage[]): LoopDetectionResult {
   let loopType = determineLoopType(toolCalls, messages, adjustedConsecutiveCount);
   
   // Override to edit_loop if detected (more severe handling)
-  if (isEditLoop && loopType !== "chanting") {
+  if ((isEditLoop || isToolSwitching) && loopType !== "chanting") {
     loopType = "edit_loop";
   }
   
@@ -1385,10 +1548,10 @@ export function detectLoop(messages: BaseMessage[]): LoopDetectionResult {
   if (isAlternating) {
     effectiveCount = patternLength;
   } else if (loopType === "edit_loop") {
-    // For edit loops, use the edit count specifically
-    effectiveCount = editCount;
+    // For edit loops, use the edit count or switch count specifically
+    effectiveCount = Math.max(editCount, switchCount);
   } else if (loopType === "similar_calls") {
-    effectiveCount = similarCount;
+    effectiveCount = Math.max(similarCount, delayedCount);
   } else if (loopType === "frequency") {
     effectiveCount = frequencyCount;
   }
@@ -1437,6 +1600,8 @@ export function detectLoop(messages: BaseMessage[]): LoopDetectionResult {
       cycleType,
       isSimilar,
       isEditLoop,
+      isToolSwitching,
+      isDelayedLoop,
       isFrequent,
       hasRecentHelp,
       hasVaryingOutputs,
@@ -1646,6 +1811,7 @@ export function shouldSkipDueToLoop(
  * Returns true if the pattern is legitimate (should NOT trigger loop detection)
  * 
  * Improved: Also check that edits are actually different (not repeating same edit)
+ * Enhanced: Check for "progressive edit loop" - edits that are similar but not identical
  */
 export function isLegitimateBuildFixRetry(messages: BaseMessage[]): boolean {
   const toolCalls = extractRecentToolCalls(messages);
@@ -1660,6 +1826,7 @@ export function isLegitimateBuildFixRetry(messages: BaseMessage[]): boolean {
   let editCount = 0;
   let lastWasBuild = false;
   const editHashes = new Set<string>();  // Track unique edits
+  const editContents: string[] = [];  // Track edit content for similarity check
   
   for (const tc of recentCalls) {
     const isBuildCommand = tc.name === "shell" && typeof tc.fullArgs.command === "string" && 
@@ -1673,6 +1840,13 @@ export function isLegitimateBuildFixRetry(messages: BaseMessage[]): boolean {
     } else if (isEditCommand && lastWasBuild) {
       editCount++;
       editHashes.add(tc.argsHash);  // Track unique edit content
+      
+      // Also track the actual edit content for similarity check
+      if (tc.name === "str_replace_based_edit_tool") {
+        const newStr = tc.fullArgs.new_str as string || "";
+        editContents.push(newStr);
+      }
+      
       lastWasBuild = false;
     }
   }
@@ -1681,6 +1855,26 @@ export function isLegitimateBuildFixRetry(messages: BaseMessage[]): boolean {
   // At least 2 build commands and 2 edits in between
   // AND edits must be different (not repeating same edit)
   const hasUniqueEdits = editHashes.size >= Math.max(1, editCount - 1);  // Allow 1 repeat
+  
+  // Additional check: if edits are too similar (progressive edit loop), it's not legitimate
+  // This catches cases where agent makes tiny changes each time but doesn't fix the issue
+  if (editContents.length >= 3) {
+    let similarPairs = 0;
+    for (let i = 1; i < editContents.length; i++) {
+      const similarity = calculateSimilarity(editContents[i-1], editContents[i]);
+      if (similarity > 0.8) {  // 80% similar
+        similarPairs++;
+      }
+    }
+    // If most edits are very similar, it's a progressive edit loop, not legitimate
+    if (similarPairs >= editContents.length - 1) {
+      logger.info("Detected progressive edit loop - edits are too similar", {
+        editCount,
+        similarPairs,
+      });
+      return false;
+    }
+  }
   
   return buildCount >= 2 && editCount >= 2 && hasUniqueEdits;
 }
