@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, KeyRound } from "lucide-react";
 import { LangGraphLogoSVG } from "../icons/langgraph";
+import { UrAgentLogo } from "../icons/uragent-logo";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
@@ -16,12 +17,19 @@ interface DefaultConfig {
   installationName?: string;
 }
 
+interface AuthConfig {
+  keycloakEnabled: boolean;
+  keycloakUrl?: string;
+  keycloakRealm?: string;
+}
+
 function AuthStatusContent() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [defaultConfig, setDefaultConfig] = useState<DefaultConfig | null>(null);
-  const [isCheckingDefaultConfig, setIsCheckingDefaultConfig] = useState(true);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [isCheckingConfig, setIsCheckingConfig] = useState(true);
 
   const {
     token: githubToken,
@@ -34,17 +42,19 @@ function AuthStatusContent() {
     isLoading: isCheckingAppInstallation,
   } = useGitHubAppProvider();
 
-  // Check for default config first
+  // Check for auth config first
   useEffect(() => {
-    checkDefaultConfig();
+    checkAuthConfig();
   }, []);
 
-  // Check auth status if no default config
+  // Check auth status if no default config and no keycloak
   useEffect(() => {
-    if (defaultConfig !== null && !defaultConfig.hasDefaultConfig) {
-      checkAuthStatus();
+    if (authConfig !== null && defaultConfig !== null) {
+      if (!defaultConfig.hasDefaultConfig && !authConfig.keycloakEnabled) {
+        checkAuthStatus();
+      }
     }
-  }, [defaultConfig]);
+  }, [authConfig, defaultConfig]);
 
   // If we have default config, try to fetch token directly
   useEffect(() => {
@@ -69,16 +79,16 @@ function AuthStatusContent() {
   // Redirect to chat when token is available
   useEffect(() => {
     if (githubToken) {
-      console.log("redirecting to chat");
       router.push("/chat");
     }
   }, [githubToken, router]);
 
   // Compute display states
-  const showGetStarted = !defaultConfig?.hasDefaultConfig && !isAuth;
+  const showKeycloakLogin = authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !isAuth;
+  const showGetStarted = !authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !isAuth;
   const showInstallApp =
-    !defaultConfig?.hasDefaultConfig && !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
-  const showLoading = !defaultConfig?.hasDefaultConfig && !showGetStarted && !showInstallApp && !githubToken;
+    !authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
+  const showLoading = !authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !showGetStarted && !showInstallApp && !githubToken;
 
   // Redirect when all conditions are met (non-default config flow)
   useEffect(() => {
@@ -87,22 +97,30 @@ function AuthStatusContent() {
     }
   }, [defaultConfig, showGetStarted, showInstallApp, showLoading, githubToken, router]);
 
-  const checkDefaultConfig = async () => {
+  const checkAuthConfig = async () => {
     try {
-      setIsCheckingDefaultConfig(true);
-      const response = await fetch("/api/auth/default-config");
-      const data = await response.json();
-      setDefaultConfig(data);
+      setIsCheckingConfig(true);
+      
+      // Check default config
+      const defaultConfigResponse = await fetch("/api/auth/default-config");
+      const defaultConfigData = await defaultConfigResponse.json();
+      setDefaultConfig(defaultConfigData);
+      
+      // Check auth config (keycloak enabled, etc.)
+      const authConfigResponse = await fetch("/api/auth/config");
+      const authConfigData = await authConfigResponse.json();
+      setAuthConfig(authConfigData);
       
       // If we have default config, we can skip auth check
-      if (data.hasDefaultConfig) {
+      if (defaultConfigData.hasDefaultConfig) {
         setIsAuth(true);
       }
     } catch (error) {
-      console.error("Error checking default config:", error);
+      console.error("Error checking auth config:", error);
       setDefaultConfig({ hasDefaultConfig: false });
+      setAuthConfig({ keycloakEnabled: false });
     } finally {
-      setIsCheckingDefaultConfig(false);
+      setIsCheckingConfig(false);
     }
   };
 
@@ -117,7 +135,12 @@ function AuthStatusContent() {
     }
   };
 
-  const handleLogin = () => {
+  const handleKeycloakLogin = () => {
+    setIsLoading(true);
+    window.location.href = "/api/auth/keycloak/login";
+  };
+
+  const handleGitHubLogin = () => {
     setIsLoading(true);
     window.location.href = "/api/auth/github/login";
   };
@@ -127,14 +150,14 @@ function AuthStatusContent() {
     window.location.href = "/api/github/installation";
   };
 
-  // Show loading while checking default config
-  if (isCheckingDefaultConfig) {
+  // Show loading while checking config
+  if (isCheckingConfig) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <LangGraphLogoSVG className="h-7" />
+              <UrAgentLogo width={150} height={24} />
               <h1 className="text-xl font-semibold tracking-tight">
                 Loading...
               </h1>
@@ -157,7 +180,7 @@ function AuthStatusContent() {
           <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
             <div className="flex flex-col gap-4 border-b p-6">
               <div className="flex flex-col items-start gap-2">
-                <LangGraphLogoSVG className="h-7" />
+                <UrAgentLogo width={150} height={24} />
                 <h1 className="text-xl font-semibold tracking-tight">
                   Loading...
                 </h1>
@@ -174,23 +197,52 @@ function AuthStatusContent() {
     return null;
   }
 
-  // Original auth flow for non-default config
+  // Keycloak login flow
+  if (showKeycloakLogin) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center p-4">
+        <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
+          <div className="flex flex-col gap-4 border-b p-6">
+            <div className="flex flex-col items-start gap-2">
+              <UrAgentLogo width={150} height={24} />
+              <h1 className="text-xl font-semibold tracking-tight">
+                Welcome to UrAgent
+              </h1>
+            </div>
+            <p className="text-muted-foreground">
+              Sign in to continue to UrAgent - your AI-powered coding assistant.
+            </p>
+            <Button
+              onClick={handleKeycloakLogin}
+              disabled={isLoading}
+              className="w-full"
+            >
+              <KeyRound className="mr-2 h-4 w-4" />
+              {isLoading ? "Redirecting..." : "Sign in with SSO"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Original GitHub auth flow
   if (showGetStarted) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <LangGraphLogoSVG className="h-7" />
+              <UrAgentLogo width={150} height={24} />
               <h1 className="text-xl font-semibold tracking-tight">
                 Get started
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Connect your GitHub account to get started with Open SWE.
+              Connect your GitHub account to get started with UrAgent.
             </p>
             <Button
-              onClick={handleLogin}
+              onClick={handleGitHubLogin}
               disabled={isLoading}
             >
               <GitHubSVG
@@ -211,7 +263,7 @@ function AuthStatusContent() {
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <LangGraphLogoSVG className="h-7" />
+              <UrAgentLogo width={150} height={24} />
               <h1 className="text-xl font-semibold tracking-tight">
                 One more step
               </h1>
@@ -260,13 +312,13 @@ function AuthStatusContent() {
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <LangGraphLogoSVG className="h-7" />
+              <UrAgentLogo width={150} height={24} />
               <h1 className="text-xl font-semibold tracking-tight">
                 Loading...
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Setting up your GitHub integration...
+              Setting up your integration...
             </p>
           </div>
         </div>

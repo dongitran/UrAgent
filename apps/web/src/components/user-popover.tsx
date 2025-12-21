@@ -43,8 +43,15 @@ export function UserPopover({ className }: UserPopoverProps) {
         method: "POST",
       });
       if (response.ok) {
+        const data = await response.json();
         localStorage.removeItem(GITHUB_APP_INSTALLED_KEY);
-        window.location.href = "/";
+        
+        // If Keycloak logout URL is provided, redirect to it
+        if (data.redirectUrl && data.provider === "keycloak") {
+          window.location.href = data.redirectUrl;
+        } else {
+          window.location.href = "/";
+        }
       } else {
         console.error("Logout failed");
       }
