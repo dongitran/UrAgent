@@ -27,25 +27,36 @@ export enum LLMTask {
   SUMMARIZER = "summarizer",
 }
 
+// Model defaults - read from env or use hardcoded defaults
+// Env format: ANTHROPIC_PLANNER_MODEL=claude-sonnet-4-5-20250929
+const getModelDefault = (task: string, fallback: string): string => {
+  const envKey = `ANTHROPIC_${task.toUpperCase()}_MODEL`;
+  const envValue = typeof process !== 'undefined' && process.env ? process.env[envKey] : undefined;
+  if (envValue) {
+    return `anthropic:${envValue}`;
+  }
+  return fallback;
+};
+
 export const TASK_TO_CONFIG_DEFAULTS_MAP = {
   [LLMTask.PLANNER]: {
-    modelName: "anthropic:claude-opus-4-5",
+    modelName: getModelDefault("planner", "anthropic:claude-sonnet-4-5-20250929"),
     temperature: 0,
   },
   [LLMTask.PROGRAMMER]: {
-    modelName: "anthropic:claude-opus-4-5",
+    modelName: getModelDefault("programmer", "anthropic:claude-sonnet-4-5-20250929"),
     temperature: 0,
   },
   [LLMTask.REVIEWER]: {
-    modelName: "anthropic:claude-opus-4-5",
+    modelName: getModelDefault("reviewer", "anthropic:claude-sonnet-4-5-20250929"),
     temperature: 0,
   },
   [LLMTask.ROUTER]: {
-    modelName: "anthropic:claude-haiku-4-5",
+    modelName: getModelDefault("router", "anthropic:claude-haiku-4-5-20251001"),
     temperature: 0,
   },
   [LLMTask.SUMMARIZER]: {
-    modelName: "anthropic:claude-haiku-4-5",
+    modelName: getModelDefault("summarizer", "anthropic:claude-haiku-4-5-20251001"),
     temperature: 0,
   },
 };

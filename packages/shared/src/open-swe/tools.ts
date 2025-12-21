@@ -179,6 +179,7 @@ export function createGrepToolFields(targetRepository: TargetRepository) {
 const _tmpSearchToolSchema = createGrepToolFields({
   owner: "x",
   repo: "x",
+  branch: "main",
 }).schema;
 export type GrepCommand = z.infer<typeof _tmpSearchToolSchema>;
 
