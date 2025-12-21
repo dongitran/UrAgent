@@ -72,6 +72,7 @@ export function buildKeycloakAuthUrl(state: string): string {
 
 /**
  * Exchange authorization code for tokens
+ * Supports both public clients (no secret) and confidential clients (with secret)
  */
 export async function exchangeCodeForTokens(code: string): Promise<KeycloakTokenData> {
   const config = getKeycloakConfig();
@@ -80,10 +81,14 @@ export async function exchangeCodeForTokens(code: string): Promise<KeycloakToken
   const params = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: config.clientId,
-    client_secret: config.clientSecret,
     code,
     redirect_uri: config.redirectUri,
   });
+
+  // Only add client_secret if it's configured (confidential client)
+  if (config.clientSecret) {
+    params.append("client_secret", config.clientSecret);
+  }
 
   const response = await fetch(tokenUrl, {
     method: "POST",
@@ -103,6 +108,7 @@ export async function exchangeCodeForTokens(code: string): Promise<KeycloakToken
 
 /**
  * Refresh access token using refresh token
+ * Supports both public clients (no secret) and confidential clients (with secret)
  */
 export async function refreshAccessToken(refreshToken: string): Promise<KeycloakTokenData> {
   const config = getKeycloakConfig();
@@ -111,9 +117,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<Keycloak
   const params = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: config.clientId,
-    client_secret: config.clientSecret,
     refresh_token: refreshToken,
   });
+
+  // Only add client_secret if it's configured (confidential client)
+  if (config.clientSecret) {
+    params.append("client_secret", config.clientSecret);
+  }
 
   const response = await fetch(tokenUrl, {
     method: "POST",
@@ -198,9 +208,27 @@ export function decodeKeycloakToken(token: string): KeycloakUser | null {
 
 /**
  * Verify Keycloak token by introspection endpoint
+ * Note: Token introspection requires client authentication for confidential clients
+ * For public clients, we skip introspection and rely on token decoding
  */
 export async function verifyKeycloakToken(token: string): Promise<boolean> {
   const config = getKeycloakConfig();
+  
+  // For public clients (no secret), we can't use introspection endpoint
+  // Just decode and check expiration
+  if (!config.clientSecret) {
+    const decoded = decodeKeycloakToken(token);
+    if (!decoded) return false;
+    
+    // Check if token has exp claim and is not expired
+    const tokenData = decoded as any;
+    if (tokenData.exp) {
+      return tokenData.exp * 1000 > Date.now();
+    }
+    return true;
+  }
+
+  // For confidential clients, use introspection endpoint
   const introspectUrl = `${config.url}/realms/${config.realm}/protocol/openid-connect/token/introspect`;
   
   const params = new URLSearchParams({
