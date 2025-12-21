@@ -42,7 +42,7 @@ export async function prepareGraphState(
     throw new Error("No target repository provided");
   }
 
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
   const baseGetIssueInputs = {
     owner: state.targetRepository.owner,
     repo: state.targetRepository.repo,

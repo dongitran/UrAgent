@@ -144,6 +144,24 @@ export async function createPullRequest({
   draft?: boolean;
   nullOnError?: boolean;
 }): Promise<GitHubPullRequest | GitHubPullRequestList[number] | null> {
+  logger.info("=== CREATE PULL REQUEST CALLED ===", {
+    owner,
+    repo,
+    headBranch,
+    baseBranch,
+    draft,
+    nullOnError,
+    title,
+    isSameBranch: headBranch === baseBranch,
+  });
+
+  // CRITICAL: Prevent creating PR with same head and base branch
+  if (headBranch === baseBranch) {
+    const errorMsg = `Cannot create PR: head branch (${headBranch}) is same as base branch (${baseBranch})`;
+    logger.error("CRITICAL ERROR: " + errorMsg);
+    throw new Error(errorMsg);
+  }
+
   const octokit = new Octokit({
     auth: githubInstallationToken,
   });
@@ -183,11 +201,23 @@ export async function createPullRequest({
     }
   }
 
+  // Double check after fetching default branch
+  if (headBranch === repoBaseBranch) {
+    const errorMsg = `Cannot create PR: head branch (${headBranch}) is same as base branch (${repoBaseBranch})`;
+    logger.error("CRITICAL ERROR after fetching default branch: " + errorMsg);
+    throw new Error(errorMsg);
+  }
+
   let pullRequest: GitHubPullRequest | null = null;
   try {
     logger.info(
-      `Creating pull request against default branch: ${repoBaseBranch}`,
-      { nullOnError },
+      `Creating pull request: ${headBranch} -> ${repoBaseBranch}`,
+      { 
+        nullOnError,
+        headBranch,
+        baseBranch: repoBaseBranch,
+        draft,
+      },
     );
 
     // Step 2: Create the pull request
@@ -202,8 +232,20 @@ export async function createPullRequest({
     });
 
     pullRequest = pullRequestData;
-    logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
+    logger.info(`🐙 Pull request created successfully!`, {
+      prNumber: pullRequest.number,
+      prUrl: pullRequest.html_url,
+      headBranch,
+      baseBranch: repoBaseBranch,
+    });
   } catch (error) {
+    logger.error(`Failed to create pull request`, {
+      error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      headBranch,
+      baseBranch: repoBaseBranch,
+      nullOnError,
+    });
+
     if (nullOnError) {
       return null;
     }
@@ -213,6 +255,7 @@ export async function createPullRequest({
         "Pull request already exists. Getting existing pull request...",
         {
           nullOnError,
+          headBranch,
         },
       );
       return getExistingPullRequest(
@@ -223,9 +266,6 @@ export async function createPullRequest({
       );
     }
 
-    logger.error(`Failed to create pull request`, {
-      error,
-    });
     return null;
   }
 

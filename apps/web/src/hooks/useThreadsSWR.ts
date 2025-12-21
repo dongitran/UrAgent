@@ -153,9 +153,12 @@ export function useThreadsSWR<
 
     return allThreads.filter((thread) => {
       const threadInstallationName = thread.metadata?.installation_name;
+      // Allow threads without installation_name (backward compatibility for API-created threads)
+      // or threads matching current installation
       return (
-        typeof threadInstallationName === "string" &&
-        threadInstallationName === currentInstallation.accountName
+        !threadInstallationName ||
+        (typeof threadInstallationName === "string" &&
+          threadInstallationName === currentInstallation.accountName)
       );
     });
   }, [data, currentInstallation, disableOrgFiltering]);

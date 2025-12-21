@@ -51,5 +51,5 @@ credentials.json
 # Test traces
 apps/cli/test_traces/
 
-# Process documentation (contains sensitive test data)
+# Process documentation
 process.md

@@ -5,13 +5,19 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 /**
  * Returns a GitHub installation token that can be used for Git operations
  * This endpoint is intended for internal use by the AI coding agent
+ * Supports both cookie-based installation ID and default installation from env
  */
 export async function GET(request: NextRequest) {
   try {
-    // Get the installation ID from cookies
-    const installationId = request.cookies.get(
+    // Get the installation ID from cookies or fall back to default
+    let installationId = request.cookies.get(
       GITHUB_INSTALLATION_ID_COOKIE,
     )?.value;
+
+    // Fall back to default installation ID from environment
+    if (!installationId) {
+      installationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
+    }
 
     if (!installationId) {
       return NextResponse.json(

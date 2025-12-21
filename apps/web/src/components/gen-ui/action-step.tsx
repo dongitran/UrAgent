@@ -39,7 +39,7 @@ import { cn } from "@/lib/utils";
 import { ToolIconWithTooltip } from "./tool-icon-tooltip";
 
 // Used only for Zod type inference.
-const dummyRepo = { owner: "dummy", repo: "dummy" };
+const dummyRepo = { owner: "dummy", repo: "dummy", branch: "main" };
 const shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof shellTool.schema>;
 const applyPatchTool = createApplyPatchToolFields(dummyRepo);

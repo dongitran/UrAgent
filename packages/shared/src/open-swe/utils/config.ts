@@ -2,6 +2,23 @@ import {
   GraphConfig,
   GraphConfigurationMetadata,
 } from "@openswe/shared/open-swe/types";
+import {
+  GITHUB_USER_LOGIN_HEADER,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_INSTALLATION_ID,
+  GITHUB_INSTALLATION_NAME,
+} from "@openswe/shared/constants";
+
+// Hidden fields that should still be passed through to subgraphs
+const PASSTHROUGH_HIDDEN_FIELDS = [
+  "apiKeys",
+  "reviewPullNumber",
+  "customFramework",
+  GITHUB_USER_LOGIN_HEADER,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_INSTALLATION_ID,
+  GITHUB_INSTALLATION_NAME,
+];
 
 export function getCustomConfigurableFields(
   config: GraphConfig,
@@ -16,7 +33,7 @@ export function getCustomConfigurableFields(
     if (key in config.configurable) {
       if (
         metadataValue.x_open_swe_ui_config.type !== "hidden" ||
-        ["apiKeys", "reviewPullNumber", "customFramework"].includes(key)
+        PASSTHROUGH_HIDDEN_FIELDS.includes(key)
       ) {
         result[key as keyof GraphConfig["configurable"]] =
           config.configurable[key as keyof GraphConfig["configurable"]];

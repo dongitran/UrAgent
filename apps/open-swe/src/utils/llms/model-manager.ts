@@ -113,8 +113,11 @@ export class ModelManager {
     graphConfig: GraphConfig,
     provider: Provider,
   ): string | null {
+    // Try LangGraph Cloud format first, then fall back to self-hosted header, then default config
     const userLogin = (graphConfig.configurable as any)?.langgraph_auth_user
-      ?.display_name;
+      ?.display_name 
+      || (graphConfig.configurable as any)?.["x-github-user-login"]
+      || process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
     const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
 
     if (!secretsEncryptionKey) {
@@ -181,6 +184,9 @@ export class ModelManager {
     const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
       max_retries: MAX_RETRIES,
+      // Explicitly set topP to undefined to avoid Anthropic API error with Claude 4.5 models
+      // See: https://github.com/langchain-ai/langchainjs/issues/9205
+      topP: undefined,
       ...(apiKey ? { apiKey } : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {

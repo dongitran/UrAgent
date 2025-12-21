@@ -101,7 +101,16 @@ export function useGitHubInstallations(): UseGitHubInstallationsReturn {
       setInstallations(transformedInstallations);
 
       // Get the current installation ID from the cookie
-      const currentId = getCurrentInstallationId();
+      let currentId = getCurrentInstallationId();
+      
+      // If no cookie, check if we have a default installation and auto-select it
+      if (!currentId && transformedInstallations.length > 0) {
+        const firstInstallation = transformedInstallations[0];
+        currentId = firstInstallation.id.toString();
+        // Auto-switch to the first (default) installation
+        await switchInstallation(currentId);
+      }
+      
       setCurrentInstallationId(currentId);
     } catch (err) {
       const errorMessage =

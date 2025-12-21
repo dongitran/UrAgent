@@ -18,7 +18,6 @@ import { ThreadCard, ThreadCardLoading } from "./thread-card";
 import { GitHubInstallationBanner } from "../github/installation-banner";
 import { ApiKeyBanner } from "../api-key-banner";
 import { IssuesRequiredBanner } from "../github/forked-repository-banner";
-import { QuickActions } from "./quick-actions";
 import { DraftsSection } from "./drafts-section";
 import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
@@ -31,7 +30,7 @@ import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
-import { OpenSWELogo } from "../icons/openswe-logo";
+import { UrAgentLogo } from "../icons/uragent-logo";
 import { OpenSWEIcon } from "../icons/openswe-icon";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 
@@ -130,7 +129,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       <div className="border-border bg-card border-b px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <OpenSWELogo
+            <UrAgentLogo
               width={120}
               height={18}
             />
@@ -292,7 +291,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               </div>
             )}
           </div>
-          <QuickActions setQuickActionPrompt={setQuickActionPrompt} />
           {/* TODO: Better multiple draft handling. Not actually used right now */}
           <DraftsSection onLoadDraft={handleLoadDraft} />
         </div>

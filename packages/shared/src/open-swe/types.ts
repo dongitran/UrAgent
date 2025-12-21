@@ -142,7 +142,7 @@ export type TaskPlan = {
 export type TargetRepository = {
   owner: string;
   repo: string;
-  branch?: string;
+  branch: string;
   baseCommit?: string;
 };
 
@@ -218,6 +218,11 @@ export const GraphAnnotation = MessagesZodState.extend({
       schema: z.custom<TargetRepository>(),
       fn: (_state, update) => update,
     },
+    default: () => ({
+      owner: process.env.DEFAULT_REPOSITORY_OWNER || "",
+      repo: process.env.DEFAULT_REPOSITORY_NAME || "",
+      branch: process.env.DEFAULT_BRANCH || "main",
+    }),
   }),
   /**
    * The current tree of the codebase the agent is working with.

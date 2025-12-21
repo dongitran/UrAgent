@@ -95,7 +95,7 @@ async function startProgrammerRun(input: {
   const isLocal = isLocalMode(config);
   const defaultHeaders = isLocal
     ? { [LOCAL_MODE_HEADER]: "true" }
-    : getDefaultHeaders(config);
+    : await getDefaultHeaders(config);
 
   // Only regenerate if its not running in local mode, and the GITHUB_PAT is not in the headers
   // If the GITHUB_PAT is in the headers, then it means we're running an eval and this does not need to be regenerated
@@ -203,6 +203,13 @@ export async function interruptProposedPlan(
     internalMessages: state.messages,
     documentCache: state.documentCache,
   };
+
+  logger.info("=== PROGRAMMER RUN INPUT PREPARED ===", {
+    branchName: state.branchName,
+    targetBranch: state.targetRepository?.branch,
+    isSameBranch: state.branchName === state.targetRepository?.branch,
+    isLocalMode: isLocalMode(config),
+  });
 
   if (state.autoAcceptPlan) {
     logger.info("Auto accepting plan.", {

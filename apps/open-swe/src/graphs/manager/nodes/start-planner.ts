@@ -27,6 +27,36 @@ import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
 /**
+ * Determines the branch name to use for the planner run.
+ * If the current branchName is the same as the base branch (targetRepository.branch),
+ * we need to create a new feature branch to avoid committing directly to the base branch.
+ */
+function determineBranchName(
+  state: ManagerGraphState,
+  config: GraphConfig,
+): string {
+  const baseBranch = state.targetRepository?.branch || "main";
+  const currentBranchName = state.branchName;
+  
+  // If branchName is not set, or is the same as base branch, create a new feature branch
+  if (!currentBranchName || currentBranchName === baseBranch) {
+    const newBranchName = getBranchName(config);
+    logger.info("Creating new feature branch (current branch is base branch)", {
+      baseBranch,
+      currentBranchName,
+      newBranchName,
+    });
+    return newBranchName;
+  }
+  
+  logger.info("Using existing feature branch", {
+    baseBranch,
+    currentBranchName,
+  });
+  return currentBranchName;
+}
+
+/**
  * Start planner node.
  * This node will kickoff a new planner session using the LangGraph SDK.
  * In local mode, creates a planner session with local mode headers.
@@ -44,7 +74,7 @@ export async function startPlanner(
   const localMode = isLocalMode(config);
   const defaultHeaders = localMode
     ? { [LOCAL_MODE_HEADER]: "true" }
-    : getDefaultHeaders(config);
+    : await getDefaultHeaders(config);
 
   // Only regenerate if its not running in local mode, and the GITHUB_PAT is not in the headers
   // If the GITHUB_PAT is in the headers, then it means we're running an eval and this does not need to be regenerated
@@ -66,13 +96,20 @@ export async function startPlanner(
       targetRepository: state.targetRepository,
       // Include the existing task plan, so the agent can use it as context when generating followup tasks.
       taskPlan: state.taskPlan,
-      branchName: state.branchName ?? getBranchName(config),
+      branchName: determineBranchName(state, config),
       autoAcceptPlan: state.autoAcceptPlan,
       ...(followupMessage || localMode ? { messages: [followupMessage] } : {}),
       ...(!shouldCreateIssue(config) && followupMessage
         ? { internalMessages: [followupMessage] }
         : {}),
     };
+
+    logger.info("Starting planner run", {
+      plannerThreadId,
+      branchName: runInput.branchName,
+      targetRepository: state.targetRepository,
+      localMode,
+    });
 
     const run = await langGraphClient.runs.create(
       plannerThreadId,

@@ -59,7 +59,7 @@ import { OPEN_SWE_STREAM_MODE } from "@openswe/shared/constants";
 import { CustomNodeEvent } from "@openswe/shared/open-swe/custom-node-events";
 
 // Used only for Zod type inference.
-const dummyRepo = { owner: "dummy", repo: "dummy" };
+const dummyRepo = { owner: "dummy", repo: "dummy", branch: "main" };
 const shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof shellTool.schema>;
 const applyPatchTool = createApplyPatchToolFields(dummyRepo);
@@ -117,6 +117,7 @@ const textEditorTool = createTextEditorToolFields(
   {
     owner: "dummy",
     repo: "dummy",
+    branch: "main",
   },
   {},
 );

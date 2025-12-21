@@ -119,7 +119,12 @@ export function getBranchName(configOrThreadId: GraphConfig | string): string {
     throw new Error("No thread ID provided");
   }
 
-  return `open-swe/${threadId}`;
+  const branchName = `open-swe/${threadId}`;
+  logger.info("Generated branch name from thread ID", {
+    threadId,
+    branchName,
+  });
+  return branchName;
 }
 
 export async function getChangedFilesStatus(
@@ -215,7 +220,38 @@ export async function checkoutBranchAndCommit(
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const branchName = options.branchName || getBranchName(config);
 
-  logger.info(`Committing changes to branch ${branchName}`);
+  logger.info("=== CHECKOUT BRANCH AND COMMIT STARTED ===", {
+    optionsBranchName: options.branchName,
+    generatedBranchName: getBranchName(config),
+    finalBranchName: branchName,
+    baseBranch: targetRepository.branch,
+    isFeatureBranch: branchName !== targetRepository.branch,
+    absoluteRepoDir,
+  });
+
+  // IMPORTANT: Prevent committing directly to base branch
+  if (branchName === targetRepository.branch) {
+    logger.warn("⚠️ WARNING: Attempting to commit to base branch! Creating feature branch instead.", {
+      baseBranch: targetRepository.branch,
+      branchName,
+      threadId: config.configurable?.thread_id,
+    });
+    // Force create a new feature branch
+    const featureBranchName = getBranchName(config);
+    logger.info(`Creating feature branch instead: ${featureBranchName}`, {
+      oldBranchName: branchName,
+      newBranchName: featureBranchName,
+    });
+    return checkoutBranchAndCommit(config, targetRepository, sandbox, {
+      ...options,
+      branchName: featureBranchName,
+    });
+  }
+
+  logger.info(`✅ Branch is valid feature branch, proceeding with commit`, {
+    branchName,
+    baseBranch: targetRepository.branch,
+  });
 
   // Validate and filter files before committing
   const validFiles = await getValidFilesToCommit(
@@ -338,8 +374,20 @@ export async function checkoutBranchAndCommit(
   const activeTask = getActiveTask(options.taskPlan);
   const prForTask = getPullRequestNumberFromActiveTask(options.taskPlan);
 
+  logger.info("Checking if draft PR needs to be created", {
+    hasActiveTask: !!activeTask,
+    activeTaskTitle: activeTask?.title,
+    prForTask,
+    branchName,
+    baseBranch: targetRepository.branch,
+  });
+
   if (!prForTask) {
-    logger.info("First commit detected, creating a draft pull request.");
+    logger.info("First commit detected, creating a draft pull request.", {
+      branchName,
+      baseBranch: targetRepository.branch,
+      activeTaskTitle: activeTask?.title,
+    });
     const hasIssue = shouldCreateIssue(config);
 
     const reviewPullNumber = config.configurable?.reviewPullNumber;
@@ -357,6 +405,12 @@ export async function checkoutBranchAndCommit(
     });
 
     if (pullRequest) {
+      logger.info(`✅ Draft pull request created successfully!`, {
+        prNumber: pullRequest.number,
+        prUrl: pullRequest.html_url,
+        branchName,
+        baseBranch: targetRepository.branch,
+      });
       updatedTaskPlan = addPullRequestNumberToActiveTask(
         options.taskPlan,
         pullRequest.number,
@@ -370,9 +424,19 @@ export async function checkoutBranchAndCommit(
           config,
           updatedTaskPlan,
         );
-        logger.info(`Draft pull request created: #${pullRequest.number}`);
+        logger.info(`Draft pull request linked to issue: #${options.githubIssueId}`);
       }
+    } else {
+      logger.warn("Failed to create draft pull request", {
+        branchName,
+        baseBranch: targetRepository.branch,
+      });
     }
+  } else {
+    logger.info("PR already exists for this task, skipping draft PR creation", {
+      prForTask,
+      branchName,
+    });
   }
 
   logger.info("Successfully checked out & committed changes.", {

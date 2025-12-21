@@ -99,14 +99,26 @@ Given all of this, please respond with the concise conclusion. Do not include an
   };
 
   // Route based on mode: END for local mode, open-pr for sandbox mode
-  if (isLocalMode(config)) {
+  const localMode = isLocalMode(config);
+  logger.info("=== GENERATE CONCLUSION ROUTING ===", {
+    isLocalMode: localMode,
+    configLocalMode: (config.configurable as any)?.["x-local-mode"],
+    branchName: state.branchName,
+    targetBranch: state.targetRepository?.branch,
+    willRouteToOpenPr: !localMode,
+  });
+
+  if (localMode) {
     logger.info("Local mode: routing to END");
     return new Command({
       update: graphUpdate,
       goto: END,
     });
   } else {
-    logger.info("Sandbox mode: routing to open-pr");
+    logger.info("Sandbox mode: routing to open-pr", {
+      branchName: state.branchName,
+      targetBranch: state.targetRepository?.branch,
+    });
     return new Command({
       update: graphUpdate,
       goto: "open-pr",

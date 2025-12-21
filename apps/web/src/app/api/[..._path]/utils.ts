@@ -10,10 +10,10 @@ export function getGitHubAccessTokenOrThrow(
 ): string {
   const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value ?? "";
 
+  // If no OAuth token, return empty string (will use installation token instead)
+  // This allows default config mode to work without OAuth login
   if (!token) {
-    throw new Error(
-      "No GitHub access token found. User must authenticate first.",
-    );
+    return "";
   }
 
   return encryptSecret(token, encryptionKey);

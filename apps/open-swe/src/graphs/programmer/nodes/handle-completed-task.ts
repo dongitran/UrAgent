@@ -89,7 +89,7 @@ export async function handleCompletedTask(
     summary,
   );
   // Update the github issue to reflect this task as completed.
-  if (!isLocalMode(config) && shouldCreateIssue(config)) {
+  if (!isLocalMode(config) && shouldCreateIssue(config) && state.githubIssueId) {
     await addTaskPlanToIssue(
       {
         githubIssueId: state.githubIssueId,
@@ -99,7 +99,11 @@ export async function handleCompletedTask(
       updatedPlanTasks,
     );
   } else {
-    logger.info("Skipping GitHub issue update in local mode");
+    logger.info("Skipping GitHub issue update", {
+      isLocalMode: isLocalMode(config),
+      shouldCreateIssue: shouldCreateIssue(config),
+      hasGithubIssueId: !!state.githubIssueId,
+    });
   }
 
   const commandUpdate: GraphUpdate = {

@@ -17,7 +17,7 @@ import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { UserPopover } from "@/components/user-popover";
-import { OpenSWELogo } from "@/components/icons/openswe-logo";
+import { UrAgentLogo } from "@/components/icons/uragent-logo";
 
 type FilterStatus =
   | "all"
@@ -128,7 +128,7 @@ function AllThreadsPageContent() {
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <div className="flex items-center gap-2">
-            <OpenSWELogo
+            <UrAgentLogo
               width={120}
               height={18}
             />

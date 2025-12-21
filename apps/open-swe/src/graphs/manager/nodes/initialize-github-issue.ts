@@ -24,7 +24,7 @@ export async function initializeGithubIssue(
     // The human message should already be in the state from the CLI input
     return {};
   }
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
   let taskPlan = state.taskPlan;
 
   if (state.messages.length && state.messages.some(isHumanMessage)) {

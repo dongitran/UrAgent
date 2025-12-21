@@ -8,13 +8,35 @@ type GitHubInstallationsResponse =
 /**
  * Fetches all GitHub App installations accessible to the current user
  * Uses the user's access token from GITHUB_TOKEN_COOKIE to call GET /user/installations
+ * Falls back to default installation if configured in environment
  */
 export async function GET(request: NextRequest) {
   try {
     // Get the user's access token from cookies
     const tokenData = getGitHubToken(request);
 
+    // If no token, check for default installation config
     if (!tokenData || !tokenData.access_token) {
+      const defaultInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
+      const defaultInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
+
+      if (defaultInstallationId && defaultInstallationName) {
+        // Return a mock installation response for default config
+        return NextResponse.json({
+          total_count: 1,
+          installations: [
+            {
+              id: parseInt(defaultInstallationId, 10),
+              account: {
+                login: defaultInstallationName,
+                avatar_url: `https://github.com/${defaultInstallationName}.png`,
+              },
+              target_type: "User",
+            },
+          ],
+        });
+      }
+
       return NextResponse.json(
         {
           error: "GitHub access token not found. Please authenticate first.",

@@ -10,10 +10,18 @@ import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { useRouter } from "next/navigation";
 
+interface DefaultConfig {
+  hasDefaultConfig: boolean;
+  installationId?: string;
+  installationName?: string;
+}
+
 function AuthStatusContent() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [defaultConfig, setDefaultConfig] = useState<DefaultConfig | null>(null);
+  const [isCheckingDefaultConfig, setIsCheckingDefaultConfig] = useState(true);
 
   const {
     token: githubToken,
@@ -26,13 +34,28 @@ function AuthStatusContent() {
     isLoading: isCheckingAppInstallation,
   } = useGitHubAppProvider();
 
+  // Check for default config first
   useEffect(() => {
-    checkAuthStatus();
+    checkDefaultConfig();
   }, []);
 
+  // Check auth status if no default config
+  useEffect(() => {
+    if (defaultConfig !== null && !defaultConfig.hasDefaultConfig) {
+      checkAuthStatus();
+    }
+  }, [defaultConfig]);
+
+  // If we have default config, try to fetch token directly
+  useEffect(() => {
+    if (defaultConfig?.hasDefaultConfig && !githubToken && !isTokenLoading) {
+      fetchGitHubToken();
+    }
+  }, [defaultConfig, githubToken, isTokenLoading, fetchGitHubToken]);
+
+  // Fetch token when app is installed but we don't have a token yet
   useEffect(() => {
     if (isAuth && hasGitHubAppInstalled && !githubToken && !isTokenLoading) {
-      // Fetch token when app is installed but we don't have a token yet
       fetchGitHubToken();
     }
   }, [
@@ -43,12 +66,45 @@ function AuthStatusContent() {
     fetchGitHubToken,
   ]);
 
+  // Redirect to chat when token is available
   useEffect(() => {
     if (githubToken) {
       console.log("redirecting to chat");
       router.push("/chat");
     }
-  }, [githubToken]);
+  }, [githubToken, router]);
+
+  // Compute display states
+  const showGetStarted = !defaultConfig?.hasDefaultConfig && !isAuth;
+  const showInstallApp =
+    !defaultConfig?.hasDefaultConfig && !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
+  const showLoading = !defaultConfig?.hasDefaultConfig && !showGetStarted && !showInstallApp && !githubToken;
+
+  // Redirect when all conditions are met (non-default config flow)
+  useEffect(() => {
+    if (!defaultConfig?.hasDefaultConfig && !showGetStarted && !showInstallApp && !showLoading && githubToken) {
+      router.push("/chat");
+    }
+  }, [defaultConfig, showGetStarted, showInstallApp, showLoading, githubToken, router]);
+
+  const checkDefaultConfig = async () => {
+    try {
+      setIsCheckingDefaultConfig(true);
+      const response = await fetch("/api/auth/default-config");
+      const data = await response.json();
+      setDefaultConfig(data);
+      
+      // If we have default config, we can skip auth check
+      if (data.hasDefaultConfig) {
+        setIsAuth(true);
+      }
+    } catch (error) {
+      console.error("Error checking default config:", error);
+      setDefaultConfig({ hasDefaultConfig: false });
+    } finally {
+      setIsCheckingDefaultConfig(false);
+    }
+  };
 
   const checkAuthStatus = async () => {
     try {
@@ -71,17 +127,54 @@ function AuthStatusContent() {
     window.location.href = "/api/github/installation";
   };
 
-  const showGetStarted = !isAuth;
-  const showInstallApp =
-    !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
-  const showLoading = !showGetStarted && !showInstallApp && !githubToken;
+  // Show loading while checking default config
+  if (isCheckingDefaultConfig) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center p-4">
+        <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
+          <div className="flex flex-col gap-4 border-b p-6">
+            <div className="flex flex-col items-start gap-2">
+              <LangGraphLogoSVG className="h-7" />
+              <h1 className="text-xl font-semibold tracking-tight">
+                Loading...
+              </h1>
+            </div>
+            <p className="text-muted-foreground">
+              Checking configuration...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    if (!showGetStarted && !showInstallApp && !showLoading) {
-      router.push("/chat");
+  // If we have default config, bypass auth flow
+  if (defaultConfig?.hasDefaultConfig) {
+    // Show loading while fetching token
+    if (!githubToken) {
+      return (
+        <div className="flex min-h-screen w-full items-center justify-center p-4">
+          <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
+            <div className="flex flex-col gap-4 border-b p-6">
+              <div className="flex flex-col items-start gap-2">
+                <LangGraphLogoSVG className="h-7" />
+                <h1 className="text-xl font-semibold tracking-tight">
+                  Loading...
+                </h1>
+              </div>
+              <p className="text-muted-foreground">
+                Setting up with default configuration ({defaultConfig.installationName})...
+              </p>
+            </div>
+          </div>
+        </div>
+      );
     }
-  }, [showGetStarted, showInstallApp, showLoading, router]);
+    // Token fetched, will redirect via useEffect
+    return null;
+  }
 
+  // Original auth flow for non-default config
   if (showGetStarted) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
