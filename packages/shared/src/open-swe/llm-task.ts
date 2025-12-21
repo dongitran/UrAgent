@@ -28,35 +28,44 @@ export enum LLMTask {
 }
 
 // Model defaults - read from env or use hardcoded defaults
-// Env format: ANTHROPIC_PLANNER_MODEL=claude-sonnet-4-5-20250929
+// Priority: OPENAI_*_MODEL (for LiteLLM) > ANTHROPIC_*_MODEL > hardcoded defaults
 const getModelDefault = (task: string, fallback: string): string => {
-  const envKey = `ANTHROPIC_${task.toUpperCase()}_MODEL`;
-  const envValue = typeof process !== 'undefined' && process.env ? process.env[envKey] : undefined;
-  if (envValue) {
-    return `anthropic:${envValue}`;
+  // First check for OpenAI models (LiteLLM gateway)
+  const openaiEnvKey = `OPENAI_${task.toUpperCase()}_MODEL`;
+  const openaiEnvValue = typeof process !== 'undefined' && process.env ? process.env[openaiEnvKey] : undefined;
+  if (openaiEnvValue) {
+    return `openai:${openaiEnvValue}`;
   }
+  
+  // Then check for Anthropic models
+  const anthropicEnvKey = `ANTHROPIC_${task.toUpperCase()}_MODEL`;
+  const anthropicEnvValue = typeof process !== 'undefined' && process.env ? process.env[anthropicEnvKey] : undefined;
+  if (anthropicEnvValue) {
+    return `anthropic:${anthropicEnvValue}`;
+  }
+  
   return fallback;
 };
 
 export const TASK_TO_CONFIG_DEFAULTS_MAP = {
   [LLMTask.PLANNER]: {
-    modelName: getModelDefault("planner", "anthropic:claude-sonnet-4-5-20250929"),
+    modelName: getModelDefault("planner", "openai:claude-4-5-sonnet"),
     temperature: 0,
   },
   [LLMTask.PROGRAMMER]: {
-    modelName: getModelDefault("programmer", "anthropic:claude-sonnet-4-5-20250929"),
+    modelName: getModelDefault("programmer", "openai:claude-4-5-sonnet"),
     temperature: 0,
   },
   [LLMTask.REVIEWER]: {
-    modelName: getModelDefault("reviewer", "anthropic:claude-sonnet-4-5-20250929"),
+    modelName: getModelDefault("reviewer", "openai:claude-4-5-sonnet"),
     temperature: 0,
   },
   [LLMTask.ROUTER]: {
-    modelName: getModelDefault("router", "anthropic:claude-haiku-4-5-20251001"),
+    modelName: getModelDefault("router", "openai:claude-haiku-4.5"),
     temperature: 0,
   },
   [LLMTask.SUMMARIZER]: {
-    modelName: getModelDefault("summarizer", "anthropic:claude-haiku-4-5-20251001"),
+    modelName: getModelDefault("summarizer", "openai:claude-haiku-4.5"),
     temperature: 0,
   },
 };
