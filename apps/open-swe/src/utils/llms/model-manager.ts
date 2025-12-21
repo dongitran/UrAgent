@@ -389,6 +389,13 @@ export class ModelManager {
     provider: Provider,
     task: LLMTask,
   ): ModelLoadConfig | null {
+    // First try to get from environment variables
+    const envModelName = this.getModelFromEnv(provider, task);
+    if (envModelName) {
+      return { provider, modelName: envModelName };
+    }
+    
+    // Fallback to hardcoded defaults
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
       anthropic: {
         [LLMTask.PLANNER]: "claude-opus-4-5",
@@ -419,6 +426,25 @@ export class ModelManager {
       return null;
     }
     return { provider, modelName };
+  }
+
+  /**
+   * Get model name from environment variables
+   * Supports: {PROVIDER}_{TASK}_MODEL format
+   * Example: OPENAI_PROGRAMMER_MODEL, ANTHROPIC_PLANNER_MODEL
+   */
+  private getModelFromEnv(provider: Provider, task: LLMTask): string | null {
+    const providerPrefix = provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
+    const taskName = task.toUpperCase();
+    const envKey = `${providerPrefix}_${taskName}_MODEL`;
+    
+    const envValue = process.env[envKey];
+    if (envValue) {
+      logger.info(`Using model from env ${envKey}: ${envValue}`);
+      return envValue;
+    }
+    
+    return null;
   }
 
   /**
