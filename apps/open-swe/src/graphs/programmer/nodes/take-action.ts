@@ -242,13 +242,29 @@ export async function takeAction(
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
 
+  logger.info("=== TAKE ACTION - CHECKING FOR COMMITS ===", {
+    isLocalMode: isLocalMode(config),
+    currentBranchName: branchName,
+    targetBranch: state.targetRepository?.branch,
+    isSameBranch: branchName === state.targetRepository?.branch,
+  });
+
   if (!isLocalMode(config)) {
     const repoPath = getRepoAbsolutePath(state.targetRepository);
     const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
+    logger.info("Changed files check in take-action", {
+      changedFilesCount: changedFiles.length,
+      changedFiles,
+      branchName,
+      targetBranch: state.targetRepository?.branch,
+    });
+
     if (changedFiles.length > 0) {
       logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
         changedFiles,
+        branchName,
+        targetBranch: state.targetRepository?.branch,
       });
 
       const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
@@ -263,6 +279,13 @@ export async function takeAction(
           githubIssueId: state.githubIssueId,
         },
       );
+      
+      logger.info("After checkoutBranchAndCommit in take-action", {
+        oldBranchName: branchName,
+        newBranchName: result.branchName,
+        branchChanged: branchName !== result.branchName,
+      });
+      
       branchName = result.branchName;
       pullRequestNumber = result.updatedTaskPlan
         ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
