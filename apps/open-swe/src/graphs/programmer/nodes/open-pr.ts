@@ -46,6 +46,7 @@ import {
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { GITHUB_USER_LOGIN_HEADER } from "@openswe/shared/constants";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -94,6 +95,15 @@ export async function openPullRequest(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  logger.info("=== OPEN PR NODE STARTED ===", {
+    branchName: state.branchName,
+    targetBranch: state.targetRepository?.branch,
+    owner: state.targetRepository?.owner,
+    repo: state.targetRepository?.repo,
+    sandboxSessionId: state.sandboxSessionId,
+    isLocalMode: isLocalMode(config),
+  });
+
   const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
 
   const { sandbox, codebaseTree, dependenciesInstalled } =
@@ -108,6 +118,7 @@ export async function openPullRequest(
   const { owner, repo } = state.targetRepository;
 
   if (!owner || !repo) {
+    logger.error("Failed to open pull request: No target repository found in config.");
     throw new Error(
       "Failed to open pull request: No target repository found in config.",
     );
@@ -116,12 +127,30 @@ export async function openPullRequest(
   const repoPath = getRepoAbsolutePath(state.targetRepository);
 
   // First, verify that there are changed files
+  logger.info("Checking for changed files...", {
+    repoPath,
+    baseBranch: state.targetRepository.branch,
+  });
+  
   const gitDiffRes = await sandbox.process.executeCommand(
     `git diff --name-only ${state.targetRepository.branch ?? ""}`,
     repoPath,
   );
+  
+  logger.info("Git diff result", {
+    exitCode: gitDiffRes.exitCode,
+    result: gitDiffRes.result,
+    hasChanges: gitDiffRes.result.trim().length > 0,
+  });
+  
   if (gitDiffRes.exitCode !== 0 || gitDiffRes.result.trim().length === 0) {
     // no changed files
+    logger.warn("No changed files detected, skipping PR creation", {
+      exitCode: gitDiffRes.exitCode,
+      result: gitDiffRes.result,
+      branchName: state.branchName,
+      baseBranch: state.targetRepository.branch,
+    });
     const sandboxDeleted = await deleteSandbox(sandboxSessionId);
     return {
       ...(sandboxDeleted && {
@@ -135,6 +164,13 @@ export async function openPullRequest(
   let updatedTaskPlan: TaskPlan | undefined;
 
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+  
+  logger.info("Changed files status", {
+    changedFilesCount: changedFiles.length,
+    changedFiles,
+    currentBranch: branchName,
+    baseBranch: state.targetRepository.branch,
+  });
 
   if (changedFiles.length > 0) {
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
@@ -153,6 +189,11 @@ export async function openPullRequest(
     );
     branchName = result.branchName;
     updatedTaskPlan = result.updatedTaskPlan;
+    
+    logger.info("After checkoutBranchAndCommit", {
+      newBranchName: branchName,
+      hasUpdatedTaskPlan: !!updatedTaskPlan,
+    });
   }
 
   const openPrTool = createOpenPrToolFields();
@@ -213,27 +254,86 @@ export async function openPullRequest(
   const reviewPullNumber = config.configurable?.reviewPullNumber;
   const prBody = `${shouldCreateIssue(config) ? `Fixes #${state.githubIssueId}` : ""}${reviewPullNumber ? `\n\nTriggered from pull request: #${reviewPullNumber}` : ""}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`;
 
-  if (!prForTask) {
-    // No PR created yet. Shouldn't be possible, but we have a condition here anyway
-    pullRequest = await createPullRequest({
-      owner,
-      repo,
+  logger.info("=== CREATING/UPDATING PULL REQUEST ===", {
+    prForTask,
+    headBranch: branchName,
+    baseBranch: state.targetRepository.branch,
+    owner,
+    repo,
+    title,
+    userLogin,
+    reviewPullNumber,
+    shouldCreateIssue: shouldCreateIssue(config),
+    githubIssueId: state.githubIssueId,
+    isSameBranch: branchName === state.targetRepository.branch,
+  });
+
+  // CRITICAL: Check if head branch is same as base branch
+  if (branchName === state.targetRepository.branch) {
+    logger.error("CRITICAL ERROR: Cannot create PR - head branch is same as base branch!", {
       headBranch: branchName,
-      title,
-      body: prBody,
-      githubInstallationToken,
       baseBranch: state.targetRepository.branch,
     });
+    throw new Error(`Cannot create PR: head branch (${branchName}) is same as base branch (${state.targetRepository.branch})`);
+  }
+
+  if (!prForTask) {
+    // No PR created yet. Shouldn't be possible, but we have a condition here anyway
+    logger.info("Creating new pull request (no existing PR for task)", {
+      headBranch: branchName,
+      baseBranch: state.targetRepository.branch,
+    });
+    
+    try {
+      pullRequest = await createPullRequest({
+        owner,
+        repo,
+        headBranch: branchName,
+        title,
+        body: prBody,
+        githubInstallationToken,
+        baseBranch: state.targetRepository.branch,
+      });
+      
+      logger.info("Pull request created successfully", {
+        prNumber: pullRequest?.number,
+        prUrl: pullRequest?.html_url,
+      });
+    } catch (error) {
+      logger.error("Failed to create pull request", {
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        headBranch: branchName,
+        baseBranch: state.targetRepository.branch,
+      });
+      throw error;
+    }
   } else {
     // Ensure the PR is ready for review
-    pullRequest = await updatePullRequest({
-      owner,
-      repo,
-      title,
-      body: prBody,
-      pullNumber: prForTask,
-      githubInstallationToken,
+    logger.info("Updating existing pull request", {
+      prNumber: prForTask,
     });
+    
+    try {
+      pullRequest = await updatePullRequest({
+        owner,
+        repo,
+        title,
+        body: prBody,
+        pullNumber: prForTask,
+        githubInstallationToken,
+      });
+      
+      logger.info("Pull request updated successfully", {
+        prNumber: pullRequest?.number,
+        prUrl: pullRequest?.html_url,
+      });
+    } catch (error) {
+      logger.error("Failed to update pull request", {
+        error: error instanceof Error ? { name: error.name, message: error.message } : error,
+        prNumber: prForTask,
+      });
+      throw error;
+    }
   }
 
   let sandboxDeleted = false;

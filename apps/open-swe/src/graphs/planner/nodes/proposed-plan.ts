@@ -204,6 +204,13 @@ export async function interruptProposedPlan(
     documentCache: state.documentCache,
   };
 
+  logger.info("=== PROGRAMMER RUN INPUT PREPARED ===", {
+    branchName: state.branchName,
+    targetBranch: state.targetRepository?.branch,
+    isSameBranch: state.branchName === state.targetRepository?.branch,
+    isLocalMode: isLocalMode(config),
+  });
+
   if (state.autoAcceptPlan) {
     logger.info("Auto accepting plan.", {
       autoAcceptPlan: state.autoAcceptPlan,

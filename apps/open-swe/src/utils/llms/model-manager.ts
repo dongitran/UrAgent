@@ -113,9 +113,11 @@ export class ModelManager {
     graphConfig: GraphConfig,
     provider: Provider,
   ): string | null {
-    // Try LangGraph Cloud format first, then fall back to self-hosted header
+    // Try LangGraph Cloud format first, then fall back to self-hosted header, then default config
     const userLogin = (graphConfig.configurable as any)?.langgraph_auth_user
-      ?.display_name || (graphConfig.configurable as any)?.["x-github-user-login"];
+      ?.display_name 
+      || (graphConfig.configurable as any)?.["x-github-user-login"]
+      || process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
     const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
 
     if (!secretsEncryptionKey) {
