@@ -13,6 +13,24 @@ import {
 } from "@/lib/keycloak";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
 
+// Header name for refreshed token from middleware
+const REFRESHED_TOKEN_HEADER = "x-keycloak-refreshed-token";
+
+/**
+ * Get Keycloak access token from request
+ * First checks for refreshed token from middleware, then falls back to cookie
+ */
+function getAccessToken(req: NextRequest): string | null {
+  // Check if middleware already refreshed the token
+  const refreshedToken = req.headers.get(REFRESHED_TOKEN_HEADER);
+  if (refreshedToken) {
+    return refreshedToken;
+  }
+  
+  // Fall back to cookie
+  return getKeycloakAccessToken(req);
+}
+
 /**
  * Check if Keycloak token is expired or about to expire (within 30 seconds)
  */
@@ -116,7 +134,9 @@ export interface AuthResult {
 export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
   // If Keycloak is enabled, it's the ONLY auth method
   if (isKeycloakEnabled()) {
-    let keycloakToken = getKeycloakAccessToken(req);
+    // First check for refreshed token from middleware (via header)
+    // Then fall back to cookie
+    let keycloakToken = getAccessToken(req);
     
     // If no token or token is expired, try to refresh
     if (!keycloakToken || isTokenExpiredOrExpiring(keycloakToken)) {
