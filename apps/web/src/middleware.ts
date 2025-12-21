@@ -4,7 +4,7 @@ import {
   GITHUB_INSTALLATION_ID_COOKIE,
 } from "@openswe/shared/constants";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
-import { KEYCLOAK_ACCESS_TOKEN_COOKIE } from "@/lib/keycloak";
+import { KEYCLOAK_ACCESS_TOKEN_COOKIE, KEYCLOAK_REFRESH_TOKEN_COOKIE, decodeKeycloakToken } from "@/lib/keycloak";
 
 /**
  * Check if default GitHub configuration is available
@@ -37,11 +37,40 @@ function isKeycloakEnabled(): boolean {
 }
 
 /**
- * Check if user has valid Keycloak token
+ * Check if user has valid (non-expired) Keycloak token
+ * Also checks if refresh token is available for auto-refresh
  */
-function hasKeycloakToken(request: NextRequest): boolean {
-  const token = request.cookies.get(KEYCLOAK_ACCESS_TOKEN_COOKIE)?.value;
-  return !!token;
+function hasValidKeycloakAuth(request: NextRequest): boolean {
+  const accessToken = request.cookies.get(KEYCLOAK_ACCESS_TOKEN_COOKIE)?.value;
+  const refreshToken = request.cookies.get(KEYCLOAK_REFRESH_TOKEN_COOKIE)?.value;
+  
+  // If no tokens at all, not authenticated
+  if (!accessToken && !refreshToken) {
+    return false;
+  }
+  
+  // If we have a refresh token, we can refresh the access token in API routes
+  // So consider it as "authenticated" for middleware purposes
+  if (refreshToken) {
+    return true;
+  }
+  
+  // If only access token (no refresh), check if it's expired
+  if (accessToken) {
+    try {
+      const decoded = decodeKeycloakToken(accessToken) as any;
+      if (decoded && decoded.exp) {
+        // Token is valid if not expired
+        return decoded.exp * 1000 > Date.now();
+      }
+      // If no exp claim, assume valid
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  
+  return false;
 }
 
 export async function middleware(request: NextRequest) {
@@ -50,10 +79,10 @@ export async function middleware(request: NextRequest) {
   
   if (keycloakEnabled) {
     // Keycloak is enabled - ONLY accept Keycloak token
-    const hasValidKeycloakToken = hasKeycloakToken(request);
+    const hasValidAuth = hasValidKeycloakAuth(request);
 
     if (request.nextUrl.pathname === "/") {
-      if (hasValidKeycloakToken) {
+      if (hasValidAuth) {
         const url = request.nextUrl.clone();
         url.pathname = "/chat";
         return NextResponse.redirect(url);
@@ -65,7 +94,7 @@ export async function middleware(request: NextRequest) {
     }
 
     if (request.nextUrl.pathname.startsWith("/chat")) {
-      if (!hasValidKeycloakToken) {
+      if (!hasValidAuth) {
         const url = request.nextUrl.clone();
         url.pathname = "/api/auth/keycloak/login";
         return NextResponse.redirect(url);
