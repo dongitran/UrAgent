@@ -188,6 +188,10 @@ export class ModelManager {
       // See: https://github.com/langchain-ai/langchainjs/issues/9205
       topP: undefined,
       ...(apiKey ? { apiKey } : {}),
+      // Support custom base URL for OpenAI (LiteLLM gateway)
+      ...(provider === "openai" && process.env.OPENAI_BASE_URL
+        ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } }
+        : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
@@ -207,6 +211,8 @@ export class ModelManager {
     logger.debug("Initializing model", {
       provider,
       modelName,
+      hasCustomBaseUrl: provider === "openai" && !!process.env.OPENAI_BASE_URL,
+      baseUrl: provider === "openai" ? process.env.OPENAI_BASE_URL : undefined,
     });
 
     return await initChatModel(modelName, modelOptions);
@@ -383,6 +389,13 @@ export class ModelManager {
     provider: Provider,
     task: LLMTask,
   ): ModelLoadConfig | null {
+    // First try to get from environment variables
+    const envModelName = this.getModelFromEnv(provider, task);
+    if (envModelName) {
+      return { provider, modelName: envModelName };
+    }
+    
+    // Fallback to hardcoded defaults
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
       anthropic: {
         [LLMTask.PLANNER]: "claude-opus-4-5",
@@ -399,11 +412,12 @@ export class ModelManager {
         [LLMTask.SUMMARIZER]: "gemini-3-pro-preview",
       },
       openai: {
-        [LLMTask.PLANNER]: "gpt-5-codex",
-        [LLMTask.PROGRAMMER]: "gpt-5-codex",
-        [LLMTask.REVIEWER]: "gpt-5-codex",
-        [LLMTask.ROUTER]: "gpt-5-nano",
-        [LLMTask.SUMMARIZER]: "gpt-5-mini",
+        // Using LiteLLM gateway with Claude models
+        [LLMTask.PLANNER]: "claude-4-5-sonnet",
+        [LLMTask.PROGRAMMER]: "claude-4-5-sonnet",
+        [LLMTask.REVIEWER]: "claude-4-5-sonnet",
+        [LLMTask.ROUTER]: "claude-haiku-4.5",
+        [LLMTask.SUMMARIZER]: "claude-haiku-4.5",
       },
     };
 
@@ -412,6 +426,25 @@ export class ModelManager {
       return null;
     }
     return { provider, modelName };
+  }
+
+  /**
+   * Get model name from environment variables
+   * Supports: {PROVIDER}_{TASK}_MODEL format
+   * Example: OPENAI_PROGRAMMER_MODEL, ANTHROPIC_PLANNER_MODEL
+   */
+  private getModelFromEnv(provider: Provider, task: LLMTask): string | null {
+    const providerPrefix = provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
+    const taskName = task.toUpperCase();
+    const envKey = `${providerPrefix}_${taskName}_MODEL`;
+    
+    const envValue = process.env[envKey];
+    if (envValue) {
+      logger.info(`Using model from env ${envKey}: ${envValue}`);
+      return envValue;
+    }
+    
+    return null;
   }
 
   /**
