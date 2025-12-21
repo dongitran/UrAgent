@@ -1,43 +1,51 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="apps/docs/logo/light.svg">
-    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo" width="35%">
-  </picture>
-</div>
+# UrAgent
 
-<div align="center">
-  <h1>Open SWE - An Open-Source Asynchronous Coding Agent</h1>
-</div>
+An asynchronous coding agent for automated software development, forked from [Open SWE](https://github.com/langchain-ai/open-swe) by LangChain.
 
-Open SWE is an open-source cloud-based asynchronous coding agent built with [LangGraph](https://docs.langchain.com/oss/javascript/langgraph/overview). It autonomously understands codebases, plans solutions, and executes code changes across entire repositories—from initial planning to opening pull requests.
+## About
 
-> [!TIP]
-> Try out Open SWE yourself using our [public demo](https://swe.langchain.com)!
->
-> **Note: you're required to set your own LLM API keys to use the demo.**
+UrAgent is built on top of Open SWE, an open-source cloud-based asynchronous coding agent built with [LangGraph](https://docs.langchain.com/oss/javascript/langgraph/overview). It autonomously understands codebases, plans solutions, and executes code changes across entire repositories—from initial planning to opening pull requests.
 
-> [!NOTE]
-> 📚 See the **Open SWE documentation files [here](https://github.com/langchain-ai/open-swe/tree/main/apps/docs)**
->
-> 💬 Read the **announcement blog post [here](https://blog.langchain.com/introducing-open-swe-an-open-source-asynchronous-coding-agent/)**
->
-> 📺 Watch the **announcement video [here](https://youtu.be/TaYVvXbOs8c)**
+## Features
 
-# Features
+- 📝 **Planning**: Dedicated planning step for deep understanding of complex codebases and nuanced tasks
+- 🤝 **Human in the loop**: Send messages while running for real-time feedback
+- 🏃 **Parallel Execution**: Run multiple tasks in parallel in sandbox environments
+- 🧑‍💻 **End to end task management**: Automatic GitHub issue and PR creation
 
-![UI Screenshot](./static/ui-screenshot.png)
+## Configuration
 
-- 📝 **Planning**: Open SWE has a dedicated planning step which allows it to deeply understand complex codebases and nuanced tasks. You're also given the ability to accept, edit, or reject the proposed plan before it's executed.
-- 🤝 **Human in the loop**: With Open SWE, you can send it messages while it's running (both during the planning and execution steps). This allows for giving real time feedback and instructions without having to interrupt the process.
-- 🏃 **Parallel Execution**: You can run as many Open SWE tasks as you want in parallel! Since it runs in a sandbox environment in the cloud, you're not limited by the number of tasks you can run at once.
-- 🧑‍💻 **End to end task management**: Open SWE will automatically create GitHub issues for tasks, and create pull requests which will close the issue when implementation is complete.
+UrAgent uses environment variables for default repository configuration:
 
+```env
+DEFAULT_REPOSITORY_OWNER=your-org
+DEFAULT_REPOSITORY_NAME=your-repo
+DEFAULT_BRANCH=main
+DEFAULT_GITHUB_INSTALLATION_ID=your-installation-id
+```
 
-## Usage
+## Development
 
-Open SWE can be used in multiple ways:
+```bash
+# Install dependencies
+yarn install
 
-- 🖥️ **From the UI**. You can create, manage and execute Open SWE tasks from the [web application](https://swe.langchain.com).
-- 📝 **From GitHub**. You can start Open SWE tasks directly from GitHub issues simply by adding a label `open-swe`, or `open-swe-auto` (adding `-auto` will cause Open SWE to automatically accept the plan, requiring no intervention from you). For enhanced performance on complex tasks, use `open-swe-max` or `open-swe-max-auto` labels which utilize Claude Opus 4.1 for both planning and programming.
+# Start the API (Docker)
+docker compose up --build
 
+# Start the web app
+cd apps/web && yarn dev
+```
+
+## License
+
+This project is licensed under the same terms as the original Open SWE project.
+
+### Original Open SWE License
+
+Open SWE is created by [LangChain](https://langchain.com) and is licensed under the [MIT License](https://github.com/langchain-ai/open-swe/blob/main/LICENSE).
+
+## Acknowledgments
+
+- [LangChain](https://langchain.com) for creating Open SWE
+- [LangGraph](https://docs.langchain.com/oss/javascript/langgraph/overview) for the agent framework
