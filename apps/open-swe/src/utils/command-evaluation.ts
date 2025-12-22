@@ -21,7 +21,7 @@ import { z } from "zod";
 const logger = createLogger(LogLevel.INFO, "CommandEvaluation");
 
 // Type definitions for tool call arguments - derived from actual tool schemas. Underscores so the linter doesn't complain.
-const dummyRepo = { owner: "dummy", repo: "dummy" };
+const dummyRepo = { owner: "dummy", repo: "dummy", branch: "main" };
 const _shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof _shellTool.schema>;
 
