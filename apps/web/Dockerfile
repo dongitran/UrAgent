@@ -6,9 +6,11 @@ WORKDIR /app
 # Install dependencies for building
 RUN apk add --no-cache libc6-compat
 
+# Enable corepack for yarn
+RUN corepack enable && corepack prepare yarn@3.5.1 --activate
+
 # Copy yarn config files
 COPY package.json yarn.lock .yarnrc.yml ./
-COPY .yarn ./.yarn
 
 # Copy package.json files for workspaces
 COPY apps/web/package.json ./apps/web/
