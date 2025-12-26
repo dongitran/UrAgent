@@ -24,10 +24,11 @@ export async function GET() {
   const response = NextResponse.redirect(authUrl);
   
   // Store state in cookie for verification
+  // Use SameSite=None for cross-domain OAuth redirects
   response.cookies.set(KEYCLOAK_STATE_COOKIE, state, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: true,
+    sameSite: "none",
     maxAge: 60 * 10, // 10 minutes
     path: "/",
   });

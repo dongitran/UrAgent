@@ -134,7 +134,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<Keycloak
   });
 
   if (!response.ok) {
-    throw new Error("Failed to refresh token");
+    const errorText = await response.text();
+    console.error("Keycloak refresh token error:", {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText,
+    });
+    throw new Error(`Failed to refresh token: ${errorText}`);
   }
 
   return response.json();
