@@ -14,6 +14,7 @@ import {
 } from "@openswe/shared/open-swe/tools";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
 import { wrapScript } from "../utils/wrap-script.js";
+import { join, isAbsolute } from "path";
 
 const logger = createLogger(LogLevel.INFO, "GrepTool");
 
@@ -28,13 +29,25 @@ export function createGrepTool(
         const localMode = isLocalMode(config);
         const localAbsolutePath = getLocalWorkingDirectory();
         const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
-        const workDir = localMode ? localAbsolutePath : sandboxAbsolutePath;
+        const repoRoot = localMode ? localAbsolutePath : sandboxAbsolutePath;
+
+        let workDir = repoRoot;
+        const inputWorkdir = (input as { workdir?: string }).workdir;
+        if (inputWorkdir) {
+          workDir = isAbsolute(inputWorkdir)
+            ? inputWorkdir
+            : join(repoRoot, inputWorkdir);
+        }
 
         logger.info("Running grep search command", {
           command: command.join(" "),
           workDir,
+          inputWorkdir,
+          repoRoot,
         });
 
+        // Note: grep doesn't have the same double-path issue as view
+        // because the query is a search pattern, not a file path
         const executor = createShellExecutor(config);
         const response = await executor.executeCommand({
           command: wrapScript(command.join(" ")),

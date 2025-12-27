@@ -26,14 +26,16 @@ export function createInstallDependenciesTool(
       try {
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
         const command = input.command.join(" ");
-        
+
         let workdir = repoRoot;
         if (input.workdir) {
-          workdir = isAbsolute(input.workdir) ? input.workdir : join(repoRoot, input.workdir);
+          workdir = isAbsolute(input.workdir)
+            ? input.workdir
+            : join(repoRoot, input.workdir);
         }
-        
+
         const timeout = TIMEOUT_SEC * 2.5;
-        
+
         logger.info("[DAYTONA] Running install dependencies command", {
           command,
           workdir,
@@ -47,7 +49,7 @@ export function createInstallDependenciesTool(
         const sandbox = isLocalMode(config)
           ? undefined
           : await getSandboxSessionOrThrow(input);
-        
+
         logger.debug("[DAYTONA] Sandbox retrieved for install dependencies", {
           sandboxId: sandbox?.id,
           sandboxState: sandbox?.state,
@@ -73,30 +75,35 @@ export function createInstallDependenciesTool(
           exitCode: response.exitCode,
           resultLength: response.result?.length ?? 0,
           resultPreview: response.result?.substring(0, 500) ?? "null",
-          artifacts: response.artifacts ? {
-            stdoutLength: response.artifacts.stdout?.length ?? 0,
-            stderrLength: response.artifacts.stderr?.length ?? 0,
-          } : null,
+          artifacts: response.artifacts
+            ? {
+                stdoutLength: response.artifacts.stdout?.length ?? 0,
+                stderrLength: response.artifacts.stderr?.length ?? 0,
+              }
+            : null,
           fullResponseJson: JSON.stringify(response).substring(0, 2000),
         });
 
         if (response.exitCode !== 0) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           let errorMessage = `Failed to install dependencies. Exit code: ${response.exitCode}\nError: ${errorResult}`;
-          
+
           if (response.exitCode === -1) {
-            logger.error("[DAYTONA] Install dependencies returned exit code -1", {
-              sandboxId: sandbox?.id,
-              sandboxState: sandbox?.state,
-              command,
-              workdir,
-              timeout,
-              durationMs: duration,
-              fullResponse: JSON.stringify(response),
-            });
-            errorMessage = `Failed to install dependencies. Exit code: -1 (Daytona sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal error: ${errorResult || 'No output'}`;
+            logger.error(
+              "[DAYTONA] Install dependencies returned exit code -1",
+              {
+                sandboxId: sandbox?.id,
+                sandboxState: sandbox?.state,
+                command,
+                workdir,
+                timeout,
+                durationMs: duration,
+                fullResponse: JSON.stringify(response),
+              },
+            );
+            errorMessage = `Failed to install dependencies. Exit code: -1 (Daytona sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal error: ${errorResult || "No output"}`;
           }
-          
+
           throw new Error(errorMessage);
         }
 
@@ -117,12 +124,15 @@ export function createInstallDependenciesTool(
         if (errorFields) {
           const errorResult =
             errorFields.result ?? errorFields.artifacts?.stdout;
-          logger.error("[DAYTONA] Install dependencies failed with sandbox error", {
-            sandboxSessionId: state.sandboxSessionId,
-            exitCode: errorFields.exitCode,
-            errorResult: errorResult?.substring(0, 1000),
-            fullErrorFields: JSON.stringify(errorFields).substring(0, 2000),
-          });
+          logger.error(
+            "[DAYTONA] Install dependencies failed with sandbox error",
+            {
+              sandboxSessionId: state.sandboxSessionId,
+              exitCode: errorFields.exitCode,
+              errorResult: errorResult?.substring(0, 1000),
+              fullErrorFields: JSON.stringify(errorFields).substring(0, 2000),
+            },
+          );
           throw new Error(
             `Failed to install dependencies. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
           );
@@ -130,11 +140,14 @@ export function createInstallDependenciesTool(
 
         logger.error("[DAYTONA] Install dependencies threw exception", {
           sandboxSessionId: state.sandboxSessionId,
-          error: e instanceof Error ? {
-            name: e.name,
-            message: e.message,
-            stack: e.stack,
-          } : e,
+          error:
+            e instanceof Error
+              ? {
+                  name: e.name,
+                  message: e.message,
+                  stack: e.stack,
+                }
+              : e,
         });
 
         throw e;

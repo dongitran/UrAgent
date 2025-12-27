@@ -9,6 +9,7 @@ import {
   createSearchDocumentForTool,
   createWriteDefaultTsConfigTool,
 } from "../../../tools/index.js";
+import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import {
   GraphState,
   GraphConfig,
@@ -64,6 +65,7 @@ export async function takeAction(
   const shellTool = createShellTool(state, config);
   const searchTool = createGrepTool(state, config);
   const textEditorTool = createTextEditorTool(state, config);
+  const viewTool = createViewTool(state, config);
   const installDependenciesTool = createInstallDependenciesTool(state, config);
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
@@ -84,6 +86,7 @@ export async function takeAction(
     shellTool,
     searchTool,
     textEditorTool,
+    viewTool,
     installDependenciesTool,
     applyPatchTool,
     getURLContentTool,
@@ -267,7 +270,8 @@ export async function takeAction(
         targetBranch: state.targetRepository?.branch,
       });
 
-      const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
+      const { githubInstallationToken } =
+        await getGitHubTokensFromConfig(config);
       const result = await checkoutBranchAndCommit(
         config,
         state.targetRepository,
@@ -279,13 +283,13 @@ export async function takeAction(
           githubIssueId: state.githubIssueId,
         },
       );
-      
+
       logger.info("After checkoutBranchAndCommit in take-action", {
         oldBranchName: branchName,
         newBranchName: result.branchName,
         branchChanged: branchName !== result.branchName,
       });
-      
+
       branchName = result.branchName;
       pullRequestNumber = result.updatedTaskPlan
         ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
