@@ -4,6 +4,8 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { createShellToolFields } from "@openswe/shared/open-swe/tools";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { join, isAbsolute } from "path";
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
@@ -18,11 +20,17 @@ export function createShellTool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
         const { command, workdir, timeout } = input;
+        const repoRoot = getRepoAbsolutePath(state.targetRepository);
+        
+        let resolvedWorkdir = repoRoot;
+        if (workdir) {
+          resolvedWorkdir = isAbsolute(workdir) ? workdir : join(repoRoot, workdir);
+        }
 
         const executor = createShellExecutor(config);
         const response = await executor.executeCommand({
           command,
-          workdir,
+          workdir: resolvedWorkdir,
           timeout: timeout ?? TIMEOUT_SEC,
           env: DEFAULT_ENV,
         });

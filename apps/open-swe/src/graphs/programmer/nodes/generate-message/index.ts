@@ -392,16 +392,53 @@ async function createToolsAndPrompt(
   // Remove trailing AIMessages with tool_calls
   while (processedMessages.length > 0) {
     const lastMsg = processedMessages[processedMessages.length - 1];
+    const lastMsgToolCalls = (lastMsg as AIMessage).tool_calls;
     const isAIWithToolCalls = 
       (lastMsg.constructor.name === 'AIMessage' || lastMsg.constructor.name === 'AIMessageChunk') && 
-      (lastMsg as AIMessage).tool_calls?.length > 0;
+      lastMsgToolCalls && lastMsgToolCalls.length > 0;
     
     if (isAIWithToolCalls) {
       logger.error("[Gemini Debug] Removing trailing AIMessage with tool_calls", {
         messageIndex: processedMessages.length - 1,
-        toolCallsCount: (lastMsg as AIMessage).tool_calls?.length,
+        toolCallsCount: lastMsgToolCalls.length,
       });
       processedMessages.pop();
+    } else {
+      break;
+    }
+  }
+
+  // Gemini requires: function call turn must come immediately after user turn or function response turn
+  // If first message is AIMessage with tool_calls, we need to add a HumanMessage before it
+  // or remove leading AIMessages with tool_calls that don't have corresponding tool responses
+  while (processedMessages.length > 0) {
+    const firstMsg = processedMessages[0];
+    const firstMsgToolCalls = (firstMsg as AIMessage).tool_calls;
+    const isAIWithToolCalls = 
+      (firstMsg.constructor.name === 'AIMessage' || firstMsg.constructor.name === 'AIMessageChunk') && 
+      firstMsgToolCalls && firstMsgToolCalls.length > 0;
+    
+    if (isAIWithToolCalls) {
+      // Check if next message is a ToolMessage (function response)
+      if (processedMessages.length > 1 && processedMessages[1].constructor.name === 'ToolMessage') {
+        // Insert a placeholder HumanMessage before the AIMessage with tool_calls
+        const placeholderHumanMessage = new HumanMessage({
+          id: uuidv4(),
+          content: "Continue with the task execution.",
+        });
+        processedMessages.unshift(placeholderHumanMessage);
+        logger.error("[Gemini Debug] Inserted placeholder HumanMessage before AIMessage with tool_calls", {
+          aiMessageToolCallsCount: firstMsgToolCalls.length,
+        });
+        break;
+      } else {
+        // Remove orphan AIMessage with tool_calls (no corresponding tool response)
+        logger.error("[Gemini Debug] Removing leading AIMessage with tool_calls (no tool response)", {
+          messageIndex: 0,
+          toolCallsCount: firstMsgToolCalls.length,
+        });
+        processedMessages.shift();
+      }
     } else {
       break;
     }

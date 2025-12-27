@@ -8,6 +8,7 @@ import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { join, isAbsolute } from "path";
 
 const logger = createLogger(LogLevel.DEBUG, "InstallDependenciesTool");
 
@@ -25,7 +26,12 @@ export function createInstallDependenciesTool(
       try {
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
         const command = input.command.join(" ");
-        const workdir = input.workdir || repoRoot;
+        
+        let workdir = repoRoot;
+        if (input.workdir) {
+          workdir = isAbsolute(input.workdir) ? input.workdir : join(repoRoot, input.workdir);
+        }
+        
         const timeout = TIMEOUT_SEC * 2.5;
         
         logger.info("[DAYTONA] Running install dependencies command", {
