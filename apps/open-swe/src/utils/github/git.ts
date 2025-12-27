@@ -168,6 +168,24 @@ export async function stashAndClearChanges(
   try {
     // Use unified shell executor
     const executor = createShellExecutor(config);
+    
+    // First, try to remove any nested git directories that might cause issues
+    // These can be created by tools like nest new, create-react-app, etc.
+    // The error "does not have a commit checked out" happens when git add tries to add a nested repo
+    const cleanNestedGitOutput = await executor.executeCommand({
+      command: "find . -mindepth 2 -name '.git' -type d -exec rm -rf {} + 2>/dev/null || true",
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+      sandbox: sandbox || undefined,
+    });
+    
+    if (cleanNestedGitOutput.exitCode !== 0) {
+      logger.warn("Failed to clean nested git directories (non-fatal)", {
+        cleanNestedGitOutput,
+      });
+    }
+    
+    // Now try the standard stash and clear
     const gitStashOutput = await executor.executeCommand({
       command: "git add -A && git stash && git reset --hard",
       workdir: absoluteRepoDir,
@@ -176,9 +194,26 @@ export async function stashAndClearChanges(
     });
 
     if (gitStashOutput.exitCode !== 0) {
-      logger.error(`Failed to stash and clear changes`, {
+      // If standard approach fails, try alternative: git clean + git checkout
+      logger.warn("Standard stash failed, trying alternative cleanup", {
         gitStashOutput,
       });
+      
+      const alternativeCleanup = await executor.executeCommand({
+        command: "git checkout -- . && git clean -fd",
+        workdir: absoluteRepoDir,
+        timeout: TIMEOUT_SEC,
+        sandbox: sandbox || undefined,
+      });
+      
+      if (alternativeCleanup.exitCode !== 0) {
+        logger.error("Alternative cleanup also failed", {
+          alternativeCleanup,
+        });
+        return alternativeCleanup;
+      }
+      
+      return alternativeCleanup;
     }
     return gitStashOutput;
   } catch (e) {
