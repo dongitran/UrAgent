@@ -555,6 +555,14 @@ export async function cloneRepo(
   const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
   const branchName = args.stateBranchName || targetRepository.branch;
 
+  logger.debug("[DAYTONA] cloneRepo called", {
+    sandboxId: sandbox.id,
+    sandboxState: sandbox.state,
+    targetRepository: `${targetRepository.owner}/${targetRepository.repo}`,
+    branchName,
+    absoluteRepoDir,
+  });
+
   try {
     // Attempt to clone the repository
     return await performClone(sandbox, cloneUrl, {
@@ -565,7 +573,11 @@ export async function cloneRepo(
     });
   } catch (error) {
     const errorFields = getSandboxErrorFields(error);
-    logger.error("Clone repo failed", errorFields ?? error);
+    logger.error("[DAYTONA] Clone repo failed", {
+      sandboxId: sandbox.id,
+      sandboxState: sandbox.state,
+      ...(errorFields ?? { error }),
+    });
     throw error;
   }
 }
@@ -590,10 +602,13 @@ async function performClone(
     absoluteRepoDir,
     githubInstallationToken,
   } = args;
-  logger.info("Cloning repository", {
+  logger.info("[DAYTONA] Cloning repository", {
+    sandboxId: sandbox.id,
+    sandboxState: sandbox.state,
     repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
     branch: branchName,
     baseCommit: targetRepository.baseCommit,
+    absoluteRepoDir,
   });
 
   if (!branchName && !targetRepository.baseCommit) {
@@ -612,11 +627,21 @@ async function performClone(
     : false;
 
   if (branchExists) {
-    logger.info("Branch already exists on remote. Cloning existing branch.", {
+    logger.info("[DAYTONA] Branch already exists on remote. Cloning existing branch.", {
+      sandboxId: sandbox.id,
       branch: branchName,
     });
   }
 
+  logger.debug("[DAYTONA] Calling sandbox.git.clone", {
+    sandboxId: sandbox.id,
+    cloneUrl: cloneUrl.replace(/\/\/.*@/, "//***@"), // mask token if present
+    absoluteRepoDir,
+    branch: branchExists ? branchName : targetRepository.branch,
+    baseCommit: branchExists ? undefined : targetRepository.baseCommit,
+  });
+
+  const cloneStartTime = Date.now();
   await sandbox.git.clone(
     cloneUrl,
     absoluteRepoDir,
@@ -626,10 +651,12 @@ async function performClone(
     githubInstallationToken,
   );
 
-  logger.info("Successfully cloned repository", {
+  logger.info("[DAYTONA] Successfully cloned repository", {
+    sandboxId: sandbox.id,
     repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
     branch: branchName,
     baseCommit: targetRepository.baseCommit,
+    durationMs: Date.now() - cloneStartTime,
   });
 
   if (targetRepository.baseCommit) {
@@ -645,17 +672,22 @@ async function performClone(
   }
 
   try {
-    logger.info("Creating branch", {
+    logger.info("[DAYTONA] Creating branch", {
+      sandboxId: sandbox.id,
       branch: branchName,
     });
 
+    const createBranchStartTime = Date.now();
     await sandbox.git.createBranch(absoluteRepoDir, branchName);
 
-    logger.info("Created branch", {
+    logger.info("[DAYTONA] Created branch", {
+      sandboxId: sandbox.id,
       branch: branchName,
+      durationMs: Date.now() - createBranchStartTime,
     });
   } catch (error) {
-    logger.error("Failed to create branch, checking out branch", {
+    logger.error("[DAYTONA] Failed to create branch, checking out branch", {
+      sandboxId: sandbox.id,
       branch: branchName,
       error:
         error instanceof Error
@@ -666,16 +698,22 @@ async function performClone(
 
   try {
     // push an empty commit so that the branch exists in the remote
-    logger.info("Pushing empty commit to remote", {
+    logger.info("[DAYTONA] Pushing empty commit to remote", {
+      sandboxId: sandbox.id,
       branch: branchName,
     });
+    
+    const pushStartTime = Date.now();
     await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
 
-    logger.info("Pushed empty commit to remote", {
+    logger.info("[DAYTONA] Pushed empty commit to remote", {
+      sandboxId: sandbox.id,
       branch: branchName,
+      durationMs: Date.now() - pushStartTime,
     });
   } catch (error) {
-    logger.error("Failed to push an empty commit to branch", {
+    logger.error("[DAYTONA] Failed to push an empty commit to branch", {
+      sandboxId: sandbox.id,
       branch: branchName,
       error:
         error instanceof Error
@@ -707,29 +745,54 @@ export async function checkoutFilesFromCommit(
   }
 
   logger.info(
-    `Checking out ${filePaths.length} files from commit ${commitSha}`,
+    `[DAYTONA] Checking out ${filePaths.length} files from commit ${commitSha}`,
+    { sandboxId: sandbox.id },
   );
 
   for (const filePath of filePaths) {
     try {
+      const command = `git checkout --force ${commitSha} -- "${filePath}"`;
+      logger.debug("[DAYTONA] Executing git checkout for file", {
+        sandboxId: sandbox.id,
+        command,
+        repoDir,
+      });
+      
+      const startTime = Date.now();
       const result = await sandbox.process.executeCommand(
-        `git checkout --force ${commitSha} -- "${filePath}"`,
+        command,
         repoDir,
         undefined,
         30,
       );
 
+      logger.debug("[DAYTONA] Git checkout file response", {
+        sandboxId: sandbox.id,
+        filePath,
+        durationMs: Date.now() - startTime,
+        exitCode: result.exitCode,
+        result: result.result?.substring(0, 300),
+      });
+
       if (result.exitCode !== 0) {
         logger.warn(
-          `Failed to checkout file ${filePath} from commit ${commitSha}: ${result.result || "Unknown error"}`,
+          `[DAYTONA] Failed to checkout file ${filePath} from commit ${commitSha}: ${result.result || "Unknown error"}`,
+          { sandboxId: sandbox.id },
         );
       } else {
         logger.info(
-          `Successfully checked out ${filePath} from commit ${commitSha}`,
+          `[DAYTONA] Successfully checked out ${filePath} from commit ${commitSha}`,
+          { sandboxId: sandbox.id },
         );
       }
     } catch (error) {
-      logger.warn(`Error checking out file ${filePath}:`, { error });
+      logger.warn(`[DAYTONA] Error checking out file ${filePath}:`, {
+        sandboxId: sandbox.id,
+        error: error instanceof Error ? {
+          name: error.name,
+          message: error.message,
+        } : error,
+      });
     }
   }
 }

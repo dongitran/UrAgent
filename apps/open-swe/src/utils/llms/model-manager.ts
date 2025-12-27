@@ -243,12 +243,26 @@ export class ModelManager {
     const configs: ModelLoadConfig[] = [];
     const baseConfig = this.getBaseConfigForTask(config, task);
 
+    logger.error("[Gemini Debug] ModelManager.getModelConfigs", {
+      task,
+      baseConfigProvider: baseConfig.provider,
+      baseConfigModelName: baseConfig.modelName,
+      fallbackOrder: this.config.fallbackOrder,
+    });
+
     const defaultConfig = selectedModel._defaultConfig;
     let selectedModelConfig: ModelLoadConfig | null = null;
 
     if (defaultConfig) {
       const provider = defaultConfig.modelProvider as Provider;
       const modelName = defaultConfig.model;
+
+      logger.error("[Gemini Debug] Selected model default config", {
+        provider,
+        modelName,
+        hasMaxTokens: !!defaultConfig.maxTokens,
+        hasTemperature: !!defaultConfig.temperature,
+      });
 
       if (provider && modelName) {
         const isThinkingModel = baseConfig.thinkingModel;
@@ -274,6 +288,12 @@ export class ModelManager {
             : {}),
         };
         configs.push(selectedModelConfig);
+        
+        logger.error("[Gemini Debug] Added selected model config", {
+          provider: selectedModelConfig.provider,
+          modelName: selectedModelConfig.modelName,
+          isThinkingModel,
+        });
       }
     }
 
@@ -326,6 +346,27 @@ export class ModelManager {
   }
 
   /**
+   * Get default temperature based on model
+   * Gemini 2.5+ requires temperature = 1.0 to avoid loops
+   */
+  private getDefaultTemperature(modelStr: string): number {
+    const [provider, ...modelNameParts] = modelStr.split(":");
+    const modelName = modelNameParts.join(":");
+    
+    if (provider === "google-genai") {
+      const envTemp = process.env.GOOGLE_TEMPERATURE;
+      if (envTemp) {
+        return parseFloat(envTemp);
+      }
+      if (modelName.includes("gemini-2") || modelName.includes("gemini-3")) {
+        return 1.0;
+      }
+    }
+    
+    return 0;
+  }
+
+  /**
    * Get base configuration for a task from GraphConfig
    */
   private getBaseConfigForTask(
@@ -337,31 +378,41 @@ export class ModelManager {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
+          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
+        ),
       },
       [LLMTask.PROGRAMMER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
+          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
+        ),
       },
       [LLMTask.REVIEWER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
+          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
+        ),
       },
       [LLMTask.ROUTER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
+          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
+        ),
       },
       [LLMTask.SUMMARIZER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
+          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
+        ),
       },
     };
 
