@@ -67,7 +67,7 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     const targetRepository: TargetRepository = {
       owner: prData.repoOwner,
       repo: prData.repoName,
-      branch: undefined,
+      branch: "main",
       baseCommit: preMergeCommit,
     };
     const repoDir = getRepoAbsolutePath(targetRepository);

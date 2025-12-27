@@ -166,12 +166,18 @@ export function createGrepToolFields(targetRepository: TargetRepository) {
       .optional()
       .default(false)
       .describe("Whether or not to follow symlinks. Defaults to false."),
+    workdir: z
+      .string()
+      .optional()
+      .describe(
+        `Optional working directory to run the search in. Can be a relative path from the repository root or an absolute path. Defaults to the repository root: \`${repoRoot}\`. Use this when searching in a subdirectory (e.g., a nested project created by 'nest new' or 'create-react-app').`,
+      ),
   });
 
   return {
     name: "grep",
     schema: searchSchema,
-    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The working directory this command will be executed in is \`${repoRoot}\`.`,
+    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The default working directory is \`${repoRoot}\`, but you can specify a different directory using the 'workdir' parameter when searching in subdirectories.`,
   };
 }
 
@@ -620,7 +626,10 @@ export function createViewToolFields(
       ? getLocalWorkingDirectory()
       : getRepoAbsolutePath(targetRepository);
   const viewSchema = z.object({
-    command: z.enum(["view"]).describe("The command to execute: view"),
+    command: z
+      .enum(["view"])
+      .default("view")
+      .describe("The command to execute: view"),
     path: z
       .string()
       .describe("The path to the file or directory to operate on"),
@@ -630,13 +639,19 @@ export function createViewToolFields(
       .describe(
         "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command. If this is passed, ensure it is a valid array, containing only two positive integers.",
       ),
+    workdir: z
+      .string()
+      .optional()
+      .describe(
+        `Optional working directory. Can be a relative path from the repository root or an absolute path. Defaults to the repository root: \`${repoRoot}\`. Use this when viewing files in a subdirectory (e.g., a nested project created by 'nest new' or 'create-react-app').`,
+      ),
   });
 
   return {
     name: "view",
     description:
       "A text editor tool that can view files. " +
-      `The working directory is \`${repoRoot}\`. Ensure file paths are absolute and properly formatted. ` +
+      `The default working directory is \`${repoRoot}\`, but you can specify a different directory using the 'workdir' parameter. ` +
       "Supports commands: view (read file/directory).",
     schema: viewSchema,
   };

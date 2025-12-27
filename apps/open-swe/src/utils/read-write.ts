@@ -100,15 +100,18 @@ async function readFileFunc(inputs: {
 
     if (readOutput.exitCode !== 0) {
       const errorResult = readOutput.result ?? readOutput.artifacts?.stdout;
+      const fullPath = workDir ? `${workDir}/${filePath}` : filePath;
       logger.warn("[DAYTONA] Read file failed", {
         sandboxId: sandbox?.id,
         filePath,
+        workDir,
+        fullPath,
         exitCode: readOutput.exitCode,
         errorResult: errorResult?.substring(0, 500),
       });
       return {
         success: false,
-        output: `FAILED TO READ FILE from sandbox '${filePath}'. Exit code: ${readOutput.exitCode}.\nResult: ${errorResult}`,
+        output: `FAILED TO READ FILE from sandbox '${filePath}' (full path: ${fullPath}). Exit code: ${readOutput.exitCode}.\nResult: ${errorResult}\nHint: If the file is in a subdirectory created by a tool like 'nest new', use the 'workdir' parameter or check the actual file path.`,
       };
     }
 
@@ -122,7 +125,7 @@ async function readFileFunc(inputs: {
         sandboxId: sandbox?.id,
         filePath,
       });
-      
+
       let createOutput;
       if (config && isLocalMode(config)) {
         // Local mode: use handleCreateFileLocal
@@ -223,7 +226,7 @@ async function writeFileFunc(inputs: {
     const writeCommand = `cat > "${filePath}" << '${delimiter}'
 ${content}
 ${delimiter}`;
-    
+
     logger.debug("[DAYTONA] Executing write file command", {
       sandboxId: sandbox.id,
       filePath,

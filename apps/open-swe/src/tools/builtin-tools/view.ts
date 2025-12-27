@@ -1,4 +1,4 @@
-import { join } from "path";
+import { join, isAbsolute } from "path";
 import { tool } from "@langchain/core/tools";
 import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
@@ -22,29 +22,62 @@ export function createViewTool(
   const viewTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const { command, path, view_range } = input as any;
+        const {
+          command,
+          path,
+          view_range,
+          workdir: inputWorkdir,
+        } = input as {
+          command: string;
+          path: string;
+          view_range?: [number, number];
+          workdir?: string;
+        };
         if (command !== "view") {
           throw new Error(`Unknown command: ${command}`);
         }
 
-        const workDir = isLocalMode(config)
+        const repoRoot = isLocalMode(config)
           ? getLocalWorkingDirectory()
           : getRepoAbsolutePath(state.targetRepository);
 
+        let workDir = repoRoot;
+        if (inputWorkdir) {
+          workDir = isAbsolute(inputWorkdir)
+            ? inputWorkdir
+            : join(repoRoot, inputWorkdir);
+        }
+
+        // Normalize path: if path already includes the workdir prefix, strip it
+        let normalizedPath = path;
+        if (inputWorkdir && path.startsWith(inputWorkdir)) {
+          // Path already includes workdir, strip it to avoid double-path
+          normalizedPath = path.slice(inputWorkdir.length).replace(/^\//, "");
+          logger.info("Stripped workdir prefix from path", {
+            originalPath: path,
+            normalizedPath,
+            inputWorkdir,
+          });
+        }
+
+        logger.info("View command executing", {
+          originalPath: path,
+          normalizedPath,
+          workDir,
+          inputWorkdir,
+          repoRoot,
+        });
+
         let result: string;
         if (isLocalMode(config)) {
-          // Local mode: use ShellExecutor for file viewing
           const executor = createShellExecutor(config);
 
-          // Convert sandbox path to local path
-          let localPath = path;
-          if (path.startsWith("/home/daytona/project/")) {
-            // Remove the sandbox prefix to get the relative path
-            localPath = path.replace("/home/daytona/project/", "");
+          let localPath = normalizedPath;
+          if (normalizedPath.startsWith("/home/daytona/project/")) {
+            localPath = normalizedPath.replace("/home/daytona/project/", "");
           }
           const filePath = join(workDir, localPath);
 
-          // Use cat command to view file content
           const response = await executor.executeCommand({
             command: `cat "${filePath}"`,
             workdir: workDir,
@@ -57,16 +90,15 @@ export function createViewTool(
 
           result = response.result;
         } else {
-          // Sandbox mode: use existing handler
           const sandbox = await getSandboxSessionOrThrow(input);
           result = await handleViewCommand(sandbox, config, {
-            path,
+            path: normalizedPath,
             workDir,
             viewRange: view_range as [number, number] | undefined,
           });
         }
 
-        logger.info(`View command executed successfully on ${path}`);
+        logger.info(`View command executed successfully on ${normalizedPath}`);
         return { result, status: "success" };
       } catch (error) {
         const errorMessage =

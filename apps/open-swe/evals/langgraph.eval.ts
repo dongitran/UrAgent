@@ -221,6 +221,7 @@ ls.describe(DATASET_NAME, () => {
           targetRepository: {
             owner: inputs.repo.split("/")[0],
             repo: inputs.repo.split("/")[1],
+            branch: branchName,
           },
         },
       });

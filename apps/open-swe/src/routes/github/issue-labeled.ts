@@ -77,6 +77,7 @@ class IssueWebhookHandler extends WebhookHandlerBase {
         targetRepository: {
           owner: context.owner,
           repo: context.repo,
+          branch: payload.repository?.default_branch || "main",
         },
         autoAcceptPlan: isAutoAcceptLabel,
       };

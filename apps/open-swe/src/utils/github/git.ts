@@ -168,23 +168,24 @@ export async function stashAndClearChanges(
   try {
     // Use unified shell executor
     const executor = createShellExecutor(config);
-    
+
     // First, try to remove any nested git directories that might cause issues
     // These can be created by tools like nest new, create-react-app, etc.
     // The error "does not have a commit checked out" happens when git add tries to add a nested repo
     const cleanNestedGitOutput = await executor.executeCommand({
-      command: "find . -mindepth 2 -name '.git' -type d -exec rm -rf {} + 2>/dev/null || true",
+      command:
+        "find . -mindepth 2 -name '.git' -type d -exec rm -rf {} + 2>/dev/null || true",
       workdir: absoluteRepoDir,
       timeout: TIMEOUT_SEC,
       sandbox: sandbox || undefined,
     });
-    
+
     if (cleanNestedGitOutput.exitCode !== 0) {
       logger.warn("Failed to clean nested git directories (non-fatal)", {
         cleanNestedGitOutput,
       });
     }
-    
+
     // Now try the standard stash and clear
     const gitStashOutput = await executor.executeCommand({
       command: "git add -A && git stash && git reset --hard",
@@ -198,21 +199,21 @@ export async function stashAndClearChanges(
       logger.warn("Standard stash failed, trying alternative cleanup", {
         gitStashOutput,
       });
-      
+
       const alternativeCleanup = await executor.executeCommand({
         command: "git checkout -- . && git clean -fd",
         workdir: absoluteRepoDir,
         timeout: TIMEOUT_SEC,
         sandbox: sandbox || undefined,
       });
-      
+
       if (alternativeCleanup.exitCode !== 0) {
         logger.error("Alternative cleanup also failed", {
           alternativeCleanup,
         });
         return alternativeCleanup;
       }
-      
+
       return alternativeCleanup;
     }
     return gitStashOutput;
@@ -266,11 +267,14 @@ export async function checkoutBranchAndCommit(
 
   // IMPORTANT: Prevent committing directly to base branch
   if (branchName === targetRepository.branch) {
-    logger.warn("⚠️ WARNING: Attempting to commit to base branch! Creating feature branch instead.", {
-      baseBranch: targetRepository.branch,
-      branchName,
-      threadId: config.configurable?.thread_id,
-    });
+    logger.warn(
+      "⚠️ WARNING: Attempting to commit to base branch! Creating feature branch instead.",
+      {
+        baseBranch: targetRepository.branch,
+        branchName,
+        threadId: config.configurable?.thread_id,
+      },
+    );
     // Force create a new feature branch
     const featureBranchName = getBranchName(config);
     logger.info(`Creating feature branch instead: ${featureBranchName}`, {
@@ -459,7 +463,9 @@ export async function checkoutBranchAndCommit(
           config,
           updatedTaskPlan,
         );
-        logger.info(`Draft pull request linked to issue: #${options.githubIssueId}`);
+        logger.info(
+          `Draft pull request linked to issue: #${options.githubIssueId}`,
+        );
       }
     } else {
       logger.warn("Failed to create draft pull request", {
@@ -662,10 +668,13 @@ async function performClone(
     : false;
 
   if (branchExists) {
-    logger.info("[DAYTONA] Branch already exists on remote. Cloning existing branch.", {
-      sandboxId: sandbox.id,
-      branch: branchName,
-    });
+    logger.info(
+      "[DAYTONA] Branch already exists on remote. Cloning existing branch.",
+      {
+        sandboxId: sandbox.id,
+        branch: branchName,
+      },
+    );
   }
 
   logger.debug("[DAYTONA] Calling sandbox.git.clone", {
@@ -737,7 +746,7 @@ async function performClone(
       sandboxId: sandbox.id,
       branch: branchName,
     });
-    
+
     const pushStartTime = Date.now();
     await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
 
@@ -792,7 +801,7 @@ export async function checkoutFilesFromCommit(
         command,
         repoDir,
       });
-      
+
       const startTime = Date.now();
       const result = await sandbox.process.executeCommand(
         command,
@@ -823,10 +832,13 @@ export async function checkoutFilesFromCommit(
     } catch (error) {
       logger.warn(`[DAYTONA] Error checking out file ${filePath}:`, {
         sandboxId: sandbox.id,
-        error: error instanceof Error ? {
-          name: error.name,
-          message: error.message,
-        } : error,
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+              }
+            : error,
       });
     }
   }

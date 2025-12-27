@@ -40,6 +40,7 @@ import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
+import { createViewTool } from "../../../../tools/builtin-tools/view.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
@@ -56,6 +57,7 @@ import {
 import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 import {
   AIMessage,
+  AIMessageChunk,
   BaseMessage,
   BaseMessageLike,
   HumanMessage,
@@ -78,11 +80,16 @@ import {
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
 const formatDynamicContextPrompt = (state: GraphState) => {
-  const activePlanItems = state.taskPlan ? getActivePlanItems(state.taskPlan) : [];
+  const activePlanItems = state.taskPlan
+    ? getActivePlanItems(state.taskPlan)
+    : [];
   const planString = activePlanItems
     .map((i) => `<plan-item index="${i.index}">\n${i.plan}\n</plan-item>`)
     .join("\n");
-  return DYNAMIC_SYSTEM_PROMPT.replaceAll("{PLAN_PROMPT}", planString || "No plan available")
+  return DYNAMIC_SYSTEM_PROMPT.replaceAll(
+    "{PLAN_PROMPT}",
+    planString || "No plan available",
+  )
     .replaceAll(
       "{PLAN_GENERATION_NOTES}",
       state.contextGatheringNotes || "No context gathering notes available.",
@@ -180,12 +187,20 @@ You are in the process of executing the current task:
 
 {LOOP_WARNING}`;
 
-const formatSpecificPlanPrompt = (taskPlan: TaskPlan | null | undefined, loopWarning: string = ""): HumanMessage => {
+const formatSpecificPlanPrompt = (
+  taskPlan: TaskPlan | null | undefined,
+  loopWarning: string = "",
+): HumanMessage => {
   const activePlanItems = taskPlan ? getActivePlanItems(taskPlan) : [];
   return new HumanMessage({
     id: uuidv4(),
     content: planSpecificPrompt
-      .replace("{PLAN_PROMPT}", activePlanItems.length > 0 ? formatPlanPrompt(activePlanItems) : "No plan available - execute the user request directly.")
+      .replace(
+        "{PLAN_PROMPT}",
+        activePlanItems.length > 0
+          ? formatPlanPrompt(activePlanItems)
+          : "No plan available - execute the user request directly.",
+      )
       .replace("{LOOP_WARNING}", loopWarning),
   });
 };
@@ -205,6 +220,7 @@ async function createToolsAndPrompt(
   const mcpTools = await getMcpTools(config);
   const sharedTools = [
     createGrepTool(state, config),
+    createViewTool(state, config),
     createShellTool(state, config),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
@@ -243,27 +259,32 @@ async function createToolsAndPrompt(
     },
   ];
 
-  const rawMessages = [
-    ...state.internalMessages,
-    ...options.missingMessages,
-  ];
-  
+  const rawMessages = [...state.internalMessages, ...options.missingMessages];
+
   logger.error("[Gemini Debug] Raw messages BEFORE filtering", {
     totalRawMessages: rawMessages.length,
     rawMessageDetails: rawMessages.map((m: BaseMessage, idx: number) => ({
       index: idx,
       type: m.constructor.name,
-      role: m._getType?.() || 'unknown',
+      role: m._getType?.() || "unknown",
       hasContent: !!m.content,
-      contentLength: typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? m.content.length : 'N/A',
-      contentPreview: typeof m.content === 'string' ? m.content.substring(0, 100) : JSON.stringify(m.content)?.substring(0, 100),
+      contentLength:
+        typeof m.content === "string"
+          ? m.content.length
+          : Array.isArray(m.content)
+            ? m.content.length
+            : "N/A",
+      contentPreview:
+        typeof m.content === "string"
+          ? m.content.substring(0, 100)
+          : JSON.stringify(m.content)?.substring(0, 100),
       isHidden: !!m.additional_kwargs?.hidden,
       additionalKwargs: m.additional_kwargs,
     })),
   });
-  
+
   const inputMessages = filterMessagesWithoutContent(rawMessages);
-  
+
   logger.error("[Gemini Debug] Input messages after filtering", {
     totalInternalMessages: state.internalMessages.length,
     totalMissingMessages: options.missingMessages.length,
@@ -271,15 +292,15 @@ async function createToolsAndPrompt(
     inputMessageDetails: inputMessages.map((m: BaseMessage, idx: number) => ({
       index: idx,
       type: m.constructor.name,
-      role: m._getType?.() || 'unknown',
+      role: m._getType?.() || "unknown",
       hasContent: !!m.content,
-      contentLength: typeof m.content === 'string' ? m.content.length : 'N/A',
+      contentLength: typeof m.content === "string" ? m.content.length : "N/A",
       hasToolCalls: !!(m as AIMessage).tool_calls?.length,
       toolCallsCount: (m as AIMessage).tool_calls?.length || 0,
-      toolCallNames: (m as AIMessage).tool_calls?.map(tc => tc.name) || [],
+      toolCallNames: (m as AIMessage).tool_calls?.map((tc) => tc.name) || [],
     })),
   });
-  
+
   if (!inputMessages.length) {
     throw new Error("No messages to process.");
   }
@@ -336,31 +357,37 @@ async function createToolsAndPrompt(
   // 2. Roles must alternate between 'user' and 'ai'
   // 3. Multiple consecutive ToolMessages (from parallel tool calls) must be merged
   // 4. Cannot end with AIMessage that has tool_calls
-  
+
   const processedMessages: BaseMessage[] = [];
   let i = 0;
-  
+
   while (i < inputMessages.length) {
     const currentMsg = inputMessages[i];
     const currentType = currentMsg.constructor.name;
-    
+
     // Check if this is a ToolMessage and if there are more ToolMessages following
-    if (currentType === 'ToolMessage') {
+    if (currentType === "ToolMessage") {
       const toolMessages: ToolMessage[] = [currentMsg as ToolMessage];
       let j = i + 1;
-      
+
       // Collect all consecutive ToolMessages
-      while (j < inputMessages.length && inputMessages[j].constructor.name === 'ToolMessage') {
+      while (
+        j < inputMessages.length &&
+        inputMessages[j].constructor.name === "ToolMessage"
+      ) {
         toolMessages.push(inputMessages[j] as ToolMessage);
         j++;
       }
-      
+
       if (toolMessages.length > 1) {
         // Merge multiple ToolMessages into one
         const mergedContent = toolMessages
-          .map((msg, idx) => `[Tool Response ${idx + 1}]\n${getMessageContentString(msg.content)}`)
-          .join('\n\n');
-        
+          .map(
+            (msg, idx) =>
+              `[Tool Response ${idx + 1}]\n${getMessageContentString(msg.content)}`,
+          )
+          .join("\n\n");
+
         const firstToolMsg = toolMessages[0];
         const mergedToolMessage = new ToolMessage({
           content: mergedContent,
@@ -368,16 +395,16 @@ async function createToolsAndPrompt(
           name: firstToolMsg.name,
           additional_kwargs: firstToolMsg.additional_kwargs || {},
         });
-        
+
         processedMessages.push(mergedToolMessage);
-        
+
         logger.error("[Gemini Debug] Merged consecutive ToolMessages", {
           originalCount: toolMessages.length,
           startIndex: i,
           endIndex: j - 1,
-          toolCallIds: toolMessages.map(m => m.tool_call_id),
+          toolCallIds: toolMessages.map((m) => m.tool_call_id),
         });
-        
+
         i = j;
       } else {
         processedMessages.push(currentMsg);
@@ -388,20 +415,25 @@ async function createToolsAndPrompt(
       i++;
     }
   }
-  
+
   // Remove trailing AIMessages with tool_calls
   while (processedMessages.length > 0) {
     const lastMsg = processedMessages[processedMessages.length - 1];
     const lastMsgToolCalls = (lastMsg as AIMessage).tool_calls;
-    const isAIWithToolCalls = 
-      (lastMsg.constructor.name === 'AIMessage' || lastMsg.constructor.name === 'AIMessageChunk') && 
-      lastMsgToolCalls && lastMsgToolCalls.length > 0;
-    
+    const isAIWithToolCalls =
+      (lastMsg.constructor.name === "AIMessage" ||
+        lastMsg.constructor.name === "AIMessageChunk") &&
+      lastMsgToolCalls &&
+      lastMsgToolCalls.length > 0;
+
     if (isAIWithToolCalls) {
-      logger.error("[Gemini Debug] Removing trailing AIMessage with tool_calls", {
-        messageIndex: processedMessages.length - 1,
-        toolCallsCount: lastMsgToolCalls.length,
-      });
+      logger.error(
+        "[Gemini Debug] Removing trailing AIMessage with tool_calls",
+        {
+          messageIndex: processedMessages.length - 1,
+          toolCallsCount: lastMsgToolCalls.length,
+        },
+      );
       processedMessages.pop();
     } else {
       break;
@@ -414,29 +446,40 @@ async function createToolsAndPrompt(
   while (processedMessages.length > 0) {
     const firstMsg = processedMessages[0];
     const firstMsgToolCalls = (firstMsg as AIMessage).tool_calls;
-    const isAIWithToolCalls = 
-      (firstMsg.constructor.name === 'AIMessage' || firstMsg.constructor.name === 'AIMessageChunk') && 
-      firstMsgToolCalls && firstMsgToolCalls.length > 0;
-    
+    const isAIWithToolCalls =
+      (firstMsg.constructor.name === "AIMessage" ||
+        firstMsg.constructor.name === "AIMessageChunk") &&
+      firstMsgToolCalls &&
+      firstMsgToolCalls.length > 0;
+
     if (isAIWithToolCalls) {
       // Check if next message is a ToolMessage (function response)
-      if (processedMessages.length > 1 && processedMessages[1].constructor.name === 'ToolMessage') {
+      if (
+        processedMessages.length > 1 &&
+        processedMessages[1].constructor.name === "ToolMessage"
+      ) {
         // Insert a placeholder HumanMessage before the AIMessage with tool_calls
         const placeholderHumanMessage = new HumanMessage({
           id: uuidv4(),
           content: "Continue with the task execution.",
         });
         processedMessages.unshift(placeholderHumanMessage);
-        logger.error("[Gemini Debug] Inserted placeholder HumanMessage before AIMessage with tool_calls", {
-          aiMessageToolCallsCount: firstMsgToolCalls.length,
-        });
+        logger.error(
+          "[Gemini Debug] Inserted placeholder HumanMessage before AIMessage with tool_calls",
+          {
+            aiMessageToolCallsCount: firstMsgToolCalls.length,
+          },
+        );
         break;
       } else {
         // Remove orphan AIMessage with tool_calls (no corresponding tool response)
-        logger.error("[Gemini Debug] Removing leading AIMessage with tool_calls (no tool response)", {
-          messageIndex: 0,
-          toolCallsCount: firstMsgToolCalls.length,
-        });
+        logger.error(
+          "[Gemini Debug] Removing leading AIMessage with tool_calls (no tool response)",
+          {
+            messageIndex: 0,
+            toolCallsCount: firstMsgToolCalls.length,
+          },
+        );
         processedMessages.shift();
       }
     } else {
@@ -475,12 +518,12 @@ async function createToolsAndPrompt(
       toolCallsCount: m.tool_calls?.length || 0,
     })),
   });
-  
+
   logger.error("[Gemini Debug] Detailed Gemini message sequence", {
     messages: geminiMessages.map((m: any, idx: number) => {
-      const isSystemMsg = typeof m === 'object' && m.role === 'system';
-      const isLangChainMsg = m.constructor?.name?.includes('Message');
-      
+      const isSystemMsg = typeof m === "object" && m.role === "system";
+      const isLangChainMsg = m.constructor?.name?.includes("Message");
+
       return {
         index: idx,
         isSystemObject: isSystemMsg,
@@ -488,11 +531,12 @@ async function createToolsAndPrompt(
         type: m.constructor?.name || typeof m,
         role: m.role || m._getType?.(),
         hasContent: !!m.content,
-        contentPreview: typeof m.content === 'string' 
-          ? m.content.substring(0, 100) + '...'
-          : Array.isArray(m.content)
-            ? `Array[${m.content.length}]`
-            : typeof m.content,
+        contentPreview:
+          typeof m.content === "string"
+            ? m.content.substring(0, 100) + "..."
+            : Array.isArray(m.content)
+              ? `Array[${m.content.length}]`
+              : typeof m.content,
         hasToolCalls: !!m.tool_calls?.length,
         toolCallsCount: m.tool_calls?.length || 0,
         toolCallNames: m.tool_calls?.map((tc: any) => tc.name) || [],
@@ -539,7 +583,7 @@ export async function generateAction(
 
   // Loop detection - check if agent is stuck in a loop
   const loopDetectionResult = detectLoop(state.internalMessages);
-  
+
   if (loopDetectionResult.loopCount > 0) {
     config.writer?.({
       type: "loop_detected",
@@ -549,7 +593,7 @@ export async function generateAction(
       repeatedTool: loopDetectionResult.repeatedToolCall?.name,
     });
   }
-  
+
   // Handle based on recommendation
   if (loopDetectionResult.recommendation === "force_complete") {
     config.writer?.({
@@ -559,7 +603,7 @@ export async function generateAction(
       loopType: loopDetectionResult.loopType,
       loopCount: loopDetectionResult.loopCount,
     });
-    
+
     logger.warn("Force completing task due to loop detection", {
       loopType: loopDetectionResult.loopType,
       loopCount: loopDetectionResult.loopCount,
@@ -568,62 +612,72 @@ export async function generateAction(
       hasVaryingOutputs: loopDetectionResult.hasVaryingOutputs,
       warningCount: loopDetectionResult.warningCount,
     });
-    
+
     // Create a synthetic mark_task_completed tool call
-    const loopDescription = loopDetectionResult.isEditLoop 
+    const loopDescription = loopDetectionResult.isEditLoop
       ? `edit_loop (str_replace failing repeatedly on "${loopDetectionResult.repeatedToolCall?.name}")`
       : `${loopDetectionResult.loopType} loop`;
-    
+
     const forcedCompletionResponse = new AIMessage({
       id: uuidv4(),
       content: `Task force-completed due to detected ${loopDescription} behavior.`,
-      tool_calls: [{
-        id: uuidv4(),
-        name: markTaskCompletedTool.name,
-        args: {
-          completed_task_summary: `Task was automatically marked as completed because the agent was stuck in a ${loopDescription}, repeatedly calling "${loopDetectionResult.repeatedToolCall?.name}" ${loopDetectionResult.loopCount} times. The task appears to be complete based on the repeated verification attempts.`,
+      tool_calls: [
+        {
+          id: uuidv4(),
+          name: markTaskCompletedTool.name,
+          args: {
+            completed_task_summary: `Task was automatically marked as completed because the agent was stuck in a ${loopDescription}, repeatedly calling "${loopDetectionResult.repeatedToolCall?.name}" ${loopDetectionResult.loopCount} times. The task appears to be complete based on the repeated verification attempts.`,
+          },
         },
-      }],
+      ],
     });
-    
+
     // Need to ensure taskPlan exists for handle-completed-task node
     let taskPlanForForceComplete = state.taskPlan;
     if (!taskPlanForForceComplete) {
       taskPlanForForceComplete = {
-        tasks: [{
-          id: "force-completed-task",
-          taskIndex: 0,
-          request: "Force completed due to loop",
-          title: "Force Completed Task",
-          createdAt: Date.now(),
-          completed: false,
-          planRevisions: [{
-            revisionIndex: 0,
-            plans: [{
-              index: 0,
-              plan: "Task force-completed due to loop detection",
-              completed: false,
-            }],
+        tasks: [
+          {
+            id: "force-completed-task",
+            taskIndex: 0,
+            request: "Force completed due to loop",
+            title: "Force Completed Task",
             createdAt: Date.now(),
-            createdBy: "agent",
-          }],
-          activeRevisionIndex: 0,
-        }],
+            completed: false,
+            planRevisions: [
+              {
+                revisionIndex: 0,
+                plans: [
+                  {
+                    index: 0,
+                    plan: "Task force-completed due to loop detection",
+                    completed: false,
+                  },
+                ],
+                createdAt: Date.now(),
+                createdBy: "agent",
+              },
+            ],
+            activeRevisionIndex: 0,
+          },
+        ],
         activeTaskIndex: 0,
       };
     }
-    
+
     return {
       messages: [forcedCompletionResponse],
       internalMessages: [forcedCompletionResponse],
       taskPlan: taskPlanForForceComplete,
     };
   }
-  
+
   // For error_retry or edit_loop that hit threshold, request human help instead
   if (loopDetectionResult.recommendation === "request_help") {
-    const isEditLoop = loopDetectionResult.isEditLoop || loopDetectionResult.loopType === "edit_loop";
-    
+    const isEditLoop =
+      loopDetectionResult.isEditLoop ||
+      loopDetectionResult.loopType === "edit_loop";
+
     config.writer?.({
       type: "request_help",
       timestamp: Date.now(),
@@ -631,7 +685,7 @@ export async function generateAction(
       loopType: loopDetectionResult.loopType,
       loopCount: loopDetectionResult.loopCount,
     });
-    
+
     logger.warn("Requesting human help due to loop", {
       loopType: loopDetectionResult.loopType,
       loopCount: loopDetectionResult.loopCount,
@@ -639,24 +693,26 @@ export async function generateAction(
       isEditLoop,
       hasVaryingOutputs: loopDetectionResult.hasVaryingOutputs,
     });
-    
+
     // Create a synthetic request_human_help tool call
     const helpMessage = isEditLoop
       ? `I'm stuck in an edit loop where my file edits keep failing. I've tried to edit "${loopDetectionResult.repeatedToolCall?.name}" ${loopDetectionResult.loopCount} times without success. The str_replace_based_edit_tool keeps failing - possibly due to whitespace mismatch or the file content has changed. Please help me understand what's wrong or suggest a different approach (e.g., rewriting the entire file).`
       : `I'm stuck in a loop where the same action keeps failing. I've tried "${loopDetectionResult.repeatedToolCall?.name}" ${loopDetectionResult.loopCount} times without success. Please help me understand what's going wrong or suggest a different approach.`;
-    
+
     const requestHelpResponse = new AIMessage({
       id: uuidv4(),
       content: `Requesting human help due to detected ${loopDetectionResult.loopType} loop - the same action keeps failing.`,
-      tool_calls: [{
-        id: uuidv4(),
-        name: "request_human_help",
-        args: {
-          help_request: helpMessage,
+      tool_calls: [
+        {
+          id: uuidv4(),
+          name: "request_human_help",
+          args: {
+            help_request: helpMessage,
+          },
         },
-      }],
+      ],
     });
-    
+
     return {
       messages: [requestHelpResponse],
       internalMessages: [requestHelpResponse],
@@ -667,25 +723,31 @@ export async function generateAction(
   let taskPlanToReturn: TaskPlan | undefined;
   if (!state.taskPlan) {
     taskPlanToReturn = {
-      tasks: [{
-        id: "default-task",
-        taskIndex: 0,
-        request: "Execute the user request",
-        title: "Execute Request",
-        createdAt: Date.now(),
-        completed: false,
-        planRevisions: [{
-          revisionIndex: 0,
-          plans: [{
-            index: 0,
-            plan: "Execute the user request",
-            completed: false,
-          }],
+      tasks: [
+        {
+          id: "default-task",
+          taskIndex: 0,
+          request: "Execute the user request",
+          title: "Execute Request",
           createdAt: Date.now(),
-          createdBy: "agent",
-        }],
-        activeRevisionIndex: 0,
-      }],
+          completed: false,
+          planRevisions: [
+            {
+              revisionIndex: 0,
+              plans: [
+                {
+                  index: 0,
+                  plan: "Execute the user request",
+                  completed: false,
+                },
+              ],
+              createdAt: Date.now(),
+              createdBy: "agent",
+            },
+          ],
+          activeRevisionIndex: 0,
+        },
+      ],
       activeTaskIndex: 0,
     };
     logger.info("Created default taskPlan for direct programmer call");
@@ -701,9 +763,10 @@ export async function generateAction(
     : [[], { taskPlan: null }];
 
   // Generate loop warning if loop is detected (but not severe enough to force action)
-  const loopWarning = loopDetectionResult.recommendation === "warn"
-    ? generateLoopWarningPrompt(loopDetectionResult)
-    : "";
+  const loopWarning =
+    loopDetectionResult.recommendation === "warn"
+      ? generateLoopWarningPrompt(loopDetectionResult)
+      : "";
 
   if (loopWarning) {
     logger.info("Injecting loop warning into prompt", {
@@ -741,14 +804,18 @@ export async function generateAction(
   });
 
   const isGeminiModel = modelName.includes("gemini");
-  
+
   logger.error("[Gemini Debug] Model detection", {
     modelName,
     isAnthropicModel,
     isGeminiModel,
-    willUseProvider: isAnthropicModel ? "anthropic" : isGeminiModel ? "google-genai" : "openai",
+    willUseProvider: isAnthropicModel
+      ? "anthropic"
+      : isGeminiModel
+        ? "google-genai"
+        : "openai",
   });
-  
+
   const modelWithTools = model.bindTools(
     isAnthropicModel ? providerTools.anthropic : providerTools.openai,
     {
@@ -760,17 +827,17 @@ export async function generateAction(
         : {}),
     },
   );
-  
-  const messagesToUse = isAnthropicModel 
-    ? providerMessages.anthropic 
-    : isGeminiModel 
+
+  const messagesToUse = isAnthropicModel
+    ? providerMessages.anthropic
+    : isGeminiModel
       ? providerMessages["google-genai"]
       : providerMessages.openai;
-  
+
   // For FallbackRunnable, always pass anthropic messages as the base input
   // FallbackRunnable will use providerMessages to select the correct messages for each provider
   const baseMessagesForFallback = providerMessages.anthropic;
-  
+
   logger.error("[Gemini Debug] Final messages to invoke", {
     messageCount: messagesToUse.length,
     baseMessagesCount: baseMessagesForFallback.length,
@@ -785,51 +852,63 @@ export async function generateAction(
       isSystemMessage: m.role === "system",
     })),
   });
-  
-  logger.error("[Gemini Debug] Analyzing message ordering for Gemini compatibility", {
-    violations: messagesToUse.map((m: any, idx: number) => {
-      if (idx === 0) return null;
-      
-      const prevMsg = messagesToUse[idx - 1];
-      const currentMsg = m;
-      
-      const prevType = prevMsg.constructor?.name || typeof prevMsg;
-      const prevRole = prevMsg.role || prevMsg._getType?.();
-      const prevHasToolCalls = !!prevMsg.tool_calls?.length;
-      
-      const currentType = currentMsg.constructor?.name || typeof currentMsg;
-      const currentRole = currentMsg.role || currentMsg._getType?.();
-      const currentHasToolCalls = !!currentMsg.tool_calls?.length;
-      
-      const isViolation = 
-        (prevHasToolCalls && currentRole !== 'tool' && currentRole !== 'function') ||
-        (prevRole === 'assistant' && prevHasToolCalls && currentRole === 'user') ||
-        (prevRole === 'assistant' && prevHasToolCalls && currentRole === 'system');
-      
-      if (isViolation) {
-        return {
-          index: idx,
-          violation: 'Gemini requires tool calls to be followed by tool/function responses',
-          prevMessage: {
-            index: idx - 1,
-            type: prevType,
-            role: prevRole,
-            hasToolCalls: prevHasToolCalls,
-            toolCallsCount: prevMsg.tool_calls?.length || 0,
-          },
-          currentMessage: {
-            index: idx,
-            type: currentType,
-            role: currentRole,
-            hasToolCalls: currentHasToolCalls,
-          },
-        };
-      }
-      
-      return null;
-    }).filter(v => v !== null),
-  });
-  
+
+  logger.error(
+    "[Gemini Debug] Analyzing message ordering for Gemini compatibility",
+    {
+      violations: messagesToUse
+        .map((m: any, idx: number) => {
+          if (idx === 0) return null;
+
+          const prevMsg = messagesToUse[idx - 1] as any;
+          const currentMsg = m;
+
+          const prevType = prevMsg.constructor?.name || typeof prevMsg;
+          const prevRole = prevMsg.role || prevMsg._getType?.();
+          const prevHasToolCalls = !!prevMsg.tool_calls?.length;
+
+          const currentType = currentMsg.constructor?.name || typeof currentMsg;
+          const currentRole = currentMsg.role || currentMsg._getType?.();
+          const currentHasToolCalls = !!currentMsg.tool_calls?.length;
+
+          const isViolation =
+            (prevHasToolCalls &&
+              currentRole !== "tool" &&
+              currentRole !== "function") ||
+            (prevRole === "assistant" &&
+              prevHasToolCalls &&
+              currentRole === "user") ||
+            (prevRole === "assistant" &&
+              prevHasToolCalls &&
+              currentRole === "system");
+
+          if (isViolation) {
+            return {
+              index: idx,
+              violation:
+                "Gemini requires tool calls to be followed by tool/function responses",
+              prevMessage: {
+                index: idx - 1,
+                type: prevType,
+                role: prevRole,
+                hasToolCalls: prevHasToolCalls,
+                toolCallsCount: prevMsg.tool_calls?.length || 0,
+              },
+              currentMessage: {
+                index: idx,
+                type: currentType,
+                role: currentRole,
+                hasToolCalls: currentHasToolCalls,
+              },
+            };
+          }
+
+          return null;
+        })
+        .filter((v) => v !== null),
+    },
+  );
+
   config.writer?.({
     type: "invoking_model",
     timestamp: Date.now(),
@@ -841,15 +920,15 @@ export async function generateAction(
   try {
     // Pass base messages - FallbackRunnable will select correct provider-specific messages
     response = await modelWithTools.invoke(baseMessagesForFallback);
-    
+
     config.writer?.({
       type: "model_response",
       timestamp: Date.now(),
       hasToolCalls: !!response.tool_calls?.length,
       toolCallsCount: response.tool_calls?.length || 0,
-      toolNames: response.tool_calls?.map(tc => tc.name) || [],
+      toolNames: response.tool_calls?.map((tc) => tc.name) || [],
     });
-    
+
     logger.error("[Gemini Debug] Model invocation successful", {
       responseType: response.constructor?.name,
       hasToolCalls: !!response.tool_calls?.length,
@@ -861,11 +940,14 @@ export async function generateAction(
       timestamp: Date.now(),
       error: error instanceof Error ? error.message : String(error),
     });
-    
+
     logger.error("[Gemini Debug] Model invocation failed", {
       error: error instanceof Error ? error.message : String(error),
-      errorName: error instanceof Error ? error.name : 'Unknown',
-      errorStack: error instanceof Error ? error.stack?.split('\n').slice(0, 5) : undefined,
+      errorName: error instanceof Error ? error.name : "Unknown",
+      errorStack:
+        error instanceof Error
+          ? error.stack?.split("\n").slice(0, 5)
+          : undefined,
     });
     throw error;
   }
@@ -879,7 +961,7 @@ export async function generateAction(
       timestamp: Date.now(),
       reason: "no_tool_calls",
     });
-    
+
     logger.info("No tool calls found. Stopping sandbox...");
     newSandboxSessionId = await stopSandbox(state.sandboxSessionId);
   }
@@ -902,20 +984,26 @@ export async function generateAction(
 
   // Safe access for taskPlan - use created default or state taskPlan
   const effectiveTaskPlan = taskPlanToReturn || state.taskPlan;
-  const activePlanItems = effectiveTaskPlan ? getActivePlanItems(effectiveTaskPlan) : [];
-  const currentTaskPlan = activePlanItems.length > 0 ? getCurrentPlanItem(activePlanItems).plan : "No task plan";
-  
+  const activePlanItems = effectiveTaskPlan
+    ? getActivePlanItems(effectiveTaskPlan)
+    : [];
+  const currentTaskPlan =
+    activePlanItems.length > 0
+      ? getCurrentPlanItem(activePlanItems).plan
+      : "No task plan";
+
   config.writer?.({
     type: "action_generated",
     timestamp: Date.now(),
     currentTask: currentTaskPlan,
     hasContent: !!getMessageContentString(response.content),
-    toolCalls: response.tool_calls?.map((tc) => ({
-      name: tc.name,
-      argsPreview: JSON.stringify(tc.args).substring(0, 100),
-    })) || [],
+    toolCalls:
+      response.tool_calls?.map((tc) => ({
+        name: tc.name,
+        argsPreview: JSON.stringify(tc.args).substring(0, 100),
+      })) || [],
   });
-  
+
   logger.info("Generated action", {
     currentTask: currentTaskPlan,
     ...(getMessageContentString(response.content) && {
@@ -935,6 +1023,6 @@ export async function generateAction(
     internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
     ...(finalTaskPlan && { taskPlan: finalTaskPlan }),
-    tokenData: trackCachePerformance(response, modelName),
+    tokenData: trackCachePerformance(response as AIMessageChunk, modelName),
   };
 }
