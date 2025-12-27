@@ -69,25 +69,25 @@ export type LoopRecommendation =
  */
 export const LOOP_DETECTION_CONFIG = {
   /** Number of consecutive identical tool calls to consider as a loop (warn) */
-  LOOP_THRESHOLD: 4,  // Increased from 3 to reduce false positives (build→fix→retry is legitimate)
+  LOOP_THRESHOLD: 5,  // Increased from 4 to reduce false positives (build→fix→retry is legitimate)
   /** Number of consecutive identical tool calls to force task completion */
-  FORCE_COMPLETION_THRESHOLD: 6,  // Increased from 5 for more tolerance
+  FORCE_COMPLETION_THRESHOLD: 8,  // Increased from 6 for more tolerance
   /** Number of recent messages to analyze for loop detection */
   MESSAGES_TO_ANALYZE: 30,
   /** Threshold for read-only loop detection (% of read operations) */
-  READ_ONLY_THRESHOLD: 0.8,
+  READ_ONLY_THRESHOLD: 0.85,  // Increased from 0.8 to be more lenient
   /** Minimum tool calls to analyze for patterns */
   MIN_CALLS_FOR_PATTERN: 6,
   /** Threshold for similar tool detection (same tool, different args) */
-  SIMILAR_TOOL_THRESHOLD: 5,  // Increased from 4
+  SIMILAR_TOOL_THRESHOLD: 6,  // Increased from 5
   /** Window size for frequency-based detection */
-  FREQUENCY_WINDOW: 15,
+  FREQUENCY_WINDOW: 20,  // Increased from 15 for larger window
   /** Frequency threshold (same tool called X times in window) */
-  FREQUENCY_THRESHOLD: 7,  // Increased from 6
+  FREQUENCY_THRESHOLD: 10,  // Increased from 7 - shell commands are common
   /** Edit loop threshold - more severe, request help earlier */
-  EDIT_LOOP_THRESHOLD: 4,  // Edit loops need human help after 4 failed attempts
+  EDIT_LOOP_THRESHOLD: 5,  // Increased from 4 - give more attempts before requesting help
   /** Maximum warnings before escalating to force_complete */
-  MAX_WARNINGS_BEFORE_ESCALATE: 2,
+  MAX_WARNINGS_BEFORE_ESCALATE: 3,  // Increased from 2 for more tolerance
   /** Minimum unique files to consider as legitimate exploration (not a loop) */
   MIN_UNIQUE_FILES_FOR_EXPLORATION: 5,
   /** Similarity threshold for chanting detection (Jaccard similarity) */
@@ -98,6 +98,8 @@ export const LOOP_DETECTION_CONFIG = {
   ERROR_RATE_THRESHOLD: 0.6,
   /** Minimum tool calls to check for error rate */
   MIN_CALLS_FOR_ERROR_RATE: 5,
+  /** Minimum unique shell commands to consider as legitimate work (not a loop) */
+  MIN_UNIQUE_SHELL_COMMANDS: 4,
 };
 
 /** Tools that are considered "read-only" operations */
@@ -1176,6 +1178,7 @@ function detectReadEditFailLoop(toolCalls: ToolCallSignature[], messages: BaseMe
 /**
  * Detects frequency-based loops (same tool called too often in window)
  * Improved: Don't trigger if reading many different files
+ * Enhanced: Better handling of shell commands - distinguish different commands
  */
 function detectFrequencyLoop(toolCalls: ToolCallSignature[]): {
   isFrequent: boolean;
@@ -1188,18 +1191,45 @@ function detectFrequencyLoop(toolCalls: ToolCallSignature[]): {
   
   const recentCalls = toolCalls.slice(-LOOP_DETECTION_CONFIG.FREQUENCY_WINDOW);
   
-  // Count tool usage
+  // Count tool usage - with better shell command normalization
   const toolCount = new Map<string, number>();
-  // Also track unique targets per tool
+  // Track unique targets per tool
   const toolTargets = new Map<string, Set<string>>();
+  // Track unique full shell commands (for diversity check)
+  const uniqueShellCommands = new Set<string>();
+  // Track identical shell commands (exact same command)
+  const identicalShellCommands = new Map<string, number>();
   
   for (const tc of recentCalls) {
-    // Normalize shell commands
     let toolKey = tc.name;
+    
     if (tc.name === "shell" && typeof tc.fullArgs.command === "string") {
-      const baseCmd = tc.fullArgs.command.trim().split(" ")[0];
-      toolKey = `shell:${baseCmd}`;
+      const fullCommand = tc.fullArgs.command.trim();
+      const parts = fullCommand.split(/\s+/);
+      const baseCmd = parts[0];
+      
+      // Track unique full commands for diversity check
+      uniqueShellCommands.add(fullCommand);
+      
+      // Track identical commands
+      identicalShellCommands.set(fullCommand, (identicalShellCommands.get(fullCommand) || 0) + 1);
+      
+      // For frequency counting, use more specific key:
+      // - For yarn/npm/pnpm: include the subcommand (yarn lint, yarn build, etc.)
+      // - For other commands: include first 2 parts or the whole command if short
+      if (["yarn", "npm", "pnpm", "npx"].includes(baseCmd)) {
+        // Include subcommand: yarn lint, yarn build, yarn test, etc.
+        const subCmd = parts.slice(0, 3).join(" ");  // e.g., "yarn run lint" or "yarn lint"
+        toolKey = `shell:${subCmd}`;
+      } else if (["cat", "head", "tail", "grep", "ls", "find"].includes(baseCmd)) {
+        // For read commands, use base command only (target file tracked separately)
+        toolKey = `shell:${baseCmd}`;
+      } else {
+        // For other commands, use first 2 parts
+        toolKey = `shell:${parts.slice(0, 2).join(" ")}`;
+      }
     }
+    
     toolCount.set(toolKey, (toolCount.get(toolKey) || 0) + 1);
     
     // Track unique targets
@@ -1210,6 +1240,35 @@ function detectFrequencyLoop(toolCalls: ToolCallSignature[]): {
       }
       toolTargets.get(toolKey)!.add(target);
     }
+  }
+  
+  // If there are many unique shell commands, it's legitimate work, not a loop
+  // This handles cases where agent runs: yarn lint, yarn build, yarn test, etc.
+  if (uniqueShellCommands.size >= LOOP_DETECTION_CONFIG.MIN_UNIQUE_SHELL_COMMANDS) {
+    // Check if any single command is repeated too many times
+    let maxIdenticalCount = 0;
+    let maxIdenticalCmd = "";
+    for (const [cmd, count] of identicalShellCommands) {
+      if (count > maxIdenticalCount) {
+        maxIdenticalCount = count;
+        maxIdenticalCmd = cmd;
+      }
+    }
+    
+    // Only flag as loop if same exact command repeated many times
+    // AND it's more than half of all shell commands
+    const totalShellCalls = recentCalls.filter(tc => tc.name === "shell").length;
+    if (maxIdenticalCount >= LOOP_DETECTION_CONFIG.FREQUENCY_THRESHOLD && 
+        maxIdenticalCount > totalShellCalls * 0.6) {
+      return {
+        isFrequent: true,
+        toolName: `shell:${maxIdenticalCmd.substring(0, 50)}`,
+        count: maxIdenticalCount,
+      };
+    }
+    
+    // Many unique commands = legitimate work
+    return { isFrequent: false, toolName: null, count: 0 };
   }
   
   // Find most frequent tool
