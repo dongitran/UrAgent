@@ -99,11 +99,25 @@ export class FallbackRunnable<
       this.getPrimaryModel(),
     );
 
+    logger.error(`[Gemini Debug] FallbackRunnable.invoke starting`, {
+      task: this.task,
+      totalConfigs: modelConfigs.length,
+      configProviders: modelConfigs.map(c => c.provider),
+      hasProviderMessages: !!this.providerMessages,
+      providerMessageKeys: this.providerMessages ? Object.keys(this.providerMessages) : [],
+    });
+
     let lastError: Error | undefined;
 
     for (let i = 0; i < modelConfigs.length; i++) {
       const modelConfig = modelConfigs[i];
       const modelKey = `${modelConfig.provider}:${modelConfig.modelName}`;
+
+      logger.error(`[Gemini Debug] Trying model ${i + 1}/${modelConfigs.length}`, {
+        modelKey,
+        provider: modelConfig.provider,
+        modelName: modelConfig.modelName,
+      });
 
       if (!this.modelManager.isCircuitClosed(modelKey)) {
         logger.warn(`Circuit breaker open for ${modelKey}, skipping`);
@@ -132,9 +146,18 @@ export class FallbackRunnable<
             tools: providerSpecificTools,
             kwargs: extractedTools?.kwargs || {},
           };
+          logger.error(`[Gemini Debug] Using provider-specific tools`, {
+            provider: modelConfig.provider,
+            toolCount: providerSpecificTools.length,
+          });
         } else {
           // Fall back to extracted bound tools from primary model
           toolsToUse = this.extractBoundTools();
+          logger.error(`[Gemini Debug] Using extracted bound tools`, {
+            provider: modelConfig.provider,
+            hasTools: !!toolsToUse,
+            toolCount: toolsToUse?.tools?.length || 0,
+          });
         }
 
         if (
@@ -163,19 +186,44 @@ export class FallbackRunnable<
           runnableToUse = runnableToUse.withConfig(config);
         }
 
+        const messagesToInvoke = useProviderMessages(
+          input,
+          this.providerMessages,
+          modelConfig.provider,
+        );
+        
+        logger.error(`[Gemini Debug] About to invoke model`, {
+          provider: modelConfig.provider,
+          modelKey,
+          inputType: Array.isArray(input) ? 'array' : typeof input,
+          inputLength: Array.isArray(input) ? input.length : 'N/A',
+          messagesToInvokeType: Array.isArray(messagesToInvoke) ? 'array' : typeof messagesToInvoke,
+          messagesToInvokeLength: Array.isArray(messagesToInvoke) ? messagesToInvoke.length : 'N/A',
+          usedProviderMessages: messagesToInvoke !== input,
+          hasProviderMessagesForProvider: !!this.providerMessages?.[modelConfig.provider],
+          providerMessagesLength: this.providerMessages?.[modelConfig.provider]?.length || 0,
+        });
+
         const result = await runnableToUse.invoke(
-          useProviderMessages(
-            input,
-            this.providerMessages,
-            modelConfig.provider,
-          ),
+          messagesToInvoke,
           options,
         );
+        
+        logger.error(`[Gemini Debug] Model invocation successful`, {
+          provider: modelConfig.provider,
+          modelKey,
+        });
+        
         this.modelManager.recordSuccess(modelKey);
         return result;
       } catch (error) {
-        logger.warn(
-          `${modelKey} failed: ${error instanceof Error ? error.message : String(error)}`,
+        logger.error(
+          `[Gemini Debug] ${modelKey} failed`,
+          {
+            provider: modelConfig.provider,
+            error: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined,
+          }
         );
         lastError = error instanceof Error ? error : new Error(String(error));
         this.modelManager.recordFailure(modelKey);

@@ -67,6 +67,13 @@ export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
+  // Emit custom event: Starting plan generation
+  config.writer?.({
+    type: "planner_start",
+    timestamp: Date.now(),
+    message: "Starting plan generation",
+  });
+
   const model = await loadModel(config, LLMTask.PLANNER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.PLANNER);
@@ -75,6 +82,13 @@ export async function generatePlan(
     LLMTask.PLANNER,
   );
   const sessionPlanTool = createSessionPlanToolFields();
+  
+  config.writer?.({
+    type: "planner_binding_tools",
+    timestamp: Date.now(),
+    toolName: sessionPlanTool.name,
+  });
+  
   const modelWithTools = model.bindTools([sessionPlanTool], {
     tool_choice: sessionPlanTool.name,
     ...(modelSupportsParallelToolCallsParam
@@ -104,6 +118,13 @@ export async function generatePlan(
     throw new Error("No messages to process.");
   }
 
+  config.writer?.({
+    type: "planner_invoking_model",
+    timestamp: Date.now(),
+    messageCount: inputMessages.length,
+    modelName,
+  });
+
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
@@ -113,6 +134,12 @@ export async function generatePlan(
       },
       ...inputMessages,
     ]);
+
+  config.writer?.({
+    type: "planner_model_response",
+    timestamp: Date.now(),
+    hasToolCalls: !!response.tool_calls?.length,
+  });
 
   // Filter out empty plans
   response.tool_calls = response.tool_calls?.map((tc) => {
@@ -144,6 +171,13 @@ export async function generatePlan(
   const proposedPlanArgs = toolCall.args as z.infer<
     typeof sessionPlanTool.schema
   >;
+
+  config.writer?.({
+    type: "plan_generated",
+    timestamp: Date.now(),
+    title: proposedPlanArgs.title,
+    planItemsCount: proposedPlanArgs.plan.length,
+  });
 
   const toolResponse = new ToolMessage({
     id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,

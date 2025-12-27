@@ -187,6 +187,32 @@ function createToolsAndPrompt(
     ...state.reviewerMessages,
   ];
 
+  const geminiMessages = [
+    {
+      role: "system",
+      content: formatCacheablePrompt(state, config, {
+        excludeCacheControl: true,
+      }),
+    },
+    {
+      role: "user",
+      content: formatUserConversationHistoryMessage(state.internalMessages, {
+        excludeCacheControl: true,
+      }),
+    },
+    ...state.reviewerMessages,
+  ];
+
+  logger.error("[Gemini Debug] Reviewer message structure prepared", {
+    totalReviewerMessages: state.reviewerMessages.length,
+    reviewerMessageTypes: state.reviewerMessages.map((m: any) => ({
+      type: m.constructor.name,
+      role: m.role || m._getType?.(),
+      hasToolCalls: !!m.tool_calls?.length,
+    })),
+    geminiMessagesCount: geminiMessages.length,
+  });
+
   return {
     providerTools: {
       anthropic: anthropicTools,
@@ -196,7 +222,7 @@ function createToolsAndPrompt(
     providerMessages: {
       anthropic: anthropicMessages,
       openai: nonAnthropicMessages,
-      "google-genai": nonAnthropicMessages,
+      "google-genai": geminiMessages,
     },
   };
 }
@@ -212,6 +238,14 @@ export async function generateReviewActions(
     LLMTask.REVIEWER,
   );
   const isAnthropicModel = modelName.includes("claude-");
+  const isGeminiModel = modelName.includes("gemini");
+
+  logger.error("[Gemini Debug] Reviewer model detection", {
+    modelName,
+    isAnthropicModel,
+    isGeminiModel,
+    willUseProvider: isAnthropicModel ? "anthropic" : isGeminiModel ? "google-genai" : "openai",
+  });
 
   const { providerTools, providerMessages } = createToolsAndPrompt(
     state,
@@ -234,9 +268,30 @@ export async function generateReviewActions(
     },
   );
 
-  const response = await modelWithTools.invoke(
-    isAnthropicModel ? providerMessages.anthropic : providerMessages.openai,
-  );
+  const messagesToUse = isAnthropicModel 
+    ? providerMessages.anthropic 
+    : isGeminiModel 
+      ? providerMessages["google-genai"]
+      : providerMessages.openai;
+
+  // For FallbackRunnable, always pass anthropic messages as the base input
+  // FallbackRunnable will use providerMessages to select the correct messages for each provider
+  const baseMessagesForFallback = providerMessages.anthropic;
+
+  logger.error("[Gemini Debug] Reviewer final messages", {
+    messageCount: messagesToUse.length,
+    baseMessagesCount: baseMessagesForFallback.length,
+    willUseProviderMessages: true,
+    messageSequence: messagesToUse.map((m: any, idx: number) => ({
+      index: idx,
+      type: m.constructor?.name || typeof m,
+      role: m.role || m._getType?.(),
+      hasToolCalls: !!m.tool_calls?.length,
+    })),
+  });
+
+  // Pass base messages - FallbackRunnable will select correct provider-specific messages
+  const response = await modelWithTools.invoke(baseMessagesForFallback);
 
   logger.info("Generated review actions", {
     ...(getMessageContentString(response.content) && {

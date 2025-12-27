@@ -29,9 +29,13 @@ export function createShellTool(
 
         if (response.exitCode !== 0) {
           const errorResult = response.result ?? response.artifacts?.stdout;
-          throw new Error(
-            `Command failed. Exit code: ${response.exitCode}\nResult: ${errorResult}`,
-          );
+          let errorMessage = `Command failed. Exit code: ${response.exitCode}\nResult: ${errorResult}`;
+          
+          if (response.exitCode === -1) {
+            errorMessage = `Command failed. Exit code: -1 (Daytona sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal output: ${errorResult || 'No output'}`;
+          }
+          
+          throw new Error(errorMessage);
         }
         return {
           result: response.result ?? `exit code: ${response.exitCode}`,

@@ -46,9 +46,13 @@ export function createInstallDependenciesTool(
 
         if (response.exitCode !== 0) {
           const errorResult = response.result ?? response.artifacts?.stdout;
-          throw new Error(
-            `Failed to install dependencies. Exit code: ${response.exitCode}\nError: ${errorResult}`,
-          );
+          let errorMessage = `Failed to install dependencies. Exit code: ${response.exitCode}\nError: ${errorResult}`;
+          
+          if (response.exitCode === -1) {
+            errorMessage = `Failed to install dependencies. Exit code: -1 (Daytona sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal error: ${errorResult || 'No output'}`;
+          }
+          
+          throw new Error(errorMessage);
         }
 
         return {
