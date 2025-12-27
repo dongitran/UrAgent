@@ -12,7 +12,7 @@ import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
 import { v4 as uuidv4 } from "uuid";
 
-const logger = createLogger(LogLevel.INFO, "ReadWriteUtil");
+const logger = createLogger(LogLevel.DEBUG, "ReadWriteUtil");
 
 async function handleCreateFile(
   sandbox: Sandbox | null,
@@ -59,6 +59,14 @@ async function readFileFunc(inputs: {
 }> {
   const { sandbox, filePath, workDir, config } = inputs;
 
+  logger.debug("[DAYTONA] readFile called", {
+    sandboxId: sandbox?.id,
+    sandboxState: sandbox?.state,
+    filePath,
+    workDir,
+    isLocalMode: isLocalMode(config),
+  });
+
   if (isLocalMode(config)) {
     return readFileLocal(filePath, workDir);
   }
@@ -66,14 +74,38 @@ async function readFileFunc(inputs: {
   const executor = createShellExecutor(config);
 
   try {
+    const command = `cat "${filePath}"`;
+    logger.debug("[DAYTONA] Executing read file command", {
+      sandboxId: sandbox?.id,
+      command,
+      workDir,
+    });
+
+    const startTime = Date.now();
     const readOutput = await executor.executeCommand({
-      command: `cat "${filePath}"`,
+      command,
       workdir: workDir,
       sandbox: sandbox ?? undefined,
+    });
+    const duration = Date.now() - startTime;
+
+    logger.debug("[DAYTONA] Read file response", {
+      sandboxId: sandbox?.id,
+      filePath,
+      durationMs: duration,
+      exitCode: readOutput.exitCode,
+      resultLength: readOutput.result?.length ?? 0,
+      resultPreview: readOutput.result?.substring(0, 200) ?? "null",
     });
 
     if (readOutput.exitCode !== 0) {
       const errorResult = readOutput.result ?? readOutput.artifacts?.stdout;
+      logger.warn("[DAYTONA] Read file failed", {
+        sandboxId: sandbox?.id,
+        filePath,
+        exitCode: readOutput.exitCode,
+        errorResult: errorResult?.substring(0, 500),
+      });
       return {
         success: false,
         output: `FAILED TO READ FILE from sandbox '${filePath}'. Exit code: ${readOutput.exitCode}.\nResult: ${errorResult}`,
@@ -86,6 +118,11 @@ async function readFileFunc(inputs: {
     };
   } catch (e: any) {
     if (e instanceof Error && e.message.includes("No such file or directory")) {
+      logger.debug("[DAYTONA] File not found, attempting to create", {
+        sandboxId: sandbox?.id,
+        filePath,
+      });
+      
       let createOutput;
       if (config && isLocalMode(config)) {
         // Local mode: use handleCreateFileLocal
@@ -108,8 +145,10 @@ async function readFileFunc(inputs: {
     }
 
     logger.error(
-      `Exception while trying to read file '${filePath}' from sandbox via cat:`,
+      `[DAYTONA] Exception while trying to read file '${filePath}' from sandbox via cat:`,
       {
+        sandboxId: sandbox?.id,
+        sandboxState: sandbox?.state,
         ...(e instanceof Error
           ? { name: e.name, message: e.message, stack: e.stack }
           : { error: e }),
@@ -121,6 +160,11 @@ async function readFileFunc(inputs: {
       const errorResult = errorFields.result ?? errorFields.artifacts?.stdout;
 
       outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorResult}`;
+      logger.error("[DAYTONA] Read file sandbox error fields", {
+        sandboxId: sandbox?.id,
+        filePath,
+        errorFields: JSON.stringify(errorFields).substring(0, 1000),
+      });
     } else {
       outputMessage += ` Error: ${(e as Error).message || String(e)}`;
     }
@@ -156,6 +200,15 @@ async function writeFileFunc(inputs: {
 }> {
   const { sandbox, filePath, content, workDir, config } = inputs;
 
+  logger.debug("[DAYTONA] writeFile called", {
+    sandboxId: sandbox?.id,
+    sandboxState: sandbox?.state,
+    filePath,
+    contentLength: content?.length ?? 0,
+    workDir,
+    isLocalMode: config ? isLocalMode(config) : false,
+  });
+
   // Check if we're in local mode
   if (config && isLocalMode(config)) {
     return writeFileLocal(filePath, content, workDir);
@@ -170,15 +223,40 @@ async function writeFileFunc(inputs: {
     const writeCommand = `cat > "${filePath}" << '${delimiter}'
 ${content}
 ${delimiter}`;
+    
+    logger.debug("[DAYTONA] Executing write file command", {
+      sandboxId: sandbox.id,
+      filePath,
+      contentLength: content.length,
+      workDir,
+      commandPreview: writeCommand.substring(0, 200) + "...",
+    });
+
     const executor = createShellExecutor(config);
+    const startTime = Date.now();
     const writeOutput = await executor.executeCommand({
       command: writeCommand,
       workdir: workDir,
       sandbox: sandbox ?? undefined,
     });
+    const duration = Date.now() - startTime;
+
+    logger.debug("[DAYTONA] Write file response", {
+      sandboxId: sandbox.id,
+      filePath,
+      durationMs: duration,
+      exitCode: writeOutput.exitCode,
+      result: writeOutput.result?.substring(0, 300),
+    });
 
     if (writeOutput.exitCode !== 0) {
       const errorResult = writeOutput.result ?? writeOutput.artifacts?.stdout;
+      logger.error("[DAYTONA] Write file failed", {
+        sandboxId: sandbox.id,
+        filePath,
+        exitCode: writeOutput.exitCode,
+        errorResult: errorResult?.substring(0, 500),
+      });
       return {
         success: false,
         output: `FAILED TO WRITE FILE to sandbox '${filePath}'. Exit code: ${writeOutput.exitCode}\nResult: ${errorResult}`,
@@ -190,8 +268,10 @@ ${delimiter}`;
     };
   } catch (e: any) {
     logger.error(
-      `Exception while trying to write file '${filePath}' to sandbox via cat:`,
+      `[DAYTONA] Exception while trying to write file '${filePath}' to sandbox via cat:`,
       {
+        sandboxId: sandbox?.id,
+        sandboxState: sandbox?.state,
         ...(e instanceof Error
           ? { name: e.name, message: e.message, stack: e.stack }
           : { error: e }),
@@ -203,6 +283,11 @@ ${delimiter}`;
     if (errorFields) {
       const errorResult = errorFields.result ?? errorFields.artifacts?.stdout;
       outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorResult}`;
+      logger.error("[DAYTONA] Write file sandbox error fields", {
+        sandboxId: sandbox?.id,
+        filePath,
+        errorFields: JSON.stringify(errorFields).substring(0, 1000),
+      });
     } else {
       outputMessage += ` Error: ${(e as Error).message || String(e)}`;
     }
