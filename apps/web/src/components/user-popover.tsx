@@ -52,7 +52,7 @@ export function UserPopover({ className }: UserPopoverProps) {
       if (response.ok) {
         const data = await response.json();
         localStorage.removeItem(GITHUB_APP_INSTALLED_KEY);
-        
+
         // If Keycloak logout URL is provided, redirect to it
         if (data.redirectUrl && data.provider === "keycloak") {
           window.location.href = data.redirectUrl;
@@ -136,7 +136,10 @@ export function UserPopover({ className }: UserPopoverProps) {
           className={cn("hover:bg-accent h-8 w-8 rounded-full p-0", className)}
         >
           <img
-            src={currentUser.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.login)}&background=random`}
+            src={
+              currentUser.avatar_url ||
+              `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.login)}&background=random`
+            }
             alt={`${currentUser.login} avatar`}
             className="h-6 w-6 rounded-full"
           />
@@ -150,7 +153,10 @@ export function UserPopover({ className }: UserPopoverProps) {
           {/* Current User Info */}
           <div className="mb-4 flex items-center gap-3">
             <img
-              src={currentUser.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.login)}&background=random`}
+              src={
+                currentUser.avatar_url ||
+                `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.login)}&background=random`
+              }
               alt={`${currentUser.login} avatar`}
               className="h-10 w-10 rounded-full"
             />
@@ -164,7 +170,9 @@ export function UserPopover({ className }: UserPopoverProps) {
                 {currentUser.email && (
                   <>
                     <span className="mx-1">•</span>
-                    <span className="truncate text-xs">{currentUser.email}</span>
+                    <span className="truncate text-xs">
+                      {currentUser.email}
+                    </span>
                   </>
                 )}
               </div>
@@ -172,49 +180,51 @@ export function UserPopover({ className }: UserPopoverProps) {
           </div>
 
           {/* GitHub Installation Selector (only show if GitHub auth and multiple installations) */}
-          {authProvider === "github" && installations.length > 1 && currentInstallation && (
-            <>
-              <Separator className="mb-4" />
-              <div className="mb-4 space-y-2">
-                <label className="text-sm font-medium">GitHub Account</label>
-                <Select
-                  value={currentInstallation.id.toString()}
-                  onValueChange={handleValueChange}
-                >
-                  <SelectTrigger className="w-full">
-                    <div className="flex flex-1 items-center gap-2">
-                      <img
-                        src={currentInstallation.avatarUrl}
-                        alt={`${currentInstallation.accountName} avatar`}
-                        className="h-4 w-4 rounded-full"
-                      />
-                      <span className="truncate">
-                        {currentInstallation.accountName}
-                      </span>
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {installations.map((installation) => (
-                      <SelectItem
-                        key={installation.id}
-                        value={installation.id.toString()}
-                      >
-                        <div className="flex items-center gap-2">
-                          <img
-                            src={installation.avatarUrl}
-                            alt={`${installation.accountName} avatar`}
-                            className="h-4 w-4 rounded-full"
-                          />
-                          <span>{installation.accountName}</span>
-                          {getAccountIcon(installation.accountType)}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
-          )}
+          {authProvider === "github" &&
+            installations.length > 1 &&
+            currentInstallation && (
+              <>
+                <Separator className="mb-4" />
+                <div className="mb-4 space-y-2">
+                  <label className="text-sm font-medium">GitHub Account</label>
+                  <Select
+                    value={currentInstallation.id.toString()}
+                    onValueChange={handleValueChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <div className="flex flex-1 items-center gap-2">
+                        <img
+                          src={currentInstallation.avatarUrl}
+                          alt={`${currentInstallation.accountName} avatar`}
+                          className="h-4 w-4 rounded-full"
+                        />
+                        <span className="truncate">
+                          {currentInstallation.accountName}
+                        </span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {installations.map((installation) => (
+                        <SelectItem
+                          key={installation.id}
+                          value={installation.id.toString()}
+                        >
+                          <div className="flex items-center gap-2">
+                            <img
+                              src={installation.avatarUrl}
+                              alt={`${installation.accountName} avatar`}
+                              className="h-4 w-4 rounded-full"
+                            />
+                            <span>{installation.accountName}</span>
+                            {getAccountIcon(installation.accountType)}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
 
           <Separator className="mb-4" />
 

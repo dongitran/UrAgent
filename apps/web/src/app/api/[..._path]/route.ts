@@ -60,9 +60,11 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
       // Verify authentication (Keycloak or GitHub or default config)
       const authResult = await verifyRequestAuth(req);
       if (!authResult.authenticated) {
-        throw new Error("Unauthorized: " + (authResult.error || "Not authenticated"));
+        throw new Error(
+          "Unauthorized: " + (authResult.error || "Not authenticated"),
+        );
       }
-      
+
       // Get installation ID from cookie or fall back to default from env
       let installationId = req.cookies.get(
         GITHUB_INSTALLATION_ID_COOKIE,
@@ -77,7 +79,7 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
           "No GitHub installation ID found. GitHub App must be installed first.",
         );
       }
-      
+
       const [installationToken, installationName] = await Promise.all([
         getGitHubInstallationTokenOrThrow(installationId, encryptionKey),
         getInstallationNameFromReq(req.clone(), installationId),

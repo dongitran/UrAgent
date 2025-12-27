@@ -21,7 +21,7 @@ function getAccessToken(req: NextRequest): string | null {
   if (refreshedToken) {
     return refreshedToken;
   }
-  
+
   // Fall back to cookie
   return getKeycloakAccessToken(req);
 }
@@ -46,7 +46,9 @@ function isTokenExpiredOrExpiring(token: string): boolean {
 /**
  * Try to refresh Keycloak token if it's expired
  */
-async function tryRefreshKeycloakToken(req: NextRequest): Promise<string | null> {
+async function tryRefreshKeycloakToken(
+  req: NextRequest,
+): Promise<string | null> {
   const refreshToken = getKeycloakRefreshToken(req);
   if (!refreshToken) {
     return null;
@@ -76,7 +78,12 @@ function hasDefaultConfig(): boolean {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
-  return !!(defaultInstallationId && defaultInstallationName && appId && privateKey);
+  return !!(
+    defaultInstallationId &&
+    defaultInstallationName &&
+    appId &&
+    privateKey
+  );
 }
 
 /**
@@ -89,7 +96,7 @@ export async function GET(request: NextRequest) {
       // First check for refreshed token from middleware (via header)
       // Then fall back to cookie
       let keycloakToken = getAccessToken(request);
-      
+
       // If no token or token is expired, try to refresh
       if (!keycloakToken || isTokenExpiredOrExpiring(keycloakToken)) {
         const refreshedToken = await tryRefreshKeycloakToken(request);
@@ -97,9 +104,9 @@ export async function GET(request: NextRequest) {
           keycloakToken = refreshedToken;
         }
       }
-      
+
       if (!keycloakToken) {
-        return NextResponse.json({ 
+        return NextResponse.json({
           authenticated: false,
           provider: "keycloak",
         });
@@ -111,20 +118,20 @@ export async function GET(request: NextRequest) {
         // Check if token is still valid (not expired)
         const tokenData = decoded as any;
         if (tokenData.exp && tokenData.exp * 1000 < Date.now()) {
-          return NextResponse.json({ 
+          return NextResponse.json({
             authenticated: false,
             provider: "keycloak",
             reason: "token_expired",
           });
         }
-        
-        return NextResponse.json({ 
+
+        return NextResponse.json({
           authenticated: true,
           provider: "keycloak",
         });
       }
 
-      return NextResponse.json({ 
+      return NextResponse.json({
         authenticated: false,
         provider: "keycloak",
         reason: "invalid_token",
@@ -134,7 +141,7 @@ export async function GET(request: NextRequest) {
     // Keycloak NOT enabled - check GitHub OAuth
     const githubAuthenticated = isAuthenticated(request);
     if (githubAuthenticated) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         authenticated: true,
         provider: "github",
       });
@@ -142,13 +149,13 @@ export async function GET(request: NextRequest) {
 
     // Check default config
     if (hasDefaultConfig()) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         authenticated: true,
         provider: "default",
       });
     }
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       authenticated: false,
     });
   } catch (error) {

@@ -149,9 +149,10 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   // URL state management - only branch is in URL, repo is stored in state/localStorage
   const [selectedBranchParam, setSelectedBranchParam] = useQueryState("branch");
-  
+
   // Repository selection state (not in URL) - initialize with default from env
-  const [selectedRepositoryState, setSelectedRepositoryState] = useState<TargetRepository | null>(defaultEnvRepo);
+  const [selectedRepositoryState, setSelectedRepositoryState] =
+    useState<TargetRepository | null>(defaultEnvRepo);
 
   // Track if auto-selection has been attempted to prevent re-triggering
   const hasAutoSelectedRef = useRef(false);

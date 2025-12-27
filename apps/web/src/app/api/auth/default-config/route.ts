@@ -7,7 +7,8 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   try {
     const defaultInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
-    const defaultInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
+    const defaultInstallationName =
+      process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
     const appId = process.env.GITHUB_APP_ID;
     const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
@@ -33,7 +34,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error checking default config:", error);
     return NextResponse.json(
-      { hasDefaultConfig: false, error: "Failed to check default configuration" },
+      {
+        hasDefaultConfig: false,
+        error: "Failed to check default configuration",
+      },
       { status: 500 },
     );
   }

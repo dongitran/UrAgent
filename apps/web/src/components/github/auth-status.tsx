@@ -27,7 +27,9 @@ function AuthStatusContent() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [defaultConfig, setDefaultConfig] = useState<DefaultConfig | null>(null);
+  const [defaultConfig, setDefaultConfig] = useState<DefaultConfig | null>(
+    null,
+  );
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [isCheckingConfig, setIsCheckingConfig] = useState(true);
 
@@ -84,33 +86,57 @@ function AuthStatusContent() {
   }, [githubToken, router]);
 
   // Compute display states
-  const showKeycloakLogin = authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !isAuth;
-  const showGetStarted = !authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !isAuth;
+  const showKeycloakLogin =
+    authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !isAuth;
+  const showGetStarted =
+    !authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !isAuth;
   const showInstallApp =
-    !authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
-  const showLoading = !authConfig?.keycloakEnabled && !defaultConfig?.hasDefaultConfig && !showGetStarted && !showInstallApp && !githubToken;
+    !authConfig?.keycloakEnabled &&
+    !defaultConfig?.hasDefaultConfig &&
+    !showGetStarted &&
+    !hasGitHubAppInstalled &&
+    !isTokenLoading;
+  const showLoading =
+    !authConfig?.keycloakEnabled &&
+    !defaultConfig?.hasDefaultConfig &&
+    !showGetStarted &&
+    !showInstallApp &&
+    !githubToken;
 
   // Redirect when all conditions are met (non-default config flow)
   useEffect(() => {
-    if (!defaultConfig?.hasDefaultConfig && !showGetStarted && !showInstallApp && !showLoading && githubToken) {
+    if (
+      !defaultConfig?.hasDefaultConfig &&
+      !showGetStarted &&
+      !showInstallApp &&
+      !showLoading &&
+      githubToken
+    ) {
       router.push("/chat");
     }
-  }, [defaultConfig, showGetStarted, showInstallApp, showLoading, githubToken, router]);
+  }, [
+    defaultConfig,
+    showGetStarted,
+    showInstallApp,
+    showLoading,
+    githubToken,
+    router,
+  ]);
 
   const checkAuthConfig = async () => {
     try {
       setIsCheckingConfig(true);
-      
+
       // Check default config
       const defaultConfigResponse = await fetch("/api/auth/default-config");
       const defaultConfigData = await defaultConfigResponse.json();
       setDefaultConfig(defaultConfigData);
-      
+
       // Check auth config (keycloak enabled, etc.)
       const authConfigResponse = await fetch("/api/auth/config");
       const authConfigData = await authConfigResponse.json();
       setAuthConfig(authConfigData);
-      
+
       // If we have default config, we can skip auth check
       if (defaultConfigData.hasDefaultConfig) {
         setIsAuth(true);
@@ -157,14 +183,15 @@ function AuthStatusContent() {
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <UrAgentLogo width={150} height={24} />
+              <UrAgentLogo
+                width={150}
+                height={24}
+              />
               <h1 className="text-xl font-semibold tracking-tight">
                 Loading...
               </h1>
             </div>
-            <p className="text-muted-foreground">
-              Checking configuration...
-            </p>
+            <p className="text-muted-foreground">Checking configuration...</p>
           </div>
         </div>
       </div>
@@ -180,13 +207,17 @@ function AuthStatusContent() {
           <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
             <div className="flex flex-col gap-4 border-b p-6">
               <div className="flex flex-col items-start gap-2">
-                <UrAgentLogo width={150} height={24} />
+                <UrAgentLogo
+                  width={150}
+                  height={24}
+                />
                 <h1 className="text-xl font-semibold tracking-tight">
                   Loading...
                 </h1>
               </div>
               <p className="text-muted-foreground">
-                Setting up with default configuration ({defaultConfig.installationName})...
+                Setting up with default configuration (
+                {defaultConfig.installationName})...
               </p>
             </div>
           </div>
@@ -204,7 +235,10 @@ function AuthStatusContent() {
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <UrAgentLogo width={150} height={24} />
+              <UrAgentLogo
+                width={150}
+                height={24}
+              />
               <h1 className="text-xl font-semibold tracking-tight">
                 Welcome to UrAgent
               </h1>
@@ -233,7 +267,10 @@ function AuthStatusContent() {
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <UrAgentLogo width={150} height={24} />
+              <UrAgentLogo
+                width={150}
+                height={24}
+              />
               <h1 className="text-xl font-semibold tracking-tight">
                 Get started
               </h1>
@@ -263,7 +300,10 @@ function AuthStatusContent() {
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <UrAgentLogo width={150} height={24} />
+              <UrAgentLogo
+                width={150}
+                height={24}
+              />
               <h1 className="text-xl font-semibold tracking-tight">
                 One more step
               </h1>
@@ -312,7 +352,10 @@ function AuthStatusContent() {
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <UrAgentLogo width={150} height={24} />
+              <UrAgentLogo
+                width={150}
+                height={24}
+              />
               <h1 className="text-xl font-semibold tracking-tight">
                 Loading...
               </h1>

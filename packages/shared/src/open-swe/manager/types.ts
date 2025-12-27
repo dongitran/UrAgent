@@ -26,7 +26,7 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
         const defaultOwner = process.env.DEFAULT_REPOSITORY_OWNER;
         const defaultRepo = process.env.DEFAULT_REPOSITORY_NAME;
         const defaultBranch = process.env.DEFAULT_BRANCH || "main";
-        
+
         if (defaultOwner && defaultRepo) {
           return {
             owner: defaultOwner,

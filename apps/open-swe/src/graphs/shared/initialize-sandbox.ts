@@ -203,7 +203,7 @@ export async function initializeSandbox(
 
         const eventsMessages = createEventsMessage();
         const userMessages = state.messages || [];
-        
+
         return {
           sandboxSessionId: existingSandbox.id,
           codebaseTree,
@@ -223,7 +223,7 @@ export async function initializeSandbox(
         );
         const eventsMessages = createEventsMessage();
         const userMessages = state.messages || [];
-        
+
         return {
           sandboxSessionId: existingSandbox.id,
           codebaseTree: FAILED_TO_GENERATE_TREE_MESSAGE,
@@ -372,7 +372,7 @@ export async function initializeSandbox(
 
   const eventsMessages = createEventsMessage();
   const userMessages = state.messages || [];
-  
+
   return {
     sandboxSessionId: sandbox.id,
     targetRepository,
@@ -487,7 +487,7 @@ async function initializeSandboxLocal(
 
   const eventsMessages = createEventsMessage();
   const userMessages = state.messages || [];
-  
+
   return {
     sandboxSessionId: mockSandboxId,
     targetRepository,

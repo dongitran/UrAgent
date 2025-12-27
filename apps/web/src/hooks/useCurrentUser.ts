@@ -24,7 +24,9 @@ export function useCurrentUser(): UseCurrentUserReturn {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authProvider, setAuthProvider] = useState<"keycloak" | "github" | "default" | null>(null);
+  const [authProvider, setAuthProvider] = useState<
+    "keycloak" | "github" | "default" | null
+  >(null);
   const [isDefaultConfig, setIsDefaultConfig] = useState(false);
 
   const fetchUser = useCallback(async () => {
@@ -33,7 +35,7 @@ export function useCurrentUser(): UseCurrentUserReturn {
       setError(null);
 
       const response = await fetch("/api/auth/user");
-      
+
       if (!response.ok) {
         if (response.status === 401) {
           setUser(null);
@@ -44,12 +46,13 @@ export function useCurrentUser(): UseCurrentUserReturn {
       }
 
       const data = await response.json();
-      
+
       setUser(data.user);
       setAuthProvider(data.authProvider || null);
       setIsDefaultConfig(data.isDefaultConfig || false);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to fetch user";
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to fetch user";
       setError(errorMessage);
       setUser(null);
     } finally {

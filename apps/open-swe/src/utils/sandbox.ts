@@ -34,14 +34,14 @@ export function daytonaClient(): Daytona {
 export async function stopSandbox(sandboxSessionId: string): Promise<string> {
   logger.debug("[DAYTONA] Stopping sandbox", { sandboxSessionId });
   const startTime = Date.now();
-  
+
   const sandbox = await daytonaClient().get(sandboxSessionId);
   logger.debug("[DAYTONA] Fetched sandbox for stopping", {
     sandboxSessionId,
     sandboxState: sandbox.state,
     durationMs: Date.now() - startTime,
   });
-  
+
   if (
     sandbox.state === SandboxState.STOPPED ||
     sandbox.state === SandboxState.ARCHIVED
@@ -73,14 +73,14 @@ export async function deleteSandbox(
 ): Promise<boolean> {
   logger.debug("[DAYTONA] Deleting sandbox", { sandboxSessionId });
   const startTime = Date.now();
-  
+
   try {
     const sandbox = await daytonaClient().get(sandboxSessionId);
     logger.debug("[DAYTONA] Fetched sandbox for deletion", {
       sandboxSessionId,
       sandboxState: sandbox.state,
     });
-    
+
     await daytonaClient().delete(sandbox);
     logger.debug("[DAYTONA] Sandbox deleted successfully", {
       sandboxSessionId,
@@ -91,11 +91,14 @@ export async function deleteSandbox(
     logger.error("[DAYTONA] Failed to delete sandbox", {
       sandboxSessionId,
       durationMs: Date.now() - startTime,
-      error: error instanceof Error ? {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      } : error,
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : error,
     });
     return false;
   }
@@ -107,11 +110,14 @@ async function createSandbox(attempt: number): Promise<Sandbox | null> {
     params: DEFAULT_SANDBOX_CREATE_PARAMS,
   });
   const startTime = Date.now();
-  
+
   try {
-    const sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS, {
-      timeout: 100, // 100s timeout on creation.
-    });
+    const sandbox = await daytonaClient().create(
+      DEFAULT_SANDBOX_CREATE_PARAMS,
+      {
+        timeout: 100, // 100s timeout on creation.
+      },
+    );
     logger.debug("[DAYTONA] Sandbox created successfully", {
       attempt,
       sandboxId: sandbox.id,
@@ -177,10 +183,10 @@ export async function getSandboxWithErrorHandling(
 
     logger.debug("[DAYTONA] Getting existing sandbox", { sandboxSessionId });
     const startTime = Date.now();
-    
+
     // Try to get existing sandbox
     const sandbox = await daytonaClient().get(sandboxSessionId);
-    
+
     logger.debug("[DAYTONA] Fetched existing sandbox", {
       sandboxSessionId,
       sandboxId: sandbox.id,
@@ -224,12 +230,18 @@ export async function getSandboxWithErrorHandling(
     throw new Error(`Sandbox in unrecoverable state: ${state}`);
   } catch (error) {
     // Recreate sandbox if any step fails
-    logger.info("[DAYTONA] Recreating sandbox due to error or unrecoverable state", {
-      error: error instanceof Error ? {
-        name: error.name,
-        message: error.message,
-      } : error,
-    });
+    logger.info(
+      "[DAYTONA] Recreating sandbox due to error or unrecoverable state",
+      {
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+              }
+            : error,
+      },
+    );
 
     let sandbox: Sandbox | null = null;
     let numSandboxCreateAttempts = 0;

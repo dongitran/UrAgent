@@ -12,12 +12,16 @@ import { Octokit } from "@octokit/rest";
 /**
  * Generate GitHub installation token using GitHub App credentials from environment
  */
-async function generateGitHubInstallationToken(installationId: string): Promise<string> {
+async function generateGitHubInstallationToken(
+  installationId: string,
+): Promise<string> {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
   if (!appId || !privateKey) {
-    throw new Error("Missing GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY environment variables for token generation.");
+    throw new Error(
+      "Missing GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY environment variables for token generation.",
+    );
   }
 
   const octokit = new Octokit({
@@ -78,12 +82,13 @@ export async function getGitHubTokensFromConfig(config: GraphConfig): Promise<{
   const encryptedGitHubToken = config.configurable[GITHUB_TOKEN_COOKIE];
   const encryptedInstallationToken =
     config.configurable[GITHUB_INSTALLATION_TOKEN_COOKIE];
-  
+
   // If no encrypted tokens provided, try to generate using GitHub App credentials
   if (!encryptedInstallationToken) {
     // Check if we have GitHub App credentials to generate token
     if (process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY) {
-      const generatedToken = await generateGitHubInstallationToken(installationId);
+      const generatedToken =
+        await generateGitHubInstallationToken(installationId);
       return {
         githubAccessToken: generatedToken,
         githubInstallationToken: generatedToken,

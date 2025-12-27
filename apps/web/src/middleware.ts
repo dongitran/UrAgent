@@ -4,9 +4,9 @@ import {
   GITHUB_INSTALLATION_ID_COOKIE,
 } from "@openswe/shared/constants";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
-import { 
-  KEYCLOAK_ACCESS_TOKEN_COOKIE, 
-  KEYCLOAK_REFRESH_TOKEN_COOKIE, 
+import {
+  KEYCLOAK_ACCESS_TOKEN_COOKIE,
+  KEYCLOAK_REFRESH_TOKEN_COOKIE,
   KEYCLOAK_ID_TOKEN_COOKIE,
 } from "@/lib/keycloak";
 
@@ -26,7 +26,12 @@ function hasDefaultConfig(): boolean {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
-  return !!(defaultInstallationId && defaultInstallationName && appId && privateKey);
+  return !!(
+    defaultInstallationId &&
+    defaultInstallationName &&
+    appId &&
+    privateKey
+  );
 }
 
 /**
@@ -36,7 +41,7 @@ function isKeycloakEnabled(): boolean {
   const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL;
   const keycloakRealm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM;
   const keycloakClientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID;
-  
+
   return !!(keycloakUrl && keycloakRealm && keycloakClientId);
 }
 
@@ -79,19 +84,21 @@ function isTokenExpiredOrExpiring(token: string): boolean {
  */
 function hasValidKeycloakAuth(request: NextRequest): boolean {
   const accessToken = request.cookies.get(KEYCLOAK_ACCESS_TOKEN_COOKIE)?.value;
-  const refreshToken = request.cookies.get(KEYCLOAK_REFRESH_TOKEN_COOKIE)?.value;
-  
+  const refreshToken = request.cookies.get(
+    KEYCLOAK_REFRESH_TOKEN_COOKIE,
+  )?.value;
+
   // If no tokens at all, not authenticated
   if (!accessToken && !refreshToken) {
     return false;
   }
-  
+
   // If we have a refresh token, we can refresh the access token in API routes
   // So consider it as "authenticated" for middleware purposes
   if (refreshToken) {
     return true;
   }
-  
+
   // If only access token (no refresh), check if it's expired
   if (accessToken) {
     try {
@@ -106,7 +113,7 @@ function hasValidKeycloakAuth(request: NextRequest): boolean {
       return false;
     }
   }
-  
+
   return false;
 }
 
@@ -118,9 +125,9 @@ async function refreshKeycloakToken(refreshToken: string): Promise<any> {
   const keycloakRealm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM;
   const keycloakClientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID;
   const keycloakClientSecret = process.env.KEYCLOAK_CLIENT_SECRET;
-  
+
   const tokenUrl = `${keycloakUrl}/realms/${keycloakRealm}/protocol/openid-connect/token`;
-  
+
   const params = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: keycloakClientId || "",
@@ -163,26 +170,30 @@ function getCookieOptions(maxAge?: number) {
  * Try to refresh token and return response with new cookies
  * Returns null if refresh fails
  */
-async function tryRefreshAndSetCookies(request: NextRequest): Promise<NextResponse | null> {
-  const refreshToken = request.cookies.get(KEYCLOAK_REFRESH_TOKEN_COOKIE)?.value;
+async function tryRefreshAndSetCookies(
+  request: NextRequest,
+): Promise<NextResponse | null> {
+  const refreshToken = request.cookies.get(
+    KEYCLOAK_REFRESH_TOKEN_COOKIE,
+  )?.value;
   if (!refreshToken) {
     return null;
   }
 
   try {
     const tokenData = await refreshKeycloakToken(refreshToken);
-    
+
     // Clone the request headers and add the refreshed token
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-keycloak-refreshed-token", tokenData.access_token);
-    
+
     // Create response that continues with modified request headers
     const response = NextResponse.next({
       request: {
         headers: requestHeaders,
       },
     });
-    
+
     // Set new access token in cookie for future requests
     response.cookies.set(
       KEYCLOAK_ACCESS_TOKEN_COOKIE,
@@ -207,7 +218,7 @@ async function tryRefreshAndSetCookies(request: NextRequest): Promise<NextRespon
         getCookieOptions(tokenData.expires_in),
       );
     }
-    
+
     return response;
   } catch (error) {
     console.error("Middleware: Failed to refresh Keycloak token:", error);
@@ -218,7 +229,7 @@ async function tryRefreshAndSetCookies(request: NextRequest): Promise<NextRespon
 export async function middleware(request: NextRequest) {
   // Check if Keycloak is enabled - if so, it's the ONLY auth method
   const keycloakEnabled = isKeycloakEnabled();
-  
+
   if (keycloakEnabled) {
     // Keycloak is enabled - ONLY accept Keycloak token
     const hasValidAuth = hasValidKeycloakAuth(request);
@@ -245,10 +256,14 @@ export async function middleware(request: NextRequest) {
 
     // For API routes: check if token needs refresh and set new cookies
     // Skip auth routes - they handle their own authentication
-    if (request.nextUrl.pathname.startsWith("/api/") && 
-        !request.nextUrl.pathname.startsWith("/api/auth/")) {
-      const accessToken = request.cookies.get(KEYCLOAK_ACCESS_TOKEN_COOKIE)?.value;
-      
+    if (
+      request.nextUrl.pathname.startsWith("/api/") &&
+      !request.nextUrl.pathname.startsWith("/api/auth/")
+    ) {
+      const accessToken = request.cookies.get(
+        KEYCLOAK_ACCESS_TOKEN_COOKIE,
+      )?.value;
+
       // If access token is expired or about to expire, try to refresh
       if (!accessToken || isTokenExpiredOrExpiring(accessToken)) {
         const refreshedResponse = await tryRefreshAndSetCookies(request);

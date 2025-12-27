@@ -26,7 +26,9 @@ export async function GET(request: NextRequest) {
   if (error) {
     console.error("Keycloak auth error:", error, errorDescription);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    return NextResponse.redirect(`${appUrl}/?error=${encodeURIComponent(error)}`);
+    return NextResponse.redirect(
+      `${appUrl}/?error=${encodeURIComponent(error)}`,
+    );
   }
 
   // Verify state

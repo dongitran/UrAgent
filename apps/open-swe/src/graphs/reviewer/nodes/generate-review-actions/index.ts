@@ -244,7 +244,11 @@ export async function generateReviewActions(
     modelName,
     isAnthropicModel,
     isGeminiModel,
-    willUseProvider: isAnthropicModel ? "anthropic" : isGeminiModel ? "google-genai" : "openai",
+    willUseProvider: isAnthropicModel
+      ? "anthropic"
+      : isGeminiModel
+        ? "google-genai"
+        : "openai",
   });
 
   const { providerTools, providerMessages } = createToolsAndPrompt(
@@ -268,9 +272,9 @@ export async function generateReviewActions(
     },
   );
 
-  const messagesToUse = isAnthropicModel 
-    ? providerMessages.anthropic 
-    : isGeminiModel 
+  const messagesToUse = isAnthropicModel
+    ? providerMessages.anthropic
+    : isGeminiModel
       ? providerMessages["google-genai"]
       : providerMessages.openai;
 

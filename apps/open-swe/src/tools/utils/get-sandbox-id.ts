@@ -27,9 +27,12 @@ export async function getSandboxSessionOrThrow(
   }
 
   if (!sandboxSessionId) {
-    logger.error("[DAYTONA] FAILED TO RUN COMMAND: No sandbox session ID provided", {
-      inputKeys: Object.keys(input),
-    });
+    logger.error(
+      "[DAYTONA] FAILED TO RUN COMMAND: No sandbox session ID provided",
+      {
+        inputKeys: Object.keys(input),
+      },
+    );
     throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
   }
 
@@ -42,25 +45,28 @@ export async function getSandboxSessionOrThrow(
   try {
     const sandbox = await daytonaClient().get(sandboxSessionId);
     const duration = Date.now() - startTime;
-    
+
     logger.debug("[DAYTONA] Successfully fetched sandbox", {
       sandboxSessionId,
       sandboxId: sandbox.id,
       sandboxState: sandbox.state,
       durationMs: duration,
     });
-    
+
     return sandbox;
   } catch (error) {
     const duration = Date.now() - startTime;
     logger.error("[DAYTONA] Failed to fetch sandbox from Daytona API", {
       sandboxSessionId,
       durationMs: duration,
-      error: error instanceof Error ? {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      } : error,
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : error,
     });
     throw error;
   }

@@ -26,7 +26,7 @@ function getAccessToken(req: NextRequest): string | null {
   if (refreshedToken) {
     return refreshedToken;
   }
-  
+
   // Fall back to cookie
   return getKeycloakAccessToken(req);
 }
@@ -50,13 +50,18 @@ function isTokenExpiredOrExpiring(token: string): boolean {
 }
 
 // Cache for refreshed tokens to avoid multiple refresh calls
-const tokenRefreshCache = new Map<string, { token: string; expiresAt: number }>();
+const tokenRefreshCache = new Map<
+  string,
+  { token: string; expiresAt: number }
+>();
 
 /**
  * Try to refresh Keycloak token if it's expired
  * Returns the new access token or null if refresh failed
  */
-async function tryRefreshKeycloakToken(req: NextRequest): Promise<string | null> {
+async function tryRefreshKeycloakToken(
+  req: NextRequest,
+): Promise<string | null> {
   const refreshToken = getKeycloakRefreshToken(req);
   if (!refreshToken) {
     return null;
@@ -71,7 +76,7 @@ async function tryRefreshKeycloakToken(req: NextRequest): Promise<string | null>
 
   try {
     const tokenData = await refreshAccessToken(refreshToken);
-    
+
     // Cache the new token
     const decoded = decodeKeycloakToken(tokenData.access_token) as any;
     const expiresAt = decoded?.exp ? decoded.exp * 1000 : Date.now() + 300000; // 5 min default
@@ -112,7 +117,12 @@ function hasDefaultConfig(): boolean {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
-  return !!(defaultInstallationId && defaultInstallationName && appId && privateKey);
+  return !!(
+    defaultInstallationId &&
+    defaultInstallationName &&
+    appId &&
+    privateKey
+  );
 }
 
 export interface AuthResult {
@@ -137,7 +147,7 @@ export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
     // First check for refreshed token from middleware (via header)
     // Then fall back to cookie
     let keycloakToken = getAccessToken(req);
-    
+
     // If no token or token is expired, try to refresh
     if (!keycloakToken || isTokenExpiredOrExpiring(keycloakToken)) {
       const refreshedToken = await tryRefreshKeycloakToken(req);
@@ -145,7 +155,7 @@ export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
         keycloakToken = refreshedToken;
       }
     }
-    
+
     if (!keycloakToken) {
       return {
         authenticated: false,
@@ -155,7 +165,7 @@ export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
 
     // Decode the token to get user info
     const decoded = decodeKeycloakToken(keycloakToken);
-    
+
     if (decoded) {
       // Check if token is still valid (not expired)
       const tokenData = decoded as any;
@@ -165,7 +175,7 @@ export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
           error: "Keycloak token expired",
         };
       }
-      
+
       return {
         authenticated: true,
         user: {

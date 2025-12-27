@@ -5,7 +5,7 @@ import type { Message } from "@langchain/langgraph-sdk";
  * - If text is present, returns the joined text.
  * - If not, returns a label for the first non-text modality (e.g., 'Image', 'Other').
  * - If unknown, returns 'Multimodal message'.
- * 
+ *
  * Note: During streaming, each token may be sent as a separate text block.
  * Some streaming implementations send each token with a trailing newline,
  * which causes each word to render on a separate line.
@@ -21,7 +21,7 @@ export function getContentString(content: Message["content"]): string {
     .map((c) => c.text);
   // Join without space - streaming tokens already include proper spacing
   const joined = texts.join("");
-  
+
   // Fix streaming newline issue:
   // 1. First, protect intentional paragraph breaks (double+ newlines) by replacing with placeholder
   // 2. Replace single newlines with spaces (these are likely streaming artifacts)

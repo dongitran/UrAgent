@@ -37,7 +37,7 @@ function determineBranchName(
 ): string {
   const baseBranch = state.targetRepository?.branch || "main";
   const currentBranchName = state.branchName;
-  
+
   // If branchName is not set, or is the same as base branch, create a new feature branch
   if (!currentBranchName || currentBranchName === baseBranch) {
     const newBranchName = getBranchName(config);
@@ -48,7 +48,7 @@ function determineBranchName(
     });
     return newBranchName;
   }
-  
+
   logger.info("Using existing feature branch", {
     baseBranch,
     currentBranchName,

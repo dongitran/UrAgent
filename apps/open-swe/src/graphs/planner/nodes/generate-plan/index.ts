@@ -82,13 +82,13 @@ export async function generatePlan(
     LLMTask.PLANNER,
   );
   const sessionPlanTool = createSessionPlanToolFields();
-  
+
   config.writer?.({
     type: "planner_binding_tools",
     timestamp: Date.now(),
     toolName: sessionPlanTool.name,
   });
-  
+
   const modelWithTools = model.bindTools([sessionPlanTool], {
     tool_choice: sessionPlanTool.name,
     ...(modelSupportsParallelToolCallsParam

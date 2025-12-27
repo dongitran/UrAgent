@@ -16,13 +16,13 @@ export async function GET() {
 
   // Generate state for CSRF protection
   const state = uuidv4();
-  
+
   // Build authorization URL
   const authUrl = buildKeycloakAuthUrl(state);
-  
+
   // Create redirect response
   const response = NextResponse.redirect(authUrl);
-  
+
   // Store state in cookie for verification
   // Use SameSite=None for cross-domain OAuth redirects
   response.cookies.set(KEYCLOAK_STATE_COOKIE, state, {

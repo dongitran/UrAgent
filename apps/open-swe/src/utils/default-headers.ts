@@ -27,7 +27,9 @@ const TOKEN_CACHE_TTL_MS = 50 * 60 * 1000; // 50 minutes
  * Generate GitHub installation token using GitHub App credentials from environment
  * Uses in-memory cache to avoid repeated API calls
  */
-async function generateGitHubInstallationToken(installationId: string): Promise<string> {
+async function generateGitHubInstallationToken(
+  installationId: string,
+): Promise<string> {
   // Check cache first
   const cached = tokenCache.get(installationId);
   if (cached && cached.expiresAt > Date.now()) {
@@ -38,7 +40,9 @@ async function generateGitHubInstallationToken(installationId: string): Promise<
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
   if (!appId || !privateKey) {
-    throw new Error("Missing GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY environment variables for token generation.");
+    throw new Error(
+      "Missing GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY environment variables for token generation.",
+    );
   }
 
   const octokit = new Octokit({
@@ -63,7 +67,9 @@ async function generateGitHubInstallationToken(installationId: string): Promise<
   return data.token;
 }
 
-export async function getDefaultHeaders(config: GraphConfig): Promise<Record<string, string>> {
+export async function getDefaultHeaders(
+  config: GraphConfig,
+): Promise<Record<string, string>> {
   const githubPat = config.configurable?.[GITHUB_PAT];
   const isProd = process.env.NODE_ENV === "production";
   if (githubPat && !isProd) {
@@ -75,29 +81,40 @@ export async function getDefaultHeaders(config: GraphConfig): Promise<Record<str
 
   let githubInstallationTokenCookie =
     config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE];
-  let githubInstallationName =
-    config.configurable?.[GITHUB_INSTALLATION_NAME];
+  let githubInstallationName = config.configurable?.[GITHUB_INSTALLATION_NAME];
   let githubInstallationId = config.configurable?.[GITHUB_INSTALLATION_ID];
 
   // If missing required headers, try to use defaults from env and auto-generate token
-  if (!githubInstallationTokenCookie || !githubInstallationName || !githubInstallationId) {
+  if (
+    !githubInstallationTokenCookie ||
+    !githubInstallationName ||
+    !githubInstallationId
+  ) {
     // Try to get installation ID from env
     if (!githubInstallationId) {
       githubInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
     }
-    
+
     // Try to get installation name from env or use default
     if (!githubInstallationName) {
-      githubInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME || "default";
+      githubInstallationName =
+        process.env.DEFAULT_GITHUB_INSTALLATION_NAME || "default";
     }
 
     // If we have GitHub App credentials and installation ID, generate token
-    if (githubInstallationId && process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY) {
+    if (
+      githubInstallationId &&
+      process.env.GITHUB_APP_ID &&
+      process.env.GITHUB_APP_PRIVATE_KEY
+    ) {
       if (!githubInstallationTokenCookie) {
-        githubInstallationTokenCookie = await generateGitHubInstallationToken(githubInstallationId);
+        githubInstallationTokenCookie =
+          await generateGitHubInstallationToken(githubInstallationId);
       }
     } else if (!githubInstallationTokenCookie) {
-      throw new Error("Missing required headers and no GitHub App credentials for auto-generation");
+      throw new Error(
+        "Missing required headers and no GitHub App credentials for auto-generation",
+      );
     }
   }
 

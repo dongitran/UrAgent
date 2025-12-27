@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
     // If no token, check for default installation config
     if (!tokenData || !tokenData.access_token) {
       const defaultInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
-      const defaultInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
+      const defaultInstallationName =
+        process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
 
       if (defaultInstallationId && defaultInstallationName) {
         // Return a mock installation response for default config

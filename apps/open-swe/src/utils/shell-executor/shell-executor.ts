@@ -106,7 +106,8 @@ export class ShellExecutor {
     logger.debug("[DAYTONA] Executing command in sandbox", {
       sandboxId: sandbox_.id,
       sandboxState: sandbox_.state,
-      command: command.length > 500 ? command.substring(0, 500) + "..." : command,
+      command:
+        command.length > 500 ? command.substring(0, 500) + "..." : command,
       workdir,
       timeout,
       envKeys: env ? Object.keys(env) : [],
@@ -125,31 +126,46 @@ export class ShellExecutor {
 
       logger.debug("[DAYTONA] Command execution completed", {
         sandboxId: sandbox_.id,
-        command: command.length > 200 ? command.substring(0, 200) + "..." : command,
+        command:
+          command.length > 200 ? command.substring(0, 200) + "..." : command,
         workdir,
         durationMs: duration,
         exitCode: response.exitCode,
         resultLength: response.result?.length ?? 0,
         resultPreview: response.result?.substring(0, 500) ?? "null",
-        artifacts: response.artifacts ? {
-          stdoutLength: response.artifacts.stdout?.length ?? 0,
-          stderrLength: (response.artifacts as { stdout?: string; stderr?: string }).stderr?.length ?? 0,
-          stdoutPreview: response.artifacts.stdout?.substring(0, 300) ?? "null",
-          stderrPreview: (response.artifacts as { stdout?: string; stderr?: string }).stderr?.substring(0, 300) ?? "null",
-        } : null,
+        artifacts: response.artifacts
+          ? {
+              stdoutLength: response.artifacts.stdout?.length ?? 0,
+              stderrLength:
+                (response.artifacts as { stdout?: string; stderr?: string })
+                  .stderr?.length ?? 0,
+              stdoutPreview:
+                response.artifacts.stdout?.substring(0, 300) ?? "null",
+              stderrPreview:
+                (
+                  response.artifacts as { stdout?: string; stderr?: string }
+                ).stderr?.substring(0, 300) ?? "null",
+            }
+          : null,
         fullResponse: JSON.stringify(response).substring(0, 1000),
       });
 
       if (response.exitCode === -1) {
-        logger.error("[DAYTONA] Command returned exit code -1 (sandbox issue)", {
-          sandboxId: sandbox_.id,
-          sandboxState: sandbox_.state,
-          command: command.length > 500 ? command.substring(0, 500) + "..." : command,
-          workdir,
-          timeout,
-          durationMs: duration,
-          fullResponse: JSON.stringify(response),
-        });
+        logger.error(
+          "[DAYTONA] Command returned exit code -1 (sandbox issue)",
+          {
+            sandboxId: sandbox_.id,
+            sandboxState: sandbox_.state,
+            command:
+              command.length > 500
+                ? command.substring(0, 500) + "..."
+                : command,
+            workdir,
+            timeout,
+            durationMs: duration,
+            fullResponse: JSON.stringify(response),
+          },
+        );
       }
 
       return response;
@@ -158,15 +174,19 @@ export class ShellExecutor {
       logger.error("[DAYTONA] Command execution threw exception", {
         sandboxId: sandbox_.id,
         sandboxState: sandbox_.state,
-        command: command.length > 500 ? command.substring(0, 500) + "..." : command,
+        command:
+          command.length > 500 ? command.substring(0, 500) + "..." : command,
         workdir,
         timeout,
         durationMs: duration,
-        error: error instanceof Error ? {
-          name: error.name,
-          message: error.message,
-          stack: error.stack,
-        } : error,
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : error,
       });
       throw error;
     }

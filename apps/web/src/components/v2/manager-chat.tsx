@@ -90,7 +90,7 @@ function extractResponseFromMessage(message: Message): string {
   if (!isAIMessageSDK(message)) {
     return getMessageContentString(message.content);
   }
-  
+
   // Handle Anthropic tool_use format in content array
   if (
     Array.isArray(message.content) &&
@@ -111,7 +111,7 @@ function extractResponseFromMessage(message: Message): string {
       // no-op
     }
   }
-  
+
   // Handle tool_calls format (works for both OpenAI and Anthropic)
   const toolCall = (message as any).tool_calls?.[0];
   const response = toolCall?.args?.response;

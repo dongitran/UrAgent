@@ -23,7 +23,7 @@ function getAccessToken(req: NextRequest): string | null {
   if (refreshedToken) {
     return refreshedToken;
   }
-  
+
   // Fall back to cookie
   return getKeycloakAccessToken(req);
 }
@@ -49,7 +49,9 @@ function isTokenExpiredOrExpiring(token: string): boolean {
 /**
  * Try to refresh Keycloak token if it's expired
  */
-async function tryRefreshKeycloakToken(req: NextRequest): Promise<string | null> {
+async function tryRefreshKeycloakToken(
+  req: NextRequest,
+): Promise<string | null> {
   const refreshToken = getKeycloakRefreshToken(req);
   if (!refreshToken) {
     return null;
@@ -79,7 +81,12 @@ function hasDefaultConfig(): { hasConfig: boolean; installationName?: string } {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
-  const hasConfig = !!(defaultInstallationId && defaultInstallationName && appId && privateKey);
+  const hasConfig = !!(
+    defaultInstallationId &&
+    defaultInstallationName &&
+    appId &&
+    privateKey
+  );
   return { hasConfig, installationName: defaultInstallationName };
 }
 
@@ -90,7 +97,7 @@ export async function GET(request: NextRequest) {
       // First check for refreshed token from middleware (via header)
       // Then fall back to cookie
       let keycloakToken = getAccessToken(request);
-      
+
       // If no token or token is expired, try to refresh
       if (!keycloakToken || isTokenExpiredOrExpiring(keycloakToken)) {
         const refreshedToken = await tryRefreshKeycloakToken(request);
@@ -98,14 +105,17 @@ export async function GET(request: NextRequest) {
           keycloakToken = refreshedToken;
         }
       }
-      
+
       if (!keycloakToken) {
-        return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+        return NextResponse.json(
+          { error: "Not authenticated" },
+          { status: 401 },
+        );
       }
 
       // Try to get user info from Keycloak
       const userInfo = await getKeycloakUserInfo(keycloakToken);
-      
+
       if (userInfo) {
         return NextResponse.json({
           user: {
@@ -139,7 +149,7 @@ export async function GET(request: NextRequest) {
 
     // Keycloak NOT enabled - check GitHub OAuth
     const token = getGitHubToken(request);
-    
+
     if (token && token.access_token) {
       const user = await verifyGithubUser(token.access_token);
       if (user) {

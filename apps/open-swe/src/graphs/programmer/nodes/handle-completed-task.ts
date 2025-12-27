@@ -89,7 +89,11 @@ export async function handleCompletedTask(
     summary,
   );
   // Update the github issue to reflect this task as completed.
-  if (!isLocalMode(config) && shouldCreateIssue(config) && state.githubIssueId) {
+  if (
+    !isLocalMode(config) &&
+    shouldCreateIssue(config) &&
+    state.githubIssueId
+  ) {
     await addTaskPlanToIssue(
       {
         githubIssueId: state.githubIssueId,

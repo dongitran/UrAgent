@@ -183,7 +183,8 @@ export async function takeReviewerActions(
         changedFiles,
       });
 
-      const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
+      const { githubInstallationToken } =
+        await getGitHubTokensFromConfig(config);
       const result = await checkoutBranchAndCommit(
         config,
         state.targetRepository,

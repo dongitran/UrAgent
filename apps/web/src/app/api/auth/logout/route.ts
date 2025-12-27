@@ -17,12 +17,12 @@ export async function POST(request: NextRequest) {
     // Check if Keycloak is enabled and user has Keycloak token
     if (isKeycloakEnabled()) {
       const idToken = request.cookies.get(KEYCLOAK_ID_TOKEN_COOKIE)?.value;
-      
+
       // If user has Keycloak token, redirect to Keycloak logout
       if (idToken) {
         const logoutUrl = buildKeycloakLogoutUrl(idToken);
-        const response = NextResponse.json({ 
-          success: true, 
+        const response = NextResponse.json({
+          success: true,
           redirectUrl: logoutUrl,
           provider: "keycloak",
         });
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Default: clear GitHub tokens
-    const response = NextResponse.json({ 
+    const response = NextResponse.json({
       success: true,
       redirectUrl: appUrl,
       provider: "github",
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
   // Check if Keycloak is enabled
   if (isKeycloakEnabled()) {
     const idToken = request.cookies.get(KEYCLOAK_ID_TOKEN_COOKIE)?.value;
-    
+
     if (idToken) {
       const logoutUrl = buildKeycloakLogoutUrl(idToken);
       const response = NextResponse.redirect(logoutUrl);

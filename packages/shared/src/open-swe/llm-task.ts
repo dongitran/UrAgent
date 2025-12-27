@@ -29,29 +29,30 @@ export enum LLMTask {
 
 /**
  * Get model configuration from environment variables
- * 
+ *
  * Configuration:
  * - LLM_PROVIDER: Provider to use (default: "openai" for LiteLLM gateway)
  * - {PROVIDER}_{TASK}_MODEL: Per-task models (e.g., OPENAI_PLANNER_MODEL)
- * 
+ *
  * Priority:
  * 1. {PROVIDER}_{TASK}_MODEL (per-task models based on LLM_PROVIDER)
  * 2. Fallback to hardcoded defaults
  */
 const getModelDefault = (task: string, fallback: string): string => {
-  const env = typeof process !== 'undefined' && process.env ? process.env : {};
-  
+  const env = typeof process !== "undefined" && process.env ? process.env : {};
+
   // Get provider
-  const provider = env.LLM_PROVIDER || 'openai';
-  
+  const provider = env.LLM_PROVIDER || "openai";
+
   // Check for per-task model based on provider
-  const providerPrefix = provider === 'google-genai' ? 'GOOGLE' : provider.toUpperCase();
+  const providerPrefix =
+    provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
   const taskEnvKey = `${providerPrefix}_${task.toUpperCase()}_MODEL`;
   const taskEnvValue = env[taskEnvKey];
   if (taskEnvValue) {
     return `${provider}:${taskEnvValue}`;
   }
-  
+
   return fallback;
 };
 

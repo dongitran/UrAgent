@@ -55,15 +55,16 @@ export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
  * When disabled, only use the configured LLM_PROVIDER (no fallback to other providers)
  */
 function getFallbackOrder(): Provider[] {
-  const multiProviderEnabled = process.env.LLM_MULTI_PROVIDER_ENABLED === 'true';
-  
+  const multiProviderEnabled =
+    process.env.LLM_MULTI_PROVIDER_ENABLED === "true";
+
   if (multiProviderEnabled) {
     // Multi-provider mode: fallback to other providers when one fails
     return [...PROVIDER_FALLBACK_ORDER];
   }
-  
+
   // Single provider mode: only use the configured provider
-  const provider = (process.env.LLM_PROVIDER || 'openai') as Provider;
+  const provider = (process.env.LLM_PROVIDER || "openai") as Provider;
   return [provider];
 }
 
@@ -131,10 +132,10 @@ export class ModelManager {
     provider: Provider,
   ): string | null {
     // Try LangGraph Cloud format first, then fall back to self-hosted header, then default config
-    const userLogin = (graphConfig.configurable as any)?.langgraph_auth_user
-      ?.display_name 
-      || (graphConfig.configurable as any)?.["x-github-user-login"]
-      || process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
+    const userLogin =
+      (graphConfig.configurable as any)?.langgraph_auth_user?.display_name ||
+      (graphConfig.configurable as any)?.["x-github-user-login"] ||
+      process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
     const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
 
     if (!secretsEncryptionKey) {
@@ -288,7 +289,7 @@ export class ModelManager {
             : {}),
         };
         configs.push(selectedModelConfig);
-        
+
         logger.error("[Gemini Debug] Added selected model config", {
           provider: selectedModelConfig.provider,
           modelName: selectedModelConfig.modelName,
@@ -352,7 +353,7 @@ export class ModelManager {
   private getDefaultTemperature(modelStr: string): number {
     const [provider, ...modelNameParts] = modelStr.split(":");
     const modelName = modelNameParts.join(":");
-    
+
     if (provider === "google-genai") {
       const envTemp = process.env.GOOGLE_TEMPERATURE;
       if (envTemp) {
@@ -362,7 +363,7 @@ export class ModelManager {
         return 1.0;
       }
     }
-    
+
     return 0;
   }
 
@@ -378,41 +379,56 @@ export class ModelManager {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
-          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
-        ),
+        temperature:
+          config.configurable?.[`${task}Temperature`] ??
+          this.getDefaultTemperature(
+            config.configurable?.[`${task}ModelName`] ??
+              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+          ),
       },
       [LLMTask.PROGRAMMER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
-          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
-        ),
+        temperature:
+          config.configurable?.[`${task}Temperature`] ??
+          this.getDefaultTemperature(
+            config.configurable?.[`${task}ModelName`] ??
+              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+          ),
       },
       [LLMTask.REVIEWER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
-          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
-        ),
+        temperature:
+          config.configurable?.[`${task}Temperature`] ??
+          this.getDefaultTemperature(
+            config.configurable?.[`${task}ModelName`] ??
+              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+          ),
       },
       [LLMTask.ROUTER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
-          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
-        ),
+        temperature:
+          config.configurable?.[`${task}Temperature`] ??
+          this.getDefaultTemperature(
+            config.configurable?.[`${task}ModelName`] ??
+              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+          ),
       },
       [LLMTask.SUMMARIZER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? this.getDefaultTemperature(
-          config.configurable?.[`${task}ModelName`] ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName
-        ),
+        temperature:
+          config.configurable?.[`${task}Temperature`] ??
+          this.getDefaultTemperature(
+            config.configurable?.[`${task}ModelName`] ??
+              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+          ),
       },
     };
 
@@ -462,7 +478,7 @@ export class ModelManager {
     if (envModelName) {
       return { provider, modelName: envModelName };
     }
-    
+
     // Fallback to hardcoded defaults
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
       anthropic: {
@@ -502,16 +518,17 @@ export class ModelManager {
    * Example: OPENAI_PROGRAMMER_MODEL, ANTHROPIC_PLANNER_MODEL
    */
   private getModelFromEnv(provider: Provider, task: LLMTask): string | null {
-    const providerPrefix = provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
+    const providerPrefix =
+      provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
     const taskName = task.toUpperCase();
     const envKey = `${providerPrefix}_${taskName}_MODEL`;
-    
+
     const envValue = process.env[envKey];
     if (envValue) {
       logger.info(`Using model from env ${envKey}: ${envValue}`);
       return envValue;
     }
-    
+
     return null;
   }
 

@@ -210,15 +210,12 @@ export async function createPullRequest({
 
   let pullRequest: GitHubPullRequest | null = null;
   try {
-    logger.info(
-      `Creating pull request: ${headBranch} -> ${repoBaseBranch}`,
-      { 
-        nullOnError,
-        headBranch,
-        baseBranch: repoBaseBranch,
-        draft,
-      },
-    );
+    logger.info(`Creating pull request: ${headBranch} -> ${repoBaseBranch}`, {
+      nullOnError,
+      headBranch,
+      baseBranch: repoBaseBranch,
+      draft,
+    });
 
     // Step 2: Create the pull request
     const { data: pullRequestData } = await octokit.pulls.create({
@@ -240,7 +237,10 @@ export async function createPullRequest({
     });
   } catch (error) {
     logger.error(`Failed to create pull request`, {
-      error: error instanceof Error ? { name: error.name, message: error.message } : error,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : error,
       headBranch,
       baseBranch: repoBaseBranch,
       nullOnError,

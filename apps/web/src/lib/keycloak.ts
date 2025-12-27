@@ -66,7 +66,7 @@ export function buildKeycloakAuthUrl(state: string): string {
     scope: "openid profile email",
     state,
   });
-  
+
   return `${config.url}/realms/${config.realm}/protocol/openid-connect/auth?${params.toString()}`;
 }
 
@@ -74,10 +74,12 @@ export function buildKeycloakAuthUrl(state: string): string {
  * Exchange authorization code for tokens
  * Supports both public clients (no secret) and confidential clients (with secret)
  */
-export async function exchangeCodeForTokens(code: string): Promise<KeycloakTokenData> {
+export async function exchangeCodeForTokens(
+  code: string,
+): Promise<KeycloakTokenData> {
   const config = getKeycloakConfig();
   const tokenUrl = `${config.url}/realms/${config.realm}/protocol/openid-connect/token`;
-  
+
   const params = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: config.clientId,
@@ -110,10 +112,12 @@ export async function exchangeCodeForTokens(code: string): Promise<KeycloakToken
  * Refresh access token using refresh token
  * Supports both public clients (no secret) and confidential clients (with secret)
  */
-export async function refreshAccessToken(refreshToken: string): Promise<KeycloakTokenData> {
+export async function refreshAccessToken(
+  refreshToken: string,
+): Promise<KeycloakTokenData> {
   const config = getKeycloakConfig();
   const tokenUrl = `${config.url}/realms/${config.realm}/protocol/openid-connect/token`;
-  
+
   const params = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: config.clientId,
@@ -219,13 +223,13 @@ export function decodeKeycloakToken(token: string): KeycloakUser | null {
  */
 export async function verifyKeycloakToken(token: string): Promise<boolean> {
   const config = getKeycloakConfig();
-  
+
   // For public clients (no secret), we can't use introspection endpoint
   // Just decode and check expiration
   if (!config.clientSecret) {
     const decoded = decodeKeycloakToken(token);
     if (!decoded) return false;
-    
+
     // Check if token has exp claim and is not expired
     const tokenData = decoded as any;
     if (tokenData.exp) {
@@ -236,7 +240,7 @@ export async function verifyKeycloakToken(token: string): Promise<boolean> {
 
   // For confidential clients, use introspection endpoint
   const introspectUrl = `${config.url}/realms/${config.realm}/protocol/openid-connect/token/introspect`;
-  
+
   const params = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
@@ -266,7 +270,9 @@ export async function verifyKeycloakToken(token: string): Promise<boolean> {
 /**
  * Get user info from Keycloak userinfo endpoint
  */
-export async function getKeycloakUserInfo(accessToken: string): Promise<KeycloakUser | null> {
+export async function getKeycloakUserInfo(
+  accessToken: string,
+): Promise<KeycloakUser | null> {
   const config = getKeycloakConfig();
   const userInfoUrl = `${config.url}/realms/${config.realm}/protocol/openid-connect/userinfo`;
 
@@ -293,14 +299,14 @@ export async function getKeycloakUserInfo(accessToken: string): Promise<Keycloak
 export function buildKeycloakLogoutUrl(idToken?: string): string {
   const config = getKeycloakConfig();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  
+
   const params = new URLSearchParams({
     post_logout_redirect_uri: appUrl,
   });
-  
+
   if (idToken) {
     params.append("id_token_hint", idToken);
   }
-  
+
   return `${config.url}/realms/${config.realm}/protocol/openid-connect/logout?${params.toString()}`;
 }

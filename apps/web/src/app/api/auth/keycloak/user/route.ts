@@ -21,7 +21,7 @@ function getAccessToken(req: NextRequest): string | null {
   if (refreshedToken) {
     return refreshedToken;
   }
-  
+
   // Fall back to cookie
   return getKeycloakAccessToken(req);
 }
@@ -46,7 +46,9 @@ function isTokenExpiredOrExpiring(token: string): boolean {
 /**
  * Try to refresh Keycloak token if it's expired
  */
-async function tryRefreshKeycloakToken(req: NextRequest): Promise<string | null> {
+async function tryRefreshKeycloakToken(
+  req: NextRequest,
+): Promise<string | null> {
   const refreshToken = getKeycloakRefreshToken(req);
   if (!refreshToken) {
     return null;
@@ -82,10 +84,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!accessToken) {
-    return NextResponse.json(
-      { error: "Not authenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
   try {

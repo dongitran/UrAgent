@@ -21,10 +21,12 @@ export function createShellTool(
       try {
         const { command, workdir, timeout } = input;
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
-        
+
         let resolvedWorkdir = repoRoot;
         if (workdir) {
-          resolvedWorkdir = isAbsolute(workdir) ? workdir : join(repoRoot, workdir);
+          resolvedWorkdir = isAbsolute(workdir)
+            ? workdir
+            : join(repoRoot, workdir);
         }
 
         const executor = createShellExecutor(config);
@@ -38,11 +40,11 @@ export function createShellTool(
         if (response.exitCode !== 0) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           let errorMessage = `Command failed. Exit code: ${response.exitCode}\nResult: ${errorResult}`;
-          
+
           if (response.exitCode === -1) {
-            errorMessage = `Command failed. Exit code: -1 (Daytona sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal output: ${errorResult || 'No output'}`;
+            errorMessage = `Command failed. Exit code: -1 (Daytona sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal output: ${errorResult || "No output"}`;
           }
-          
+
           throw new Error(errorMessage);
         }
         return {
