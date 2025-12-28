@@ -482,18 +482,18 @@ export class ModelManager {
     // Fallback to hardcoded defaults
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
       anthropic: {
-        [LLMTask.PLANNER]: "claude-opus-4-5",
-        [LLMTask.PROGRAMMER]: "claude-opus-4-5",
-        [LLMTask.REVIEWER]: "claude-opus-4-5",
+        [LLMTask.PLANNER]: "claude-sonnet-4-5",
+        [LLMTask.PROGRAMMER]: "claude-sonnet-4-5",
+        [LLMTask.REVIEWER]: "claude-sonnet-4-5",
         [LLMTask.ROUTER]: "claude-haiku-4-5-latest",
-        [LLMTask.SUMMARIZER]: "claude-opus-4-5",
+        [LLMTask.SUMMARIZER]: "claude-sonnet-4-5",
       },
       "google-genai": {
-        [LLMTask.PLANNER]: "gemini-3-pro-preview",
-        [LLMTask.PROGRAMMER]: "gemini-3-pro-preview",
-        [LLMTask.REVIEWER]: "gemini-flash-latest",
-        [LLMTask.ROUTER]: "gemini-flash-latest",
-        [LLMTask.SUMMARIZER]: "gemini-3-pro-preview",
+        [LLMTask.PLANNER]: "gemini-3-flash-preview",
+        [LLMTask.PROGRAMMER]: "gemini-3-flash-preview",
+        [LLMTask.REVIEWER]: "gemini-3-flash-preview",
+        [LLMTask.ROUTER]: "gemini-3-flash-preview",
+        [LLMTask.SUMMARIZER]: "gemini-3-flash-preview",
       },
       openai: {
         // Using LiteLLM gateway with Claude models
