@@ -84,6 +84,21 @@ docker compose up --build
 cd apps/web && yarn dev
 ```
 
+## Kubernetes Deployment
+
+### Ingress NGINX Configuration
+
+When deploying the web app behind NGINX Ingress Controller, add these annotations to handle large headers (required for authentication cookies):
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "4"
+```
+
 ## Architecture
 
 ```
