@@ -7,6 +7,9 @@ import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
 } from "@openswe/shared/open-swe/llm-task";
+import { createLogger, LogLevel } from "../logger.js";
+
+const logger = createLogger(LogLevel.DEBUG, "LoadModel");
 
 export async function loadModel(
   config: GraphConfig,
@@ -18,10 +21,24 @@ export async function loadModel(
 ) {
   const modelManager = getModelManager();
 
+  logger.error("[Gemini Debug] loadModel: Starting", {
+    task,
+    hasProviderTools: !!options?.providerTools,
+    hasProviderMessages: !!options?.providerMessages,
+    providerToolsKeys: options?.providerTools ? Object.keys(options.providerTools) : [],
+  });
+
   const model = await modelManager.loadModel(config, task);
   if (!model) {
     throw new Error(`Model loading returned undefined for task: ${task}`);
   }
+
+  logger.error("[Gemini Debug] loadModel: Model loaded from manager", {
+    task,
+    modelType: model?.constructor?.name,
+    modelLlmType: (model as any)?._llmType?.(),
+  });
+
   const fallbackModel = new FallbackRunnable(
     model,
     config,
@@ -29,6 +46,13 @@ export async function loadModel(
     modelManager,
     options,
   );
+
+  logger.error("[Gemini Debug] loadModel: FallbackRunnable created", {
+    task,
+    fallbackModelType: fallbackModel?.constructor?.name,
+    primaryRunnableType: (fallbackModel as any)?.primaryRunnable?.constructor?.name,
+  });
+
   return fallbackModel;
 }
 

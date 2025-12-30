@@ -132,10 +132,23 @@ export class FallbackRunnable<
       const graphConfig = getConfig() as GraphConfig;
 
       try {
+        logger.error(`[Gemini Debug] About to initializeModel for fallback`, {
+          provider: modelConfig.provider,
+          modelName: modelConfig.modelName,
+        });
+
         const model = await this.modelManager.initializeModel(
           modelConfig,
           graphConfig,
         );
+
+        logger.error(`[Gemini Debug] Model initialized for fallback`, {
+          provider: modelConfig.provider,
+          modelType: model?.constructor?.name,
+          modelLlmType: (model as any)?._llmType?.(),
+          hasBindTools: typeof (model as any)?.bindTools === 'function',
+        });
+
         let runnableToUse: Runnable<BaseLanguageModelInput, AIMessageChunk> =
           model;
 
@@ -180,15 +193,67 @@ export class FallbackRunnable<
             delete kwargs.parallel_tool_calls;
           }
 
+          // Deep inspection of tools before bindTools
+          logger.error(`[Gemini Debug] DEEP TOOL INSPECTION before bindTools`, {
+            toolsCount: toolsToUse.tools?.length,
+            toolsDetails: toolsToUse.tools?.map((t: any, idx: number) => ({
+              index: idx,
+              name: t?.name,
+              hasDescription: !!t?.description,
+              hasSchema: !!t?.schema,
+              schemaType: typeof t?.schema,
+              schemaConstructorName: t?.schema?.constructor?.name,
+              schemaHas_def: t?.schema && '_def' in t.schema,
+              schemaHas_zod: t?.schema && '_zod' in t.schema,
+              schema_defTypeName: t?.schema?._def?.typeName,
+              toolKeys: t ? Object.keys(t) : [],
+            })),
+            kwargs,
+          });
+
+          logger.error(`[Gemini Debug] Before bindTools on new model`, {
+            runnableToUseType: runnableToUse?.constructor?.name,
+            hasBoundTools: !!(runnableToUse as any)?.boundTools,
+            toolsCount: toolsToUse.tools?.length,
+            kwargs,
+          });
+
           runnableToUse = (runnableToUse as ConfigurableModel).bindTools(
             toolsToUse.tools,
             kwargs,
           );
+
+          logger.error(`[Gemini Debug] After bindTools on new model`, {
+            runnableToUseType: runnableToUse?.constructor?.name,
+            hasBoundTools: !!(runnableToUse as any)?.boundTools,
+            boundToolsCount: (runnableToUse as any)?.boundTools?.length ?? 0,
+            boundToolChoice: (runnableToUse as any)?.boundToolChoice,
+          });
         }
 
+        // IMPORTANT: Skip withConfig if model already has boundTools
+        // withConfig() can create a RunnableBinding that loses the boundTools
         const config = this.extractConfig();
-        if (config) {
+        const modelHasBoundTools = !!(runnableToUse as any)?.boundTools;
+        
+        logger.error(`[Gemini Debug] Before withConfig decision`, {
+          hasConfig: !!config,
+          configKeys: config ? Object.keys(config) : [],
+          modelHasBoundTools,
+          runnableToUseType: runnableToUse?.constructor?.name,
+        });
+
+        // Only apply withConfig if model doesn't have boundTools
+        // OR if config doesn't contain tools (to avoid overwriting)
+        if (config && !modelHasBoundTools) {
           runnableToUse = runnableToUse.withConfig(config);
+          
+          logger.error(`[Gemini Debug] After withConfig`, {
+            runnableToUseType: runnableToUse?.constructor?.name,
+            hasBoundTools: !!(runnableToUse as any)?.boundTools,
+          });
+        } else if (config && modelHasBoundTools) {
+          logger.error(`[Gemini Debug] Skipping withConfig to preserve boundTools`);
         }
 
         const messagesToInvoke = useProviderMessages(
@@ -244,9 +309,35 @@ export class FallbackRunnable<
     tools: BindToolsInput[],
     kwargs?: Record<string, any>,
   ): ConfigurableModel<RunInput, CallOptions> {
+    logger.error(`[Gemini Debug] FallbackRunnable.bindTools called`, {
+      toolCount: tools?.length,
+      toolNames: tools?.map((t: any) => t?.name || 'unnamed'),
+      kwargs,
+      primaryRunnableType: this.primaryRunnable?.constructor?.name,
+      primaryHasBindTools: typeof this.primaryRunnable?.bindTools === 'function',
+    });
+
     const boundPrimary =
       this.primaryRunnable.bindTools?.(tools, kwargs) ?? this.primaryRunnable;
-    return new FallbackRunnable(
+
+    // Deep inspection of boundPrimary after bindTools
+    const inspectBoundPrimary = {
+      type: boundPrimary?.constructor?.name,
+      has_queuedMethodOperations: !!boundPrimary?._queuedMethodOperations,
+      queuedMethodOperations_keys: boundPrimary?._queuedMethodOperations ? Object.keys(boundPrimary._queuedMethodOperations) : [],
+      hasBindToolsInQueued: !!boundPrimary?._queuedMethodOperations?.bindTools,
+      bindToolsIsArray: Array.isArray(boundPrimary?._queuedMethodOperations?.bindTools),
+      hasBound: !!boundPrimary?.bound,
+      boundType: boundPrimary?.bound?.constructor?.name,
+      hasConfig: !!boundPrimary?.config,
+      configKeys: boundPrimary?.config ? Object.keys(boundPrimary.config) : [],
+      configToolsExists: !!boundPrimary?.config?.tools,
+      configToolsLength: Array.isArray(boundPrimary?.config?.tools) ? boundPrimary.config.tools.length : 0,
+    };
+
+    logger.error(`[Gemini Debug] FallbackRunnable.bindTools - boundPrimary inspection`, inspectBoundPrimary);
+
+    const newFallback = new FallbackRunnable(
       boundPrimary,
       this.config,
       this.task,
@@ -255,7 +346,16 @@ export class FallbackRunnable<
         providerTools: this.providerTools,
         providerMessages: this.providerMessages,
       },
-    ) as unknown as ConfigurableModel<RunInput, CallOptions>;
+    );
+
+    logger.error(`[Gemini Debug] FallbackRunnable.bindTools - created new FallbackRunnable`, {
+      newFallbackPrimaryRunnableType: (newFallback as any).primaryRunnable?.constructor?.name,
+      newFallbackPrimaryHasQueuedOps: !!(newFallback as any).primaryRunnable?._queuedMethodOperations,
+      newFallbackPrimaryHasConfig: !!(newFallback as any).primaryRunnable?.config,
+      newFallbackPrimaryConfigTools: !!(newFallback as any).primaryRunnable?.config?.tools,
+    });
+
+    return newFallback as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
   // @ts-expect-error - types are hard man :/
@@ -296,14 +396,118 @@ export class FallbackRunnable<
 
   private extractBoundTools(): ExtractedTools | null {
     let current: any = this.primaryRunnable;
+    let depth = 0;
+
+    // Deep inspection of primaryRunnable structure
+    const inspectObject = (obj: any, label: string) => {
+      if (!obj) return { label, exists: false };
+      return {
+        label,
+        exists: true,
+        constructorName: obj?.constructor?.name,
+        keys: Object.keys(obj).filter(k => !k.startsWith('_') || k === '_queuedMethodOperations'),
+        has_queuedMethodOperations: !!obj?._queuedMethodOperations,
+        queuedMethodOperations_keys: obj?._queuedMethodOperations ? Object.keys(obj._queuedMethodOperations) : [],
+        hasBindTools: !!obj?._queuedMethodOperations?.bindTools,
+        bindToolsIsArray: Array.isArray(obj?._queuedMethodOperations?.bindTools),
+        bindToolsLength: Array.isArray(obj?._queuedMethodOperations?.bindTools) ? obj._queuedMethodOperations.bindTools.length : 0,
+        hasBound: !!obj?.bound,
+        hasConfig: !!obj?.config,
+        configKeys: obj?.config ? Object.keys(obj.config) : [],
+        configToolsExists: !!obj?.config?.tools,
+        configToolsIsArray: Array.isArray(obj?.config?.tools),
+        configToolsLength: Array.isArray(obj?.config?.tools) ? obj.config.tools.length : 0,
+        hasKwargs: !!obj?.kwargs,
+        kwargsKeys: obj?.kwargs ? Object.keys(obj.kwargs) : [],
+      };
+    };
+
+    logger.error(`[Gemini Debug] extractBoundTools starting - DEEP INSPECTION`, {
+      primaryRunnable: inspectObject(this.primaryRunnable, 'primaryRunnable'),
+      primaryRunnable_bound: inspectObject(this.primaryRunnable?.bound, 'primaryRunnable.bound'),
+      primaryRunnable_bound_bound: inspectObject(this.primaryRunnable?.bound?.bound, 'primaryRunnable.bound.bound'),
+    });
+
+    // Check _queuedMethodOperations.bindTools first (set by ChatGoogleGenAI.bindTools)
+    if (this.primaryRunnable?._queuedMethodOperations?.bindTools) {
+      const bindToolsOp = this.primaryRunnable._queuedMethodOperations.bindTools;
+      if (Array.isArray(bindToolsOp) && bindToolsOp.length > 0) {
+        const tools = bindToolsOp[0] as StructuredToolInterface[];
+        const toolOptions = bindToolsOp[1] || {};
+        logger.error(`[Gemini Debug] Found tools in primaryRunnable._queuedMethodOperations.bindTools`, {
+          toolCount: Array.isArray(tools) ? tools.length : 'not array',
+          toolNames: Array.isArray(tools) ? tools.map((t: any) => t?.name || 'unnamed') : [],
+          toolOptions,
+        });
+        return {
+          tools: tools,
+          kwargs: {
+            tool_choice: (toolOptions as Record<string, any>).tool_choice,
+            parallel_tool_calls: (toolOptions as Record<string, any>).parallel_tool_calls,
+          },
+        };
+      }
+    }
+
+    // Check if tools are directly in config (RunnableBinding from withConfig stores it there)
+    if (this.primaryRunnable?.config?.tools) {
+      const config = this.primaryRunnable.config;
+      logger.error(`[Gemini Debug] Found tools in primaryRunnable.config`, {
+        toolCount: Array.isArray(config.tools) ? config.tools.length : 'not array',
+        toolNames: Array.isArray(config.tools) ? config.tools.map((t: any) => t?.name || 'unnamed') : [],
+        tool_choice: config.tool_choice,
+      });
+      return {
+        tools: config.tools,
+        kwargs: {
+          tool_choice: config.tool_choice,
+          parallel_tool_calls: config.parallel_tool_calls,
+        },
+      };
+    }
 
     while (current) {
+      logger.error(`[Gemini Debug] extractBoundTools traversing`, {
+        depth,
+        currentType: current?.constructor?.name,
+        has_queuedMethodOperations: !!current?._queuedMethodOperations,
+        hasBindTools: !!current?._queuedMethodOperations?.bindTools,
+        hasBound: !!current?.bound,
+        hasConfig: !!current?.config,
+        configKeys: current?.config ? Object.keys(current.config) : [],
+        configTools: !!current?.config?.tools,
+      });
+
+      // Check config.tools (RunnableBinding pattern from withConfig)
+      if (current?.config?.tools) {
+        const config = current.config;
+        logger.error(`[Gemini Debug] Found tools in config at depth ${depth}`, {
+          toolCount: Array.isArray(config.tools) ? config.tools.length : 'not array',
+          toolNames: Array.isArray(config.tools) ? config.tools.map((t: any) => t?.name || 'unnamed') : [],
+          tool_choice: config.tool_choice,
+        });
+        return {
+          tools: config.tools,
+          kwargs: {
+            tool_choice: config.tool_choice,
+            parallel_tool_calls: config.parallel_tool_calls,
+          },
+        };
+      }
+
+      // Check _queuedMethodOperations.bindTools (ConfigurableModel pattern)
       if (current._queuedMethodOperations?.bindTools) {
         const bindToolsOp = current._queuedMethodOperations.bindTools;
 
         if (Array.isArray(bindToolsOp) && bindToolsOp.length > 0) {
           const tools = bindToolsOp[0] as StructuredToolInterface[];
           const toolOptions = bindToolsOp[1] || {};
+
+          logger.error(`[Gemini Debug] Found tools in _queuedMethodOperations at depth ${depth}`, {
+            toolCount: Array.isArray(tools) ? tools.length : 'not array',
+            toolNames: Array.isArray(tools) ? tools.map((t: any) => t?.name || 'unnamed') : [],
+            toolOptions,
+          });
 
           return {
             tools: tools,
@@ -315,9 +519,12 @@ export class FallbackRunnable<
           };
         }
       }
+      
+      depth++;
       current = current.bound;
     }
 
+    logger.error(`[Gemini Debug] extractBoundTools found nothing after ${depth} iterations`);
     return null;
   }
 

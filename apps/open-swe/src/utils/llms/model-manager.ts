@@ -11,6 +11,7 @@ import {
 import { isAllowedUser } from "@openswe/shared/github/allowed-users";
 import { decryptSecret } from "@openswe/shared/crypto";
 import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
+import { ChatGoogleGenAI, ThinkingConfig } from "./google-genai/index.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -174,6 +175,7 @@ export class ModelManager {
 
   /**
    * Initialize the model instance
+   * For google-genai provider, uses custom ChatGoogleGenAI with thought signature support
    */
   public async initializeModel(
     config: ModelLoadConfig,
@@ -199,6 +201,75 @@ export class ModelManager {
 
     const apiKey = this.getUserApiKey(graphConfig, provider);
 
+    // =========================================================================
+    // Use custom ChatGoogleGenAI for google-genai provider
+    // This properly handles Gemini 3's thought signatures for function calling
+    // =========================================================================
+    if (provider === "google-genai") {
+      // Determine if this is a Gemini 3 model that supports thinkingConfig
+      const isGemini3 = modelName.includes("gemini-3");
+      const isGemini25 = modelName.includes("gemini-2.5") || modelName.includes("gemini-2-5");
+      
+      // Build thinkingConfig for Gemini 3 and 2.5 models
+      // - includeThoughts: true - to see reasoning/thought summaries in response
+      // - thinkingLevel: for Gemini 3 models (minimal, low, medium, high)
+      // - thinkingBudget: for Gemini 2.5 models (number of tokens)
+      let thinkingConfig: ThinkingConfig | undefined;
+      
+      if (isGemini3) {
+        // Gemini 3 uses thinkingLevel (default is "high" for dynamic thinking)
+        // Set includeThoughts: true to see thought summaries
+        thinkingConfig = {
+          includeThoughts: true,
+          // thinkingLevel: "medium", // Can be: minimal, low, medium, high (default: high)
+        };
+        logger.info("Gemini 3 model detected, enabling thought summaries", {
+          modelName,
+          thinkingConfig,
+        });
+      } else if (isGemini25) {
+        // Gemini 2.5 uses thinkingBudget (number of tokens)
+        // -1 = dynamic thinking (model decides)
+        // 0 = disable thinking
+        // 128-32768 for Pro, 0-24576 for Flash
+        thinkingConfig = {
+          includeThoughts: true,
+          thinkingBudget: thinkingBudgetTokens || -1, // -1 for dynamic thinking
+        };
+        logger.info("Gemini 2.5 model detected, enabling thought summaries", {
+          modelName,
+          thinkingConfig,
+        });
+      }
+
+      logger.info("Using custom ChatGoogleGenAI with thought signature support", {
+        modelName,
+        hasApiKey: !!apiKey,
+        isGemini3,
+        isGemini25,
+        hasThinkingConfig: !!thinkingConfig,
+      });
+
+      const googleModel = new ChatGoogleGenAI({
+        model: modelName,
+        apiKey: apiKey || process.env.GOOGLE_API_KEY,
+        temperature: thinkingModel ? undefined : temperature,
+        maxOutputTokens: finalMaxTokens,
+        thinkingConfig: thinkingConfig,
+      });
+
+      logger.error("[Gemini Debug] ChatGoogleGenAI created", {
+        modelName,
+        modelType: googleModel?.constructor?.name,
+        modelLlmType: googleModel?._llmType?.(),
+        hasBindTools: typeof googleModel?.bindTools === 'function',
+        thinkingConfig: thinkingConfig,
+      });
+
+      return googleModel as unknown as ConfigurableModel;
+    }
+
+    // For other providers, use initChatModel as before
     const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
       max_retries: MAX_RETRIES,
@@ -482,18 +553,18 @@ export class ModelManager {
     // Fallback to hardcoded defaults
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
       anthropic: {
-        [LLMTask.PLANNER]: "claude-sonnet-4-5",
-        [LLMTask.PROGRAMMER]: "claude-sonnet-4-5",
-        [LLMTask.REVIEWER]: "claude-sonnet-4-5",
+        [LLMTask.PLANNER]: "claude-opus-4-5",
+        [LLMTask.PROGRAMMER]: "claude-opus-4-5",
+        [LLMTask.REVIEWER]: "claude-opus-4-5",
         [LLMTask.ROUTER]: "claude-haiku-4-5-latest",
-        [LLMTask.SUMMARIZER]: "claude-sonnet-4-5",
+        [LLMTask.SUMMARIZER]: "claude-opus-4-5",
       },
       "google-genai": {
-        [LLMTask.PLANNER]: "gemini-3-flash-preview",
-        [LLMTask.PROGRAMMER]: "gemini-3-flash-preview",
-        [LLMTask.REVIEWER]: "gemini-3-flash-preview",
-        [LLMTask.ROUTER]: "gemini-3-flash-preview",
-        [LLMTask.SUMMARIZER]: "gemini-3-flash-preview",
+        [LLMTask.PLANNER]: "gemini-3-pro-preview",
+        [LLMTask.PROGRAMMER]: "gemini-3-pro-preview",
+        [LLMTask.REVIEWER]: "gemini-flash-latest",
+        [LLMTask.ROUTER]: "gemini-flash-latest",
+        [LLMTask.SUMMARIZER]: "gemini-3-pro-preview",
       },
       openai: {
         // Using LiteLLM gateway with Claude models

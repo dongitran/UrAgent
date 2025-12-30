@@ -289,16 +289,25 @@ async function createToolsAndPrompt(
     totalInternalMessages: state.internalMessages.length,
     totalMissingMessages: options.missingMessages.length,
     filteredInputMessages: inputMessages.length,
-    inputMessageDetails: inputMessages.map((m: BaseMessage, idx: number) => ({
-      index: idx,
-      type: m.constructor.name,
-      role: m._getType?.() || "unknown",
-      hasContent: !!m.content,
-      contentLength: typeof m.content === "string" ? m.content.length : "N/A",
-      hasToolCalls: !!(m as AIMessage).tool_calls?.length,
-      toolCallsCount: (m as AIMessage).tool_calls?.length || 0,
-      toolCallNames: (m as AIMessage).tool_calls?.map((tc) => tc.name) || [],
-    })),
+    inputMessageDetails: inputMessages.map((m: BaseMessage, idx: number) => {
+      const aiMsg = m as AIMessage;
+      const metadata = aiMsg.response_metadata as Record<string, unknown> | undefined;
+      return {
+        index: idx,
+        type: m.constructor.name,
+        role: m._getType?.() || "unknown",
+        hasContent: !!m.content,
+        contentLength: typeof m.content === "string" ? m.content.length : "N/A",
+        hasToolCalls: !!aiMsg.tool_calls?.length,
+        toolCallsCount: aiMsg.tool_calls?.length || 0,
+        toolCallNames: aiMsg.tool_calls?.map((tc) => tc.name) || [],
+        hasResponseMetadata: !!metadata,
+        hasThoughtSignature: !!metadata?.thoughtSignature,
+        thoughtSignaturePreview: metadata?.thoughtSignature 
+          ? (metadata.thoughtSignature as string).slice(0, 30) + '...'
+          : undefined,
+      };
+    }),
   });
 
   if (!inputMessages.length) {
