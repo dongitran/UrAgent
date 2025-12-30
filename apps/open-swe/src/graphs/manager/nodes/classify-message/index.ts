@@ -113,6 +113,14 @@ export async function classifyMessage(
     config,
     LLMTask.ROUTER,
   );
+
+  logger.error("[Gemini Debug] classify-message: About to bindTools", {
+    toolCount: 1,
+    toolName: respondAndRouteTool.name,
+    tool_choice: respondAndRouteTool.name,
+    modelSupportsParallelToolCallsParam,
+  });
+
   const modelWithTools = model.bindTools([respondAndRouteTool], {
     tool_choice: respondAndRouteTool.name,
     ...(modelSupportsParallelToolCallsParam
@@ -120,6 +128,14 @@ export async function classifyMessage(
           parallel_tool_calls: false,
         }
       : {}),
+  });
+
+  logger.error("[Gemini Debug] classify-message: After bindTools", {
+    modelWithToolsType: modelWithTools?.constructor?.name,
+    hasPrimaryRunnable: !!(modelWithTools as any)?.primaryRunnable,
+    primaryRunnableType: (modelWithTools as any)?.primaryRunnable?.constructor?.name,
+    primaryHas_queuedMethodOperations: !!(modelWithTools as any)?.primaryRunnable?._queuedMethodOperations,
+    primaryHasBoundTools: !!(modelWithTools as any)?.primaryRunnable?.boundTools,
   });
 
   const response = await modelWithTools.invoke([
@@ -134,6 +150,13 @@ export async function classifyMessage(
       ),
     },
   ]);
+
+  logger.error("[Gemini Debug] classify-message: Model response received", {
+    responseType: response?.constructor?.name,
+    hasToolCalls: !!response.tool_calls?.length,
+    toolCallCount: response.tool_calls?.length ?? 0,
+    toolCallNames: response.tool_calls?.map((tc: any) => tc.name) ?? [],
+  });
 
   const toolCall = response.tool_calls?.[0];
   if (!toolCall) {

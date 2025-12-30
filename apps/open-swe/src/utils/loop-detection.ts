@@ -87,13 +87,13 @@ export const LOOP_DETECTION_CONFIG = {
   /** Window size for frequency-based detection */
   FREQUENCY_WINDOW: 20, // Increased from 15 for larger window
   /** Frequency threshold (same tool called X times in window) */
-  FREQUENCY_THRESHOLD: 10, // Increased from 7 - shell commands are common
+  FREQUENCY_THRESHOLD: 12, // Increased from 10 - view/read operations are common during exploration
   /** Edit loop threshold - more severe, request help earlier */
   EDIT_LOOP_THRESHOLD: 5, // Increased from 4 - give more attempts before requesting help
   /** Maximum warnings before escalating to force_complete */
   MAX_WARNINGS_BEFORE_ESCALATE: 3, // Increased from 2 for more tolerance
   /** Minimum unique files to consider as legitimate exploration (not a loop) */
-  MIN_UNIQUE_FILES_FOR_EXPLORATION: 5,
+  MIN_UNIQUE_FILES_FOR_EXPLORATION: 8,
   /** Similarity threshold for chanting detection (Jaccard similarity) */
   CHANTING_SIMILARITY_THRESHOLD: 0.9,
   /** Minimum consecutive chanting messages to trigger detection */
@@ -108,6 +108,7 @@ export const LOOP_DETECTION_CONFIG = {
 
 /** Tools that are considered "read-only" operations */
 const READ_ONLY_TOOLS = [
+  "view", // View tool for reading files
   "shell", // When used with cat, ls, grep, etc.
   "grep",
   "search",
@@ -182,6 +183,11 @@ function isReadOnlyToolCall(
   name: string,
   args: Record<string, unknown>,
 ): boolean {
+  // view tool is always read-only
+  if (name === "view") {
+    return true;
+  }
+
   if (READ_ONLY_TOOLS.includes(name) && name !== "shell") {
     return true;
   }
@@ -264,6 +270,11 @@ function extractTargetFile(
     }
   }
 
+  // view tool - extracts path from args.path
+  if (name === "view" && typeof args.path === "string") {
+    targetFile = args.path;
+  }
+
   // str_replace_based_edit_tool
   if (name === "str_replace_based_edit_tool" && typeof args.path === "string") {
     targetFile = args.path;
@@ -278,9 +289,19 @@ function extractTargetFile(
     }
   }
 
+  // apply_patch tool - also check file_path arg
+  if (name === "apply_patch" && typeof args.file_path === "string") {
+    targetFile = args.file_path;
+  }
+
   // grep tool
   if (name === "grep" && typeof args.path === "string") {
     targetFile = args.path;
+  }
+
+  // search_document_for tool
+  if (name === "search_document_for" && typeof args.file_path === "string") {
+    targetFile = args.file_path;
   }
 
   // Normalize the path if found
