@@ -5,7 +5,7 @@ import {
   StreamMode,
   ToolMessage,
 } from "@langchain/langgraph-sdk";
-import { getContentString } from "../utils";
+import { getContentString, getReasoningString, getContentWithReasoning } from "../utils";
 import { MarkdownText } from "../markdown-text";
 import {
   LoadExternalComponent,
@@ -209,9 +209,13 @@ export function mapToolMessageToActionStepProps(
   const aiMessage = threadMessages
     .filter(isAIMessageSDK)
     .find((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id));
-  const reasoningText = aiMessage
-    ? getContentString(aiMessage.content)
-    : undefined;
+  
+  // Extract reasoning from AIMessage content
+  // Priority: reasoning blocks (Gemini 3 thinking) > text content
+  const { text, reasoning } = aiMessage
+    ? getContentWithReasoning(aiMessage.content)
+    : { text: "", reasoning: undefined };
+  const reasoningText = reasoning || text || undefined;
 
   const status: ActionItemProps["status"] = "done";
   const success = message.status !== "error";
@@ -386,6 +390,10 @@ export function AssistantMessage({
   };
 
   const contentString = getContentString(content);
+  // Extract reasoning from content (Gemini 3 thinking output)
+  const reasoningString = getReasoningString(content);
+  // Use reasoning if available, otherwise fall back to text content
+  const effectiveReasoningText = reasoningString || contentString;
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
@@ -517,7 +525,7 @@ export function AssistantMessage({
     );
 
     const args = requestHumanHelpToolCall.args as RequestHumanHelpToolArgs;
-    const reasoningText = getContentString(content);
+    const reasoningText = effectiveReasoningText;
 
     return (
       <div className="flex flex-col gap-4">
@@ -568,7 +576,7 @@ export function AssistantMessage({
     );
 
     const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
-    const reasoningText = getContentString(content);
+    const reasoningText = effectiveReasoningText;
 
     return (
       <div className="flex flex-col gap-4">
@@ -588,7 +596,7 @@ export function AssistantMessage({
 
     const args =
       writeTechnicalNotesToolCall.args as WriteTechnicalNotesToolArgs;
-    const reasoningText = getContentString(content);
+    const reasoningText = effectiveReasoningText;
 
     return (
       <div className="flex flex-col gap-4">
@@ -679,7 +687,7 @@ export function AssistantMessage({
         <MarkTaskCompleted
           status={status}
           review={args.review}
-          reasoningText={contentString}
+          reasoningText={effectiveReasoningText}
         />
       </div>
     );
@@ -702,7 +710,7 @@ export function AssistantMessage({
           status={status}
           review={args.review}
           additionalActions={args.additional_actions}
-          reasoningText={contentString}
+          reasoningText={effectiveReasoningText}
         />
       </div>
     );
@@ -836,7 +844,7 @@ export function AssistantMessage({
           actions={actionItems.filter(
             (item): item is ActionItemProps => item !== undefined,
           )}
-          reasoningText={contentString}
+          reasoningText={effectiveReasoningText}
         />
       </div>
     );
