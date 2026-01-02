@@ -2,12 +2,15 @@ import { Button } from "@/components/ui/button";
 import { Loader2, SquareStop } from "lucide-react";
 import { UseStream } from "@langchain/langgraph-sdk/react";
 import { useCancelStream } from "@/hooks/useCancelStream";
+import { AgentSession } from "@openswe/shared/open-swe/types";
 
 interface CancelStreamButtonProps {
   stream: UseStream<any>;
   threadId?: string;
   runId?: string;
   streamName: "Planner" | "Programmer";
+  // Optional: programmer session to cancel when cancelling planner
+  programmerSession?: AgentSession;
 }
 
 export function CancelStreamButton({
@@ -15,12 +18,14 @@ export function CancelStreamButton({
   threadId,
   runId,
   streamName,
+  programmerSession,
 }: CancelStreamButtonProps) {
   const { cancelRun, cancelLoading } = useCancelStream({
     stream,
     threadId,
     runId,
     streamName,
+    programmerSession,
   });
 
   const shouldShow = stream.isLoading && threadId && runId;

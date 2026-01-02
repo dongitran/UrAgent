@@ -24,7 +24,8 @@ import {
   safeSchemaToString,
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
-import { Command } from "@langchain/langgraph";
+import { Command, END } from "@langchain/langgraph";
+import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import {
@@ -50,6 +51,45 @@ import {
 } from "../../../tools/reply-to-review-comment.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
+
+/**
+ * Check if the current run has been cancelled by the user.
+ * This is used to prevent committing changes after the user has stopped the programmer.
+ */
+async function isRunCancelled(config: GraphConfig): Promise<boolean> {
+  const threadId = config.configurable?.thread_id;
+  const runId = config.configurable?.run_id;
+  
+  if (!threadId || !runId) {
+    return false;
+  }
+  
+  try {
+    const client = createLangGraphClient();
+    const run = await client.runs.get(threadId, runId);
+    
+    // Check if run status indicates cancellation
+    const cancelledStatuses = ["cancelled", "interrupted", "error"];
+    const isCancelled = cancelledStatuses.includes(run.status);
+    
+    if (isCancelled) {
+      logger.info("Run has been cancelled by user", {
+        threadId,
+        runId,
+        status: run.status,
+      });
+    }
+    
+    return isCancelled;
+  } catch (error) {
+    // If we can't check the run status, assume it's not cancelled
+    // This prevents blocking the workflow due to API errors
+    logger.warn("Failed to check run cancellation status", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
 
 export async function takeAction(
   state: GraphState,
@@ -244,6 +284,7 @@ export async function takeAction(
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
+  let isRunCancelledByUser = false;
 
   logger.info("=== TAKE ACTION - CHECKING FOR COMMITS ===", {
     isLocalMode: isLocalMode(config),
@@ -264,37 +305,45 @@ export async function takeAction(
     });
 
     if (changedFiles.length > 0) {
-      logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
-        changedFiles,
-        branchName,
-        targetBranch: state.targetRepository?.branch,
-      });
-
-      const { githubInstallationToken } =
-        await getGitHubTokensFromConfig(config);
-      const result = await checkoutBranchAndCommit(
-        config,
-        state.targetRepository,
-        sandbox,
-        {
+      // Check if the run has been cancelled before committing
+      isRunCancelledByUser = await isRunCancelled(config);
+      if (isRunCancelledByUser) {
+        logger.info("Skipping commit because run has been cancelled by user", {
+          changedFilesCount: changedFiles.length,
+        });
+      } else {
+        logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
+          changedFiles,
           branchName,
-          githubInstallationToken,
-          taskPlan: state.taskPlan,
-          githubIssueId: state.githubIssueId,
-        },
-      );
+          targetBranch: state.targetRepository?.branch,
+        });
 
-      logger.info("After checkoutBranchAndCommit in take-action", {
-        oldBranchName: branchName,
-        newBranchName: result.branchName,
-        branchChanged: branchName !== result.branchName,
-      });
+        const { githubInstallationToken } =
+          await getGitHubTokensFromConfig(config);
+        const result = await checkoutBranchAndCommit(
+          config,
+          state.targetRepository,
+          sandbox,
+          {
+            branchName,
+            githubInstallationToken,
+            taskPlan: state.taskPlan,
+            githubIssueId: state.githubIssueId,
+          },
+        );
 
-      branchName = result.branchName;
-      pullRequestNumber = result.updatedTaskPlan
-        ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
-        : undefined;
-      updatedTaskPlan = result.updatedTaskPlan;
+        logger.info("After checkoutBranchAndCommit in take-action", {
+          oldBranchName: branchName,
+          newBranchName: result.branchName,
+          branchChanged: branchName !== result.branchName,
+        });
+
+        branchName = result.branchName;
+        pullRequestNumber = result.updatedTaskPlan
+          ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+          : undefined;
+        updatedTaskPlan = result.updatedTaskPlan;
+      }
     }
   }
 
@@ -350,6 +399,16 @@ export async function takeAction(
     }),
     ...allStateUpdates,
   };
+
+  // If run was cancelled by user, stop the graph immediately
+  if (isRunCancelledByUser) {
+    logger.info("Stopping graph because run has been cancelled by user");
+    return new Command({
+      goto: END,
+      update: commandUpdate,
+    });
+  }
+
   return new Command({
     goto: shouldRouteDiagnoseNode ? "diagnose-error" : "generate-action",
     update: commandUpdate,
