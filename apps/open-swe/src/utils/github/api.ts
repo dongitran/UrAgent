@@ -50,7 +50,102 @@ async function getInstallationTokenAndUpdateConfig() {
 }
 
 /**
- * Generic utility for handling GitHub API calls with automatic retry on 401 errors
+ * Check if an error is a transient network error that should be retried
+ */
+function isTransientNetworkError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    const errorCode = (error as any).code;
+
+    // DNS resolution errors
+    if (errorCode === "EAI_AGAIN" || message.includes("eai_again")) {
+      return true;
+    }
+
+    // Connection timeout errors
+    if (
+      errorCode === "UND_ERR_CONNECT_TIMEOUT" ||
+      message.includes("connect timeout") ||
+      message.includes("connecttimeouterror")
+    ) {
+      return true;
+    }
+
+    // Other transient errors
+    if (
+      message.includes("econnreset") ||
+      message.includes("econnrefused") ||
+      message.includes("etimedout") ||
+      message.includes("socket hang up") ||
+      message.includes("network") ||
+      message.includes("fetch failed")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate delay with exponential backoff and jitter
+ */
+function calculateRetryDelay(attempt: number): number {
+  const baseDelay = 1000; // 1 second
+  const maxDelay = 10000; // 10 seconds
+  const exponentialDelay = baseDelay * Math.pow(2, attempt);
+  const cappedDelay = Math.min(exponentialDelay, maxDelay);
+  // Add jitter (±25%)
+  const jitter = cappedDelay * 0.25 * (Math.random() * 2 - 1);
+  return Math.round(cappedDelay + jitter);
+}
+
+/**
+ * Execute an Octokit operation with retry for transient network errors
+ * This is a simpler version that doesn't handle token refresh (for operations that don't need it)
+ */
+async function withNetworkRetry<T>(
+  operation: () => Promise<T>,
+  errorMessage: string,
+  maxRetries = 3,
+): Promise<T> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (isTransientNetworkError(error) && attempt < maxRetries - 1) {
+        const delay = calculateRetryDelay(attempt);
+        logger.warn(
+          `${errorMessage} - transient error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
+          { error: lastError.message },
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      // Not retryable or max retries reached
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error("Max retries reached");
+}
+
+/**
+ * Generic utility for handling GitHub API calls with automatic retry
+ * Retries on:
+ * - 401 errors (authentication) - refreshes token and retries
+ * - Transient network errors (DNS, timeout, connection reset, etc.)
  */
 async function withGitHubRetry<T>(
   operation: (token: string) => Promise<T>,
@@ -58,6 +153,7 @@ async function withGitHubRetry<T>(
   errorMessage: string,
   additionalLogFields?: Record<string, any>,
   numRetries = 1,
+  maxRetries = 3,
 ): Promise<T | null> {
   try {
     return await operation(initialToken);
@@ -71,8 +167,12 @@ async function withGitHubRetry<T>(
           }
         : {};
 
-    // Retry with a max retries of 2
+    // Retry on 401 (authentication error) - refresh token
     if (errorFields && errorFields.message?.includes("401") && numRetries < 2) {
+      logger.warn(`GitHub API 401 error, refreshing token and retrying...`, {
+        attempt: numRetries,
+        ...additionalLogFields,
+      });
       const token = await getInstallationTokenAndUpdateConfig();
       if (!token) {
         return null;
@@ -83,6 +183,28 @@ async function withGitHubRetry<T>(
         errorMessage,
         additionalLogFields,
         numRetries + 1,
+        maxRetries,
+      );
+    }
+
+    // Retry on transient network errors
+    if (isTransientNetworkError(error) && numRetries < maxRetries) {
+      const delay = calculateRetryDelay(numRetries - 1);
+      logger.warn(
+        `GitHub API transient error, retrying in ${delay}ms (attempt ${numRetries}/${maxRetries})`,
+        {
+          error: errorFields.message,
+          ...additionalLogFields,
+        },
+      );
+      await sleep(delay);
+      return withGitHubRetry(
+        operation,
+        initialToken,
+        errorMessage,
+        additionalLogFields,
+        numRetries + 1,
+        maxRetries,
       );
     }
 
@@ -173,10 +295,10 @@ export async function createPullRequest({
         owner,
         repo,
       });
-      const { data: repository } = await octokit.repos.get({
-        owner,
-        repo,
-      });
+      const { data: repository } = await withNetworkRetry(
+        () => octokit.repos.get({ owner, repo }),
+        "Failed to fetch repo info",
+      );
 
       repoBaseBranch = repository.default_branch;
       if (!repoBaseBranch) {
@@ -217,16 +339,20 @@ export async function createPullRequest({
       draft,
     });
 
-    // Step 2: Create the pull request
-    const { data: pullRequestData } = await octokit.pulls.create({
-      draft,
-      owner,
-      repo,
-      title,
-      body,
-      head: headBranch,
-      base: repoBaseBranch,
-    });
+    // Step 2: Create the pull request with retry for network errors
+    const { data: pullRequestData } = await withNetworkRetry(
+      () =>
+        octokit.pulls.create({
+          draft,
+          owner,
+          repo,
+          title,
+          body,
+          head: headBranch,
+          base: repoBaseBranch,
+        }),
+      "Failed to create pull request",
+    );
 
     pullRequest = pullRequestData;
     logger.info(`🐙 Pull request created successfully!`, {
@@ -273,12 +399,16 @@ export async function createPullRequest({
     logger.info("Adding 'open-swe' label to pull request", {
       pullRequestNumber: pullRequest.number,
     });
-    await octokit.issues.addLabels({
-      owner,
-      repo,
-      issue_number: pullRequest.number,
-      labels: [getOpenSWELabel()],
-    });
+    await withNetworkRetry(
+      () =>
+        octokit.issues.addLabels({
+          owner,
+          repo,
+          issue_number: pullRequest.number,
+          labels: [getOpenSWELabel()],
+        }),
+      "Failed to add label to pull request",
+    );
     logger.info("Added 'open-swe' label to pull request", {
       pullRequestNumber: pullRequest.number,
     });
@@ -487,31 +617,26 @@ export async function createIssue({
   body: string;
   githubAccessToken: string;
 }): Promise<GitHubIssue | null> {
-  const octokit = new Octokit({
-    auth: githubAccessToken,
-  });
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-  try {
-    const { data: issue } = await octokit.issues.create({
-      owner,
-      repo,
-      title,
-      body,
-    });
+      const { data: issue } = await octokit.issues.create({
+        owner,
+        repo,
+        title,
+        body,
+      });
 
-    return issue;
-  } catch (error) {
-    const errorFields =
-      error instanceof Error
-        ? {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-          }
-        : { error };
-    logger.error(`Failed to create issue`, errorFields);
-    return null;
-  }
+      return issue;
+    },
+    githubAccessToken,
+    "Failed to create issue",
+    { owner, repo, title },
+    1,
+  );
 }
 
 export async function updateIssue({
