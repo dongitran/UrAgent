@@ -1,8 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInstallationToken } from "@openswe/shared/github/auth";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
+import { fetchGitHubWithRetry } from "@openswe/shared/utils/fetch-with-retry";
+import { githubApiCache } from "@/utils/cache";
 
 const GITHUB_API_URL = "https://api.github.com";
+
+// Cache TTL in seconds for different endpoints
+const CACHE_TTL: Record<string, number> = {
+  branches: 180,     // 3 minutes
+  repos: 300,        // 5 minutes
+  contents: 180,     // 3 minutes
+  default: 180,      // 3 minutes default
+};
+
+function getCacheTTL(path: string): number {
+  for (const [key, ttl] of Object.entries(CACHE_TTL)) {
+    if (path.includes(key)) return ttl;
+  }
+  return CACHE_TTL.default;
+}
+
+function shouldCache(method: string, path: string): boolean {
+  // Only cache GET requests for read-only endpoints
+  if (method !== "GET") return false;
+  
+  // Cache branches, repos info, contents
+  const cacheablePatterns = ["/branches", "/repos/", "/contents/"];
+  return cacheablePatterns.some(pattern => path.includes(pattern));
+}
 
 async function handler(req: NextRequest) {
   const path = req.nextUrl.pathname.replace(/^\/api\/github\/proxy\//, "");
@@ -42,6 +68,20 @@ async function handler(req: NextRequest) {
       targetUrl.searchParams.append(key, value);
     });
 
+    // Check cache for GET requests
+    const cacheKey = `${installationIdCookie}:${targetUrl.toString()}`;
+    if (shouldCache(req.method, path)) {
+      const cachedData = githubApiCache.get<{ body: string; status: number; headers: Record<string, string> }>(cacheKey);
+      if (cachedData) {
+        const responseHeaders = new Headers(cachedData.headers);
+        responseHeaders.set("X-Cache", "HIT");
+        return new NextResponse(cachedData.body, {
+          status: cachedData.status,
+          headers: responseHeaders,
+        });
+      }
+    }
+
     const headers = new Headers();
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Accept", "application/vnd.github.v3+json");
@@ -51,7 +91,7 @@ async function handler(req: NextRequest) {
       headers.set("Content-Type", req.headers.get("Content-Type")!);
     }
 
-    const response = await fetch(targetUrl.toString(), {
+    const response = await fetchGitHubWithRetry(targetUrl.toString(), {
       method: req.method,
       headers: headers,
       body:
@@ -60,6 +100,28 @@ async function handler(req: NextRequest) {
 
     const responseHeaders = new Headers(response.headers);
     responseHeaders.delete("Content-Encoding"); // Prevent ERR_CONTENT_DECODING_FAILED error.
+
+    // Cache successful GET responses
+    if (shouldCache(req.method, path) && response.ok) {
+      const responseBody = await response.text();
+      const headersObj: Record<string, string> = {};
+      responseHeaders.forEach((value, key) => {
+        headersObj[key] = value;
+      });
+      
+      githubApiCache.set(cacheKey, {
+        body: responseBody,
+        status: response.status,
+        headers: headersObj,
+      }, getCacheTTL(path));
+
+      responseHeaders.set("X-Cache", "MISS");
+      return new NextResponse(responseBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
+    }
 
     return new NextResponse(response.body, {
       status: response.status,
