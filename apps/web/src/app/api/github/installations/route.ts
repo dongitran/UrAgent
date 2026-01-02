@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGitHubToken } from "@/lib/auth";
 import { Endpoints } from "@octokit/types";
+import { fetchWithRetry } from "@openswe/shared/utils/fetch-with-retry";
 
 type GitHubInstallationsResponse =
   Endpoints["GET /user/installations"]["response"]["data"];
@@ -9,6 +10,7 @@ type GitHubInstallationsResponse =
  * Fetches all GitHub App installations accessible to the current user
  * Uses the user's access token from GITHUB_TOKEN_COOKIE to call GET /user/installations
  * Falls back to default installation if configured in environment
+ * Includes retry logic for transient network errors
  */
 export async function GET(request: NextRequest) {
   try {
@@ -46,14 +48,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch installations from GitHub API
-    const response = await fetch("https://api.github.com/user/installations", {
-      headers: {
-        Authorization: `${tokenData.token_type} ${tokenData.access_token}`,
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "OpenSWE-Agent",
+    // Fetch installations from GitHub API with retry
+    const response = await fetchWithRetry(
+      "https://api.github.com/user/installations",
+      {
+        headers: {
+          Authorization: `${tokenData.token_type} ${tokenData.access_token}`,
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "OpenSWE-Agent",
+        },
       },
-    });
+      {
+        maxRetries: 3,
+        initialDelayMs: 1000,
+        timeoutMs: 30000,
+      },
+    );
 
     if (!response.ok) {
       const errorData = await response.json();

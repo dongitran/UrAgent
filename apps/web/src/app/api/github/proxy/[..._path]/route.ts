@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInstallationToken } from "@openswe/shared/github/auth";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
+import { fetchGitHubWithRetry } from "@openswe/shared/utils/fetch-with-retry";
 
 const GITHUB_API_URL = "https://api.github.com";
 
@@ -51,7 +52,7 @@ async function handler(req: NextRequest) {
       headers.set("Content-Type", req.headers.get("Content-Type")!);
     }
 
-    const response = await fetch(targetUrl.toString(), {
+    const response = await fetchGitHubWithRetry(targetUrl.toString(), {
       method: req.method,
       headers: headers,
       body:

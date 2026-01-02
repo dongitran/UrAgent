@@ -1,5 +1,4 @@
 import { getInstallationToken } from "@openswe/shared/github/auth";
-import { App } from "@octokit/app";
 import { GITHUB_TOKEN_COOKIE } from "@openswe/shared/constants";
 import { encryptSecret } from "@openswe/shared/crypto";
 import { NextRequest } from "next/server";
@@ -12,6 +11,7 @@ import {
   refreshAccessToken,
 } from "@/lib/keycloak";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
+import { fetchWithRetry } from "@openswe/shared/utils/fetch-with-retry";
 
 // Header name for refreshed token from middleware
 const REFRESHED_TOKEN_HEADER = "x-keycloak-refreshed-token";
@@ -279,19 +279,38 @@ async function getInstallationName(installationId: string) {
   if (!process.env.GITHUB_APP_ID || !process.env.GITHUB_APP_PRIVATE_KEY) {
     throw new Error("GitHub App ID or Private App Key is not configured.");
   }
-  const app = new App({
-    appId: process.env.GITHUB_APP_ID,
-    privateKey: process.env.GITHUB_APP_PRIVATE_KEY,
-  });
 
-  // Get installation details
-  const { data } = await app.octokit.request(
-    "GET /app/installations/{installation_id}",
+  // Use fetchWithRetry for the GitHub API call
+  const { generateJWT } = await import("@openswe/shared/jwt");
+  const jwtToken = generateJWT(
+    process.env.GITHUB_APP_ID,
+    process.env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  );
+
+  const response = await fetchWithRetry(
+    `https://api.github.com/app/installations/${installationId}`,
     {
-      installation_id: Number(installationId),
+      headers: {
+        Authorization: `Bearer ${jwtToken}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "OpenSWE-Agent",
+      },
+    },
+    {
+      maxRetries: 3,
+      initialDelayMs: 1000,
+      timeoutMs: 30000,
     },
   );
 
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      `Failed to get installation: ${JSON.stringify(errorData)}`,
+    );
+  }
+
+  const data = await response.json();
   const installationName =
     data.account && "name" in data.account
       ? data.account.name

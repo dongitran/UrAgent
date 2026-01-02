@@ -6,6 +6,7 @@ import {
 } from "@openswe/shared/constants";
 import { getInstallationCookieOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { fetchWithRetry } from "@openswe/shared/utils/fetch-with-retry";
 
 export async function GET(request: NextRequest) {
   try {
@@ -48,8 +49,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Exchange authorization code for access token
-    const tokenResponse = await fetch(
+    // Exchange authorization code for access token with retry for network errors
+    const tokenResponse = await fetchWithRetry(
       "https://github.com/login/oauth/access_token",
       {
         method: "POST",
@@ -63,6 +64,11 @@ export async function GET(request: NextRequest) {
           code: code,
           redirect_uri: redirectUri,
         }),
+      },
+      {
+        maxRetries: 3,
+        initialDelayMs: 1000,
+        timeoutMs: 30000,
       },
     );
 

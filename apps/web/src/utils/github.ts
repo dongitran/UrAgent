@@ -1,3 +1,5 @@
+import { fetchWithRetry } from "@openswe/shared/utils/fetch-with-retry";
+
 function getBaseApiUrl(): string {
   let baseApiUrl = new URL(
     process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api",
@@ -8,6 +10,7 @@ function getBaseApiUrl(): string {
 
 /**
  * Fetches repositories accessible to a GitHub App installation
+ * Includes retry logic for transient network errors
  */
 export async function getInstallationRepositories(
   installationToken: string,
@@ -22,13 +25,21 @@ export async function getInstallationRepositories(
   url.searchParams.set("page", page.toString());
   url.searchParams.set("per_page", perPage.toString());
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${installationToken}`,
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "YourAppName",
+  const response = await fetchWithRetry(
+    url.toString(),
+    {
+      headers: {
+        Authorization: `Bearer ${installationToken}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "YourAppName",
+      },
     },
-  });
+    {
+      maxRetries: 3,
+      initialDelayMs: 1000,
+      timeoutMs: 30000,
+    },
+  );
 
   if (!response.ok) {
     const errorData = await response.json();
