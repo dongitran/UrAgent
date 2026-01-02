@@ -18,6 +18,54 @@
 
 import { GoogleGenAI, type GoogleGenAIOptions, type HttpOptions } from "@google/genai";
 import { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
+
+// Retry configuration
+const MAX_RETRIES = 5;
+const INITIAL_RETRY_DELAY_MS = 1000; // 1 second
+const MAX_RETRY_DELAY_MS = 30000; // 30 seconds
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if an error is retryable (network errors, rate limits, server errors)
+ */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    // Network errors
+    if (message.includes('fetch failed') || 
+        message.includes('network') ||
+        message.includes('econnreset') ||
+        message.includes('econnrefused') ||
+        message.includes('etimedout') ||
+        message.includes('socket hang up')) {
+      return true;
+    }
+    // Rate limit errors (429)
+    if (message.includes('429') || message.includes('rate limit') || message.includes('quota')) {
+      return true;
+    }
+    // Server errors (5xx)
+    if (message.includes('500') || message.includes('502') || message.includes('503') || message.includes('504')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Calculate delay with exponential backoff and jitter
+ */
+function calculateRetryDelay(attempt: number): number {
+  const exponentialDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+  return Math.min(exponentialDelay + jitter, MAX_RETRY_DELAY_MS);
+}
 import {
   type BaseLanguageModelInput,
   type StructuredOutputMethodOptions,
@@ -292,16 +340,43 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       toolConfig,
     };
 
-    const response = await this.client.models.generateContent({
-      model: this.model,
-      contents,
-      config,
-    });
+    // Retry logic with exponential backoff
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const response = await this.client.models.generateContent({
+          model: this.model,
+          contents,
+          config,
+        });
 
-    const generation = convertGoogleResponseToChatGeneration(response);
-    return {
-      generations: [generation],
-    };
+        const generation = convertGoogleResponseToChatGeneration(response);
+        return {
+          generations: [generation],
+        };
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        
+        if (isRetryableError(error) && attempt < MAX_RETRIES - 1) {
+          const delay = calculateRetryDelay(attempt);
+          console.error(`[Gemini Retry] _generate attempt ${attempt + 1}/${MAX_RETRIES} failed, retrying in ${delay}ms`, {
+            error: lastError.message,
+            model: this.model,
+          });
+          await sleep(delay);
+        } else {
+          // Non-retryable error or last attempt
+          console.error(`[Gemini Retry] _generate failed after ${attempt + 1} attempts`, {
+            error: lastError.message,
+            model: this.model,
+            isRetryable: isRetryableError(error),
+          });
+          throw lastError;
+        }
+      }
+    }
+
+    throw lastError || new Error("Unknown error in _generate");
   }
 
   override async *_streamResponseChunks(
@@ -349,17 +424,58 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       toolConfig,
     };
 
-    const stream = await this.client.models.generateContentStream({
-      model: this.model,
-      contents,
-      config,
+    // Debug: Log thinkingConfig to verify it's being passed
+    console.error(`[Gemini Debug] _streamResponseChunks: Config with thinkingConfig`, {
+      hasThinkingConfig: !!params.thinkingConfig,
+      thinkingConfig: params.thinkingConfig,
+      includeThoughts: params.thinkingConfig?.includeThoughts,
     });
+
+    // Retry logic with exponential backoff - ONLY for stream initialization
+    // We cannot retry during stream iteration because chunks already yielded cannot be rolled back
+    let stream: AsyncIterable<any> | undefined;
+    let lastError: Error | undefined;
+    
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        // Initialize stream - this is where most network errors occur
+        stream = await this.client.models.generateContentStream({
+          model: this.model,
+          contents,
+          config,
+        });
+        break; // Success, exit retry loop
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        
+        if (isRetryableError(error) && attempt < MAX_RETRIES - 1) {
+          const delay = calculateRetryDelay(attempt);
+          console.error(`[Gemini Retry] _streamResponseChunks init attempt ${attempt + 1}/${MAX_RETRIES} failed, retrying in ${delay}ms`, {
+            error: lastError.message,
+            model: this.model,
+          });
+          await sleep(delay);
+        } else {
+          console.error(`[Gemini Retry] _streamResponseChunks init failed after ${attempt + 1} attempts`, {
+            error: lastError.message,
+            model: this.model,
+            isRetryable: isRetryableError(error),
+          });
+          throw lastError;
+        }
+      }
+    }
+
+    if (!stream) {
+      throw lastError || new Error("Failed to initialize stream after all retries");
+    }
 
     // Track the LAST thoughtSignature seen during streaming
     // This is critical because LangChain's concat() may concatenate signatures incorrectly
     let lastThoughtSignature: string | undefined;
     let accumulatedChunk: ChatGenerationChunk | undefined;
     
+    // Iterate stream - NO retry here because we can't rollback already-yielded chunks
     for await (const chunk of stream) {
       const generationChunk = convertGoogleStreamChunkToLangChainChunk(chunk);
       if (generationChunk) {
