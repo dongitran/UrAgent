@@ -24,11 +24,45 @@ const tokenCache = new Map<string, TokenCache>();
 const TOKEN_CACHE_TTL_MS = 50 * 60 * 1000; // 50 minutes
 
 /**
+ * Check if an error is a transient network error that should be retried
+ */
+function isTransientNetworkError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    const errorCode = (error as any).code;
+
+    if (
+      errorCode === "EAI_AGAIN" ||
+      errorCode === "UND_ERR_CONNECT_TIMEOUT" ||
+      message.includes("eai_again") ||
+      message.includes("connect timeout") ||
+      message.includes("econnreset") ||
+      message.includes("econnrefused") ||
+      message.includes("etimedout") ||
+      message.includes("socket hang up") ||
+      message.includes("fetch failed")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Generate GitHub installation token using GitHub App credentials from environment
  * Uses in-memory cache to avoid repeated API calls
+ * Includes retry logic for transient network errors
  */
 async function generateGitHubInstallationToken(
   installationId: string,
+  maxRetries = 3,
 ): Promise<string> {
   // Check cache first
   const cached = tokenCache.get(installationId);
@@ -45,26 +79,48 @@ async function generateGitHubInstallationToken(
     );
   }
 
-  const octokit = new Octokit({
-    authStrategy: createAppAuth,
-    auth: {
-      appId,
-      privateKey,
-      installationId: Number(installationId),
-    },
-  });
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const octokit = new Octokit({
+        authStrategy: createAppAuth,
+        auth: {
+          appId,
+          privateKey,
+          installationId: Number(installationId),
+        },
+      });
 
-  const { data } = await octokit.apps.createInstallationAccessToken({
-    installation_id: Number(installationId),
-  });
+      const { data } = await octokit.apps.createInstallationAccessToken({
+        installation_id: Number(installationId),
+      });
 
-  // Cache the token
-  tokenCache.set(installationId, {
-    token: data.token,
-    expiresAt: Date.now() + TOKEN_CACHE_TTL_MS,
-  });
+      // Cache the token
+      tokenCache.set(installationId, {
+        token: data.token,
+        expiresAt: Date.now() + TOKEN_CACHE_TTL_MS,
+      });
 
-  return data.token;
+      return data.token;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (isTransientNetworkError(error) && attempt < maxRetries - 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+        console.warn(
+          `[generateGitHubInstallationToken] Transient error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
+          lastError.message,
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      // Not retryable or max retries reached
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error("Max retries reached");
 }
 
 export async function getDefaultHeaders(
