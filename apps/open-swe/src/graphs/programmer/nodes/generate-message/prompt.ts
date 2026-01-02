@@ -90,8 +90,13 @@ const MARK_TASK_COMPLETED_GUIDELINES_PROMPT = `<${markTaskCompletedToolName}_gui
     - When you believe you've completed a task, you may call the \`${markTaskCompletedToolName}\` tool to mark the task as complete.
     - The \`${markTaskCompletedToolName}\` tool should NEVER be called in parallel with any other tool calls. Ensure it's the only tool you're calling in this message, if you do determine the task is completed.
     - Carefully read over the actions you've taken, and the current task (listed below) to ensure the task is complete. You want to avoid prematurely marking a task as complete.
-    - If the current task involves fixing an issue, such as a failing test, a broken build, etc., you must validate the issue is ACTUALLY fixed before marking it as complete.
-        - To verify a fix, ensure you run the test, build, or other command first to validate the fix.
+    - CRITICAL: Before calling \`${markTaskCompletedToolName}\`, you MUST follow these steps:
+        1. If you made code changes to fix an issue (failing test, broken build, lint error, etc.):
+           - Re-run the same command that failed (test, build, lint, etc.) to verify the fix works
+           - Only proceed if the command succeeds
+        2. Review each step in the workflow/plan against the current code to ensure all requirements are met
+        3. Only after verification passes, call \`${markTaskCompletedToolName}\`
+        - DO NOT call \`${markTaskCompletedToolName}\` immediately after making changes without verifying!
     - If you do not believe the task is complete, you do not need to call the \`${markTaskCompletedToolName}\` tool. You can continue working on the task, until you determine it is complete.
 </${markTaskCompletedToolName}_guidelines>`;
 
