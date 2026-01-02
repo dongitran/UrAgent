@@ -32,11 +32,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Check if an error is retryable (network errors, rate limits, server errors)
+ * Check if an error is retryable (network errors, rate limits, server errors, abort errors)
  */
 function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
+    const errorName = error.name.toLowerCase();
+    
+    // Abort errors (timeout, cancelled requests)
+    if (errorName === 'aborterror' || 
+        message.includes('abort') || 
+        message.includes('aborted') ||
+        message.includes('operation was aborted')) {
+      return true;
+    }
     // Network errors
     if (message.includes('fetch failed') || 
         message.includes('network') ||

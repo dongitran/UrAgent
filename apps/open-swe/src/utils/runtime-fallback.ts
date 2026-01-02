@@ -22,6 +22,63 @@ import { MODELS_NO_PARALLEL_TOOL_CALLING } from "./llms/load-model.js";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
+// Retry configuration for FallbackRunnable
+const FALLBACK_MAX_RETRIES = 5;
+const FALLBACK_INITIAL_DELAY_MS = 1000; // 1 second
+const FALLBACK_MAX_DELAY_MS = 30000; // 30 seconds
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate delay with exponential backoff and jitter
+ */
+function calculateRetryDelay(attempt: number): number {
+  const exponentialDelay = FALLBACK_INITIAL_DELAY_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+  return Math.min(exponentialDelay + jitter, FALLBACK_MAX_DELAY_MS);
+}
+
+/**
+ * Check if an error is retryable (network errors, rate limits, server errors, abort errors)
+ */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    const errorName = error.name.toLowerCase();
+    
+    // Abort errors (timeout, cancelled requests)
+    if (errorName === 'aborterror' || 
+        message.includes('abort') || 
+        message.includes('aborted') ||
+        message.includes('operation was aborted')) {
+      return true;
+    }
+    // Network errors
+    if (message.includes('fetch failed') || 
+        message.includes('network') ||
+        message.includes('econnreset') ||
+        message.includes('econnrefused') ||
+        message.includes('etimedout') ||
+        message.includes('socket hang up')) {
+      return true;
+    }
+    // Rate limit errors (429)
+    if (message.includes('429') || message.includes('rate limit') || message.includes('quota')) {
+      return true;
+    }
+    // Server errors (5xx)
+    if (message.includes('500') || message.includes('502') || message.includes('503') || message.includes('504')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 interface ExtractedTools {
   tools: BindToolsInput[];
   kwargs: Record<string, any>;
@@ -280,15 +337,49 @@ export class FallbackRunnable<
             this.providerMessages?.[modelConfig.provider]?.length || 0,
         });
 
-        const result = await runnableToUse.invoke(messagesToInvoke, options);
+        // Retry logic with exponential backoff for each model
+        let modelLastError: Error | undefined;
+        for (let retryAttempt = 0; retryAttempt < FALLBACK_MAX_RETRIES; retryAttempt++) {
+          try {
+            const result = await runnableToUse.invoke(messagesToInvoke, options);
 
-        logger.error(`[Gemini Debug] Model invocation successful`, {
-          provider: modelConfig.provider,
-          modelKey,
-        });
+            logger.error(`[Gemini Debug] Model invocation successful`, {
+              provider: modelConfig.provider,
+              modelKey,
+              retryAttempt,
+            });
 
-        this.modelManager.recordSuccess(modelKey);
-        return result;
+            this.modelManager.recordSuccess(modelKey);
+            return result;
+          } catch (invokeError) {
+            modelLastError = invokeError instanceof Error ? invokeError : new Error(String(invokeError));
+            
+            // Check if error is retryable and we have retries left
+            if (isRetryableError(invokeError) && retryAttempt < FALLBACK_MAX_RETRIES - 1) {
+              const delay = calculateRetryDelay(retryAttempt);
+              logger.error(`[Gemini Retry] Model invoke attempt ${retryAttempt + 1}/${FALLBACK_MAX_RETRIES} failed, retrying in ${delay}ms`, {
+                provider: modelConfig.provider,
+                modelKey,
+                error: modelLastError.message,
+                errorName: modelLastError.name,
+              });
+              await sleep(delay);
+            } else {
+              // Non-retryable error or last retry attempt - break to try next model
+              logger.error(`[Gemini Retry] Model invoke failed after ${retryAttempt + 1} attempts`, {
+                provider: modelConfig.provider,
+                modelKey,
+                error: modelLastError.message,
+                errorName: modelLastError.name,
+                isRetryable: isRetryableError(invokeError),
+              });
+              throw modelLastError;
+            }
+          }
+        }
+
+        // Should not reach here, but just in case
+        throw modelLastError || new Error("Unknown error in model invoke");
       } catch (error) {
         logger.error(`[Gemini Debug] ${modelKey} failed`, {
           provider: modelConfig.provider,
