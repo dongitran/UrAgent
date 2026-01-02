@@ -449,6 +449,7 @@ export function ThreadView({
                       threadId={plannerSession?.threadId}
                       runId={plannerSession?.runId}
                       streamName="Planner"
+                      programmerSession={programmerSession}
                     />
                   )}
 

@@ -138,7 +138,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initializeSandbox)
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction, {
-    ends: ["generate-action", "diagnose-error"],
+    ends: ["generate-action", "diagnose-error", END],
   })
   .addNode("update-plan", updatePlan)
   .addNode("handle-completed-task", handleCompletedTask, {
