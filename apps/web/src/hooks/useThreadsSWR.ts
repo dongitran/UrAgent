@@ -12,7 +12,7 @@ import type { Installation } from "./useGitHubInstallations";
 type ThreadSortBy = "thread_id" | "status" | "created_at" | "updated_at";
 type SortOrder = "asc" | "desc";
 /**
- * Union type representing all possible graph states in the Open SWE system
+ * Union type representing all possible graph states in the UrAgent system
  */
 export type AnyGraphState =
   | ManagerGraphState

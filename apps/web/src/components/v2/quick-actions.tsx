@@ -29,7 +29,7 @@ The file should not contain any other content besides those tags, and the rules/
 With all of this in mind, please explore the repository and write this single \`AGENTS.md\` file with the rules/context/instructions gathered!`;
 
 const DEV_README_PROMPT = `Please add a new callout to the root readme in the repository:
-"Welcome to Open SWE!"
+"Welcome to UrAgent!"
 Make it a 'tip' callout`;
 
 function DevReadmePromptQuickAction({

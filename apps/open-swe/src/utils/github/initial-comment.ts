@@ -33,7 +33,7 @@ Rules:
 
 Bad examples (too robotic):
 - "I have received your request and will begin processing..."
-- "Open SWE has been triggered for this issue. Processing..."
+- "UrAgent has been triggered for this issue. Processing..."
 
 Good examples:
 - "🔥 Yo! Looks interesting, lemme dig in and get started!"

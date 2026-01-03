@@ -50,4 +50,4 @@ const workflow = new StateGraph(ReviewerGraphStateObj, GraphConfiguration)
   .addEdge("final-review", END);
 
 export const graph = workflow.compile();
-graph.name = "Open SWE - Reviewer";
+graph.name = "UrAgent - Reviewer";

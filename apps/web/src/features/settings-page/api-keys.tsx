@@ -119,7 +119,7 @@ export function APIKeysTab() {
         <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
         <AlertDescription className="text-blue-800 dark:text-blue-300">
           <p>
-            Open SWE uses Anthropic models by default. Configure your Anthropic
+            UrAgent uses Anthropic models by default. Configure your Anthropic
             API key below to get started.
           </p>
           <p>Only an Anthropic API key is required to get started.</p>

@@ -21,4 +21,4 @@ const workflow = new StateGraph(ManagerGraphStateObj, GraphConfiguration)
   .addEdge("start-planner", END);
 
 export const graph = workflow.compile();
-graph.name = "Open SWE - Manager";
+graph.name = "UrAgent - Manager";

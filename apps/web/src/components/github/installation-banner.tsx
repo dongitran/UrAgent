@@ -38,7 +38,7 @@ export function GitHubInstallationBanner() {
 
   // Enhanced messaging for new users
   const title = isNewUser
-    ? "🎉 Welcome to Open SWE! Complete your setup"
+    ? "🎉 Welcome to UrAgent! Complete your setup"
     : "Complete your setup to start coding";
 
   const description = isNewUser

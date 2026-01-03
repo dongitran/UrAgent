@@ -53,3 +53,5 @@ apps/cli/test_traces/
 
 # Process documentation
 process.md
+
+sync.md

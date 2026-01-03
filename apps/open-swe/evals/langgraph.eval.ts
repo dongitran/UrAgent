@@ -1,4 +1,4 @@
-// Run evals over the development Open SWE dataset
+// Run evals over the development UrAgent dataset
 
 import { v4 as uuidv4 } from "uuid";
 import * as ls from "langsmith/vitest";

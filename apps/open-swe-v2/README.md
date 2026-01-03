@@ -1,6 +1,6 @@
-# Open SWE Agent V2
+# UrAgent V2
 
-The core LangGraph agent application that powers Open SWE's autonomous code understanding, planning, and execution capabilities.
+The core LangGraph agent application that powers UrAgent's autonomous code understanding, planning, and execution capabilities.
 
 ## Documentation
 
