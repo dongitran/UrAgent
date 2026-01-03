@@ -112,7 +112,7 @@ export class WebhookHandlerBase {
 
     const appUrl = getOpenSweAppUrl(threadId);
     const appUrlCommentText = appUrl
-      ? `View run in Open SWE [here](${appUrl}) (this URL will only work for @${context.userLogin})`
+      ? `View run in UrAgent [here](${appUrl}) (this URL will only work for @${context.userLogin})`
       : "";
 
     const fullMessage = `${config.message}\n\n${appUrlCommentText}\n\n${createDevMetadataComment(runId, threadId)}`;

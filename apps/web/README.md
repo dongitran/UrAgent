@@ -1,6 +1,6 @@
-# Open SWE Web
+# UrAgent Web
 
-The Next.js web interface for Open SWE, providing a user-friendly chat interface to interact with the LangGraph agent.
+The Next.js web interface for UrAgent, providing a user-friendly chat interface to interact with the LangGraph agent.
 
 ## Documentation
 

@@ -60,4 +60,4 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   .addEdge("notetaker", "interrupt-proposed-plan");
 
 export const graph = workflow.compile();
-graph.name = "Open SWE - Planner";
+graph.name = "UrAgent - Planner";

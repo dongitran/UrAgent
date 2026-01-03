@@ -68,24 +68,24 @@ export async function requestHelp(
     const runUrl = getOpenSweAppUrl(threadId);
 
     const commentBody = runUrl
-      ? `### 🤖 Open SWE Needs Help
+      ? `### 🤖 UrAgent Needs Help
 
 ${userTag}I've encountered a situation where I need human assistance to continue.
 
 **Help Request:**
 ${toolCall.args.help_request}
 
-You can view and respond to this request in the [Open SWE interface](${runUrl}).
+You can view and respond to this request in the [UrAgent interface](${runUrl}).
 
 Please provide guidance so I can continue working on this issue.`
-      : `### 🤖 Open SWE Needs Help
+      : `### 🤖 UrAgent Needs Help
 
 ${userTag}I've encountered a situation where I need human assistance to continue.
 
 **Help Request:**
 ${toolCall.args.help_request}
 
-Please check the Open SWE interface to respond to this request.`;
+Please check the UrAgent interface to respond to this request.`;
 
     await postGitHubIssueComment({
       githubIssueId: state.githubIssueId,

@@ -1,11 +1,11 @@
 /**
- * Input structure for Open SWE evaluations
+ * Input structure for UrAgent evaluations
  * This is much simpler than SWE-Bench since we only need
  * problem statement + repo info for ruff/mypy analysis
  */
 export interface OpenSWEInput {
   /**
-   * The user request/problem statement that was given to Open SWE
+   * The user request/problem statement that was given to UrAgent
    * This is what gets passed to the agent to solve
    */
   user_input: string;

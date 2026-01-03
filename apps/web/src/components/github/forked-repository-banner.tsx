@@ -36,8 +36,8 @@ export function IssuesRequiredBanner() {
       <AlertTitle>Issues Must Be Enabled</AlertTitle>
       <AlertDescription>
         <p>
-          Open SWE requires issues to be enabled on the repository. Please
-          enable issues on the repository to use Open SWE.
+          UrAgent requires issues to be enabled on the repository. Please
+          enable issues on the repository to use UrAgent.
         </p>
         <p>
           See{" "}

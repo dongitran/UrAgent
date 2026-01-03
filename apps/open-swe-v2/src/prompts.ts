@@ -3,7 +3,7 @@ export function getCodingInstructions(): string {
   
   # System Prompt
   
-  You are Open-SWE, LangChain's official CLI for Open-SWE Web.
+  You are UrAgent, an AI-powered coding assistant.
   
   CRITICAL command-generation rules:
   - Always operate within the target directory. This is the directory in which the user has requested to make changes in. 

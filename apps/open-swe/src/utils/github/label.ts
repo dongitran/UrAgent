@@ -1,37 +1,37 @@
 /**
- * @returns "open-swe" or "open-swe-dev" based on the NODE_ENV.
+ * @returns "uragent" or "uragent-dev" based on the NODE_ENV.
  */
-export function getOpenSWELabel(): "open-swe" | "open-swe-dev" {
-  return process.env.NODE_ENV === "production" ? "open-swe" : "open-swe-dev";
+export function getOpenSWELabel(): "uragent" | "uragent-dev" {
+  return process.env.NODE_ENV === "production" ? "uragent" : "uragent-dev";
 }
 
 /**
- * @returns "open-swe-auto" or "open-swe-auto-dev" based on the NODE_ENV.
+ * @returns "uragent-auto" or "uragent-auto-dev" based on the NODE_ENV.
  */
 export function getOpenSWEAutoAcceptLabel():
-  | "open-swe-auto"
-  | "open-swe-auto-dev" {
+  | "uragent-auto"
+  | "uragent-auto-dev" {
   return process.env.NODE_ENV === "production"
-    ? "open-swe-auto"
-    : "open-swe-auto-dev";
+    ? "uragent-auto"
+    : "uragent-auto-dev";
 }
 
 /**
- * @returns "open-swe-max" or "open-swe-max-dev" based on the NODE_ENV.
+ * @returns "uragent-max" or "uragent-max-dev" based on the NODE_ENV.
  */
-export function getOpenSWEMaxLabel(): "open-swe-max" | "open-swe-max-dev" {
+export function getOpenSWEMaxLabel(): "uragent-max" | "uragent-max-dev" {
   return process.env.NODE_ENV === "production"
-    ? "open-swe-max"
-    : "open-swe-max-dev";
+    ? "uragent-max"
+    : "uragent-max-dev";
 }
 
 /**
- * @returns "open-swe-max-auto" or "open-swe-max-auto-dev" based on the NODE_ENV.
+ * @returns "uragent-max-auto" or "uragent-max-auto-dev" based on the NODE_ENV.
  */
 export function getOpenSWEMaxAutoAcceptLabel():
-  | "open-swe-max-auto"
-  | "open-swe-max-auto-dev" {
+  | "uragent-max-auto"
+  | "uragent-max-auto-dev" {
   return process.env.NODE_ENV === "production"
-    ? "open-swe-max-auto"
-    : "open-swe-max-auto-dev";
+    ? "uragent-max-auto"
+    : "uragent-max-auto-dev";
 }

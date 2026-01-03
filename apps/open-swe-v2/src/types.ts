@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Type definitions for Open SWE V2 coding agent
+ * Type definitions for UrAgent V2 coding agent
  */
 
 // Command argument types

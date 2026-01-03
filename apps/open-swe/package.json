@@ -77,7 +77,7 @@
     "vitest": "^3.2.3"
   },
   "packageManager": "yarn@3.5.1",
-  "description": "The core LangGraph agent application that powers Open SWE's autonomous code understanding, planning, and execution capabilities.",
+  "description": "The core LangGraph agent application that powers UrAgent's autonomous code understanding, planning, and execution capabilities.",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/langchain-ai/open-swe/issues"
