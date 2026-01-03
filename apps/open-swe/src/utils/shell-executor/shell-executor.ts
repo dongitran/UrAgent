@@ -17,6 +17,55 @@ const DEFAULT_ENV = {
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
+// Retry configuration for Daytona sandbox commands
+const SANDBOX_MAX_RETRIES = 5;
+const SANDBOX_RETRY_DELAY_MS = 10000; // 10 seconds, exponential: 10s → 20s → 40s → 80s → 160s
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if an error is retryable (network, timeout, gateway errors)
+ */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    const name = error.name.toLowerCase();
+    
+    // Network/timeout errors
+    if (message.includes('timeout') || 
+        message.includes('network') || 
+        message.includes('econnreset') ||
+        message.includes('econnrefused') ||
+        message.includes('socket') ||
+        message.includes('fetch failed') ||
+        name.includes('timeout') ||
+        name.includes('abort')) {
+      return true;
+    }
+    
+    // Gateway errors (502, 503, 504) - often from CloudFront
+    if (message.includes('502') || 
+        message.includes('503') || 
+        message.includes('504') ||
+        message.includes('gateway') ||
+        message.includes('cloudfront')) {
+      return true;
+    }
+    
+    // Rate limit errors
+    if (message.includes('429') || message.includes('rate limit')) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 /**
  * Unified shell executor that handles both local and sandbox command execution
  * This eliminates the need for if/else blocks in every tool that runs shell commands
@@ -87,7 +136,7 @@ export class ShellExecutor {
   }
 
   /**
-   * Execute command in sandbox
+   * Execute command in sandbox with retry logic for transient errors
    */
   private async executeSandbox(
     command: string,
@@ -103,93 +152,133 @@ export class ShellExecutor {
         xSandboxSessionId: sandboxSessionId,
       }));
 
-    logger.debug("[DAYTONA] Executing command in sandbox", {
-      sandboxId: sandbox_.id,
-      sandboxState: sandbox_.state,
-      command:
-        command.length > 500 ? command.substring(0, 500) + "..." : command,
-      workdir,
-      timeout,
-      envKeys: env ? Object.keys(env) : [],
-      timestamp: new Date().toISOString(),
-    });
+    let lastError: Error | undefined;
 
-    const startTime = Date.now();
-    try {
-      const response = await sandbox_.process.executeCommand(
-        command,
-        workdir,
-        env,
-        timeout,
-      );
-      const duration = Date.now() - startTime;
-
-      logger.debug("[DAYTONA] Command execution completed", {
-        sandboxId: sandbox_.id,
-        command:
-          command.length > 200 ? command.substring(0, 200) + "..." : command,
-        workdir,
-        durationMs: duration,
-        exitCode: response.exitCode,
-        resultLength: response.result?.length ?? 0,
-        resultPreview: response.result?.substring(0, 500) ?? "null",
-        artifacts: response.artifacts
-          ? {
-              stdoutLength: response.artifacts.stdout?.length ?? 0,
-              stderrLength:
-                (response.artifacts as { stdout?: string; stderr?: string })
-                  .stderr?.length ?? 0,
-              stdoutPreview:
-                response.artifacts.stdout?.substring(0, 300) ?? "null",
-              stderrPreview:
-                (
-                  response.artifacts as { stdout?: string; stderr?: string }
-                ).stderr?.substring(0, 300) ?? "null",
-            }
-          : null,
-        fullResponse: JSON.stringify(response).substring(0, 1000),
-      });
-
-      if (response.exitCode === -1) {
-        logger.error(
-          "[DAYTONA] Command returned exit code -1 (sandbox issue)",
-          {
-            sandboxId: sandbox_.id,
-            sandboxState: sandbox_.state,
-            command:
-              command.length > 500
-                ? command.substring(0, 500) + "..."
-                : command,
-            workdir,
-            timeout,
-            durationMs: duration,
-            fullResponse: JSON.stringify(response),
-          },
-        );
-      }
-
-      return response;
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      logger.error("[DAYTONA] Command execution threw exception", {
+    for (let attempt = 0; attempt < SANDBOX_MAX_RETRIES; attempt++) {
+      logger.debug("[DAYTONA] Executing command in sandbox", {
         sandboxId: sandbox_.id,
         sandboxState: sandbox_.state,
         command:
           command.length > 500 ? command.substring(0, 500) + "..." : command,
         workdir,
         timeout,
-        durationMs: duration,
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-                stack: error.stack,
-              }
-            : error,
+        envKeys: env ? Object.keys(env) : [],
+        attempt: attempt + 1,
+        maxRetries: SANDBOX_MAX_RETRIES,
+        timestamp: new Date().toISOString(),
       });
-      throw error;
+
+      const startTime = Date.now();
+      try {
+        const response = await sandbox_.process.executeCommand(
+          command,
+          workdir,
+          env,
+          timeout,
+        );
+        const duration = Date.now() - startTime;
+
+        logger.debug("[DAYTONA] Command execution completed", {
+          sandboxId: sandbox_.id,
+          command:
+            command.length > 200 ? command.substring(0, 200) + "..." : command,
+          workdir,
+          durationMs: duration,
+          exitCode: response.exitCode,
+          resultLength: response.result?.length ?? 0,
+          resultPreview: response.result?.substring(0, 500) ?? "null",
+          attempt: attempt + 1,
+          artifacts: response.artifacts
+            ? {
+                stdoutLength: response.artifacts.stdout?.length ?? 0,
+                stderrLength:
+                  (response.artifacts as { stdout?: string; stderr?: string })
+                    .stderr?.length ?? 0,
+                stdoutPreview:
+                  response.artifacts.stdout?.substring(0, 300) ?? "null",
+                stderrPreview:
+                  (
+                    response.artifacts as { stdout?: string; stderr?: string }
+                  ).stderr?.substring(0, 300) ?? "null",
+              }
+            : null,
+          fullResponse: JSON.stringify(response).substring(0, 1000),
+        });
+
+        if (response.exitCode === -1) {
+          logger.error(
+            "[DAYTONA] Command returned exit code -1 (sandbox issue)",
+            {
+              sandboxId: sandbox_.id,
+              sandboxState: sandbox_.state,
+              command:
+                command.length > 500
+                  ? command.substring(0, 500) + "..."
+                  : command,
+              workdir,
+              timeout,
+              durationMs: duration,
+              attempt: attempt + 1,
+              fullResponse: JSON.stringify(response),
+            },
+          );
+        }
+
+        return response;
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        const shouldRetry = isRetryableError(error) && attempt < SANDBOX_MAX_RETRIES - 1;
+
+        if (shouldRetry) {
+          const delay = SANDBOX_RETRY_DELAY_MS * Math.pow(2, attempt); // Exponential backoff: 10s, 20s, 40s, 80s, 160s
+          logger.warn("[DAYTONA] Command execution failed, will retry", {
+            sandboxId: sandbox_.id,
+            sandboxState: sandbox_.state,
+            command:
+              command.length > 500 ? command.substring(0, 500) + "..." : command,
+            workdir,
+            timeout,
+            durationMs: duration,
+            attempt: attempt + 1,
+            maxRetries: SANDBOX_MAX_RETRIES,
+            retryDelayMs: delay,
+            error: {
+              name: lastError.name,
+              message: lastError.message,
+            },
+          });
+          await sleep(delay);
+          continue;
+        }
+
+        logger.error("[DAYTONA] Command execution threw exception", {
+          sandboxId: sandbox_.id,
+          sandboxState: sandbox_.state,
+          command:
+            command.length > 500 ? command.substring(0, 500) + "..." : command,
+          workdir,
+          timeout,
+          durationMs: duration,
+          attempt: attempt + 1,
+          maxRetries: SANDBOX_MAX_RETRIES,
+          isRetryable: isRetryableError(error),
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+        });
+        throw error;
+      }
     }
+
+    // Should not reach here, but just in case
+    throw lastError ?? new Error("Unknown error in executeSandbox");
   }
 
   /**
