@@ -7,6 +7,7 @@ import {
 } from "../../utils/github/label.js";
 import { RequestSource } from "../../constants.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { generateInitialComment } from "../../utils/github/initial-comment.js";
 
 class IssueWebhookHandler extends WebhookHandlerBase {
   constructor() {
@@ -95,12 +96,18 @@ class IssueWebhookHandler extends WebhookHandlerBase {
         configurable,
       });
 
+      // Generate natural initial comment using AI (matches issue language)
+      const initialMessage = await generateInitialComment({
+        issueTitle: issueData.issueTitle,
+        issueBody: issueData.issueBody,
+        isAutoAccept: isAutoAcceptLabel,
+      });
+
       await this.createComment(
         context,
         {
           issueNumber: issueData.issueNumber,
-          message:
-            "🤖 Open SWE has been triggered for this issue. Processing...",
+          message: initialMessage,
         },
         runId,
         threadId,

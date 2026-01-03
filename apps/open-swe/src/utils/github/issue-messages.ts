@@ -135,6 +135,32 @@ export function extractIssueTitleAndContentFromMessage(content: string) {
   return { title: messageTitle, content: messageContent };
 }
 
+/**
+ * Extract issue title and body from message content.
+ * Handles formats like:
+ * - "[original issue]\n**Title**\nBody"
+ * - "**Title**\n\nBody"
+ */
+export function extractIssueTitleAndBodyFromContent(content: string): { issueTitle: string; issueBody: string } {
+  let issueTitle = '';
+  let issueBody = content;
+
+  // Remove "[original issue]\n" prefix if present
+  let cleanContent = content;
+  if (cleanContent.startsWith('[original issue]\n')) {
+    cleanContent = cleanContent.substring('[original issue]\n'.length);
+  }
+
+  // Try to extract title from **title** format
+  const titleMatch = cleanContent.match(/^\*\*(.+?)\*\*\n/);
+  if (titleMatch) {
+    issueTitle = titleMatch[1];
+    issueBody = cleanContent.substring(titleMatch[0].length).trim();
+  }
+
+  return { issueTitle, issueBody };
+}
+
 export function formatContentForIssueBody(body: string): string {
   return `${ISSUE_CONTENT_OPEN_TAG}${body}${ISSUE_CONTENT_CLOSE_TAG}`;
 }

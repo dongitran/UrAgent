@@ -24,7 +24,8 @@ import {
 } from "../../../utils/llms/index.js";
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
-import { formatUserRequestPrompt } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt, getInitialUserRequest } from "../../../utils/user-request.js";
+import { extractIssueTitleAndBodyFromContent } from "../../../utils/github/issue-messages.js";
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
 import {
   deleteSandbox,
@@ -47,6 +48,7 @@ import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { GITHUB_USER_LOGIN_HEADER } from "@openswe/shared/constants";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { postGitHubIssueComment, generateNaturalComment } from "../../../utils/github/plan.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -353,6 +355,50 @@ export async function openPullRequest(
   if (pullRequest) {
     // Delete the sandbox.
     sandboxDeleted = await deleteSandbox(sandboxSessionId);
+
+    // Post comment to GitHub issue about PR creation/update (only if not in local mode and has githubIssueId)
+    if (!isLocalMode(config) && state.githubIssueId) {
+      const prAction = prForTask ? "updated" : "created";
+      const completedTasksCount = getActivePlanItems(state.taskPlan).filter(t => t.completed).length;
+      const totalTasksCount = getActivePlanItems(state.taskPlan).length;
+      
+      // Get issue content for language detection
+      const issueContent = getInitialUserRequest(state.internalMessages);
+      const { issueTitle, issueBody } = extractIssueTitleAndBodyFromContent(issueContent);
+      
+      logger.warn("[OpenPR] Issue content for language detection", {
+        issueContentLength: issueContent?.length || 0,
+        issueContentSnippet: issueContent?.slice(0, 200),
+        extractedTitle: issueTitle,
+        extractedBodyLength: issueBody?.length || 0,
+        extractedBodySnippet: issueBody?.slice(0, 100),
+      });
+      
+      const completionMessage = await generateNaturalComment({
+        type: "implementation_complete",
+        prNumber: pullRequest.number,
+        prUrl: pullRequest.html_url,
+        prTitle: title,
+        prAction,
+        tasksCompleted: completedTasksCount,
+        totalTasks: totalTasksCount,
+        issueTitle,
+        issueBody,
+      });
+      
+      await postGitHubIssueComment({
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+        commentBody: completionMessage,
+        config,
+      });
+
+      logger.info("Posted completion comment to GitHub issue", {
+        githubIssueId: state.githubIssueId,
+        prNumber: pullRequest.number,
+        prAction,
+      });
+    }
   }
 
   const newMessages = [

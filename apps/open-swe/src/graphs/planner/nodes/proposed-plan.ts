@@ -20,6 +20,9 @@ import {
   getRecentUserRequest,
 } from "../../../utils/user-request.js";
 import {
+  extractIssueTitleAndBodyFromContent,
+} from "../../../utils/github/issue-messages.js";
+import {
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
   DO_NOT_RENDER_ID_PREFIX,
@@ -46,7 +49,7 @@ import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/conf
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import {
   postGitHubIssueComment,
-  cleanTaskItems,
+  generateNaturalComment,
 } from "../../../utils/github/plan.js";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
@@ -219,10 +222,21 @@ export async function interruptProposedPlan(
 
     // Post comment to GitHub issue about auto-accepting the plan (only if not in local mode)
     if (!isLocalMode(config) && state.githubIssueId) {
+      // Get issue content for language detection
+      const issueContent = getInitialUserRequest(state.messages);
+      const { issueTitle, issueBody } = extractIssueTitleAndBodyFromContent(issueContent);
+      const commentBody = await generateNaturalComment({
+        type: "plan_generated_auto_accept",
+        planTitle: state.proposedPlanTitle,
+        planSteps: proposedPlan,
+        issueTitle,
+        issueBody,
+      });
+      
       await postGitHubIssueComment({
         githubIssueId: state.githubIssueId,
         targetRepository: state.targetRepository,
-        commentBody: `### 🤖 Plan Generated\n\nI've generated a plan for this issue and will proceed to implement it since auto-accept is enabled.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nProceeding to implementation...`,
+        commentBody,
         config,
       });
     }
@@ -267,10 +281,21 @@ export async function interruptProposedPlan(
     );
 
     // Post comment to GitHub issue about plan being ready for approval
+    // Get issue content for language detection
+    const issueContent = getInitialUserRequest(state.messages);
+    const { issueTitle, issueBody } = extractIssueTitleAndBodyFromContent(issueContent);
+    const commentBody = await generateNaturalComment({
+      type: "plan_ready_for_approval",
+      planTitle: state.proposedPlanTitle,
+      planSteps: proposedPlan,
+      issueTitle,
+      issueBody,
+    });
+    
     await postGitHubIssueComment({
       githubIssueId: state.githubIssueId,
       targetRepository: state.targetRepository,
-      commentBody: `### 🟠 Plan Ready for Approval 🟠\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
+      commentBody,
       config,
     });
   }
@@ -330,10 +355,21 @@ export async function interruptProposedPlan(
 
     // Update the comment to notify the user that the plan was accepted (only if not in local mode)
     if (!isLocalMode(config) && state.githubIssueId) {
+      // Get issue content for language detection
+      const issueContentForAccept = getInitialUserRequest(state.messages);
+      const { issueTitle: issueTitleForAccept, issueBody: issueBodyForAccept } = extractIssueTitleAndBodyFromContent(issueContentForAccept);
+      const commentBody = await generateNaturalComment({
+        type: "plan_accepted",
+        planTitle: state.proposedPlanTitle,
+        planSteps: planItems.map(p => p.plan),
+        issueTitle: issueTitleForAccept,
+        issueBody: issueBodyForAccept,
+      });
+      
       await postGitHubIssueComment({
         githubIssueId: state.githubIssueId,
         targetRepository: state.targetRepository,
-        commentBody: `### ✅ Plan Accepted ✅\n\nThe proposed plan was accepted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
+        commentBody,
         config,
       });
     }
@@ -357,10 +393,21 @@ export async function interruptProposedPlan(
 
     // Update the comment to notify the user that the plan was edited (only if not in local mode)
     if (!isLocalMode(config) && state.githubIssueId) {
+      // Get issue content for language detection
+      const issueContentForEdit = getInitialUserRequest(state.messages);
+      const { issueTitle: issueTitleForEdit, issueBody: issueBodyForEdit } = extractIssueTitleAndBodyFromContent(issueContentForEdit);
+      const commentBody = await generateNaturalComment({
+        type: "plan_edited",
+        planTitle: state.proposedPlanTitle,
+        planSteps: planItems.map(p => p.plan),
+        issueTitle: issueTitleForEdit,
+        issueBody: issueBodyForEdit,
+      });
+      
       await postGitHubIssueComment({
         githubIssueId: state.githubIssueId,
         targetRepository: state.targetRepository,
-        commentBody: `### ✅ Plan Edited & Submitted ✅\n\nThe proposed plan was edited and submitted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
+        commentBody,
         config,
       });
     }
