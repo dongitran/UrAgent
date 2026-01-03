@@ -25,6 +25,88 @@ import { shouldCreateIssue } from "../should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
+// Retry configuration for direct sandbox commands
+const SANDBOX_MAX_RETRIES = 5;
+const SANDBOX_RETRY_DELAY_MS = 10000; // 10 seconds, exponential: 10s → 20s → 40s → 80s → 160s
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if an error is retryable (network, timeout, gateway errors)
+ */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    const name = error.name.toLowerCase();
+    
+    if (message.includes('timeout') || 
+        message.includes('network') || 
+        message.includes('econnreset') ||
+        message.includes('econnrefused') ||
+        message.includes('socket') ||
+        message.includes('fetch failed') ||
+        message.includes('502') || 
+        message.includes('503') || 
+        message.includes('504') ||
+        message.includes('gateway') ||
+        message.includes('cloudfront') ||
+        name.includes('timeout') ||
+        name.includes('abort')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Execute sandbox command with retry logic for transient errors
+ */
+async function executeSandboxCommandWithRetry(
+  sandbox: Sandbox,
+  command: string,
+  workdir: string,
+  timeout: number,
+): Promise<{ exitCode: number; result: string }> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < SANDBOX_MAX_RETRIES; attempt++) {
+    try {
+      const response = await sandbox.process.executeCommand(
+        command,
+        workdir,
+        undefined,
+        timeout,
+      );
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      if (isRetryableError(error) && attempt < SANDBOX_MAX_RETRIES - 1) {
+        const delay = SANDBOX_RETRY_DELAY_MS * Math.pow(2, attempt);
+        logger.warn("[DAYTONA] Command failed, retrying...", {
+          sandboxId: sandbox.id,
+          command: command.substring(0, 100),
+          attempt: attempt + 1,
+          maxRetries: SANDBOX_MAX_RETRIES,
+          retryDelayMs: delay,
+          error: lastError.message,
+        });
+        await sleep(delay);
+        continue;
+      }
+      
+      throw error;
+    }
+  }
+
+  throw lastError ?? new Error("Unknown error in executeSandboxCommandWithRetry");
+}
+
 /**
  * Parses git status output and returns an array of file paths.
  * Removes the git status indicators (first 3 characters) from each line.
@@ -803,10 +885,10 @@ export async function checkoutFilesFromCommit(
       });
 
       const startTime = Date.now();
-      const result = await sandbox.process.executeCommand(
+      const result = await executeSandboxCommandWithRetry(
+        sandbox,
         command,
         repoDir,
-        undefined,
         30,
       );
 

@@ -8,6 +8,88 @@ const VENV_PATH = ".venv";
 const RUN_PYTHON_IN_VENV = `${VENV_PATH}/bin/python`;
 const RUN_PIP_IN_VENV = `${VENV_PATH}/bin/pip`;
 
+// Retry configuration for sandbox commands
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 10000; // 10 seconds, exponential: 10s → 20s → 40s → 80s → 160s
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if an error is retryable (network, timeout, gateway errors)
+ */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    const name = error.name.toLowerCase();
+    
+    if (message.includes('timeout') || 
+        message.includes('network') || 
+        message.includes('econnreset') ||
+        message.includes('econnrefused') ||
+        message.includes('socket') ||
+        message.includes('fetch failed') ||
+        message.includes('502') || 
+        message.includes('503') || 
+        message.includes('504') ||
+        message.includes('gateway') ||
+        message.includes('cloudfront') ||
+        name.includes('timeout') ||
+        name.includes('abort')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Execute command with retry logic for transient errors
+ */
+async function executeWithRetry(
+  sandbox: Sandbox,
+  command: string,
+  workdir: string,
+  timeout: number,
+): Promise<{ exitCode: number; result: string }> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await sandbox.process.executeCommand(
+        command,
+        workdir,
+        undefined,
+        timeout,
+      );
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      if (isRetryableError(error) && attempt < MAX_RETRIES - 1) {
+        const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
+        logger.warn("[DAYTONA] Command failed, retrying...", {
+          sandboxId: sandbox.id,
+          command: command.substring(0, 100),
+          attempt: attempt + 1,
+          maxRetries: MAX_RETRIES,
+          retryDelayMs: delay,
+          error: lastError.message,
+        });
+        await sleep(delay);
+        continue;
+      }
+      
+      throw error;
+    }
+  }
+
+  throw lastError ?? new Error("Unknown error in executeWithRetry");
+}
+
 /**
  * Setup Python environment with requirements.txt + ruff + mypy
  */
@@ -29,10 +111,10 @@ export async function setupEnv(
   });
 
   const startTime = Date.now();
-  const createVenvRes = await sandbox.process.executeCommand(
+  const createVenvRes = await executeWithRetry(
+    sandbox,
     createVenvCommand,
     absoluteRepoDir,
-    undefined,
     TIMEOUT_SEC,
   );
 
@@ -60,10 +142,10 @@ export async function setupEnv(
   });
 
   const upgradePipStartTime = Date.now();
-  const upgradePipRes = await sandbox.process.executeCommand(
+  const upgradePipRes = await executeWithRetry(
+    sandbox,
     upgradePipCommand,
     absoluteRepoDir,
-    undefined,
     TIMEOUT_SEC,
   );
 
@@ -87,10 +169,10 @@ export async function setupEnv(
     command: checkRequirementsCommand,
   });
 
-  const requirementsExistRes = await sandbox.process.executeCommand(
+  const requirementsExistRes = await executeWithRetry(
+    sandbox,
     checkRequirementsCommand,
     absoluteRepoDir,
-    undefined,
     TIMEOUT_SEC,
   );
 
@@ -107,10 +189,10 @@ export async function setupEnv(
 
     const installReqCommand = `${RUN_PIP_IN_VENV} install -r requirements.txt`;
     const installReqStartTime = Date.now();
-    const installReqRes = await sandbox.process.executeCommand(
+    const installReqRes = await executeWithRetry(
+      sandbox,
       installReqCommand,
       absoluteRepoDir,
-      undefined,
       TIMEOUT_SEC * 3,
     );
 
@@ -148,10 +230,10 @@ export async function setupEnv(
   });
 
   const installToolsStartTime = Date.now();
-  const installAnalysisToolsRes = await sandbox.process.executeCommand(
+  const installAnalysisToolsRes = await executeWithRetry(
+    sandbox,
     installToolsCommand,
     absoluteRepoDir,
-    undefined,
     TIMEOUT_SEC,
   );
 

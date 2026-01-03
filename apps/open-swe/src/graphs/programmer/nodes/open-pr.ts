@@ -45,10 +45,11 @@ import {
   GitHubPullRequestUpdate,
 } from "../../../utils/github/types.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
-import { GITHUB_USER_LOGIN_HEADER } from "@openswe/shared/constants";
+import { GITHUB_USER_LOGIN_HEADER, TIMEOUT_SEC } from "@openswe/shared/constants";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { postGitHubIssueComment, generateNaturalComment } from "../../../utils/github/plan.js";
+import { createShellExecutor } from "../../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -136,10 +137,14 @@ export async function openPullRequest(
     baseBranch: state.targetRepository.branch,
   });
 
-  const gitDiffRes = await sandbox.process.executeCommand(
-    `git diff --name-only ${state.targetRepository.branch ?? ""}`,
-    repoPath,
-  );
+  // Use ShellExecutor for retry support on transient errors
+  const executor = createShellExecutor(config);
+  const gitDiffRes = await executor.executeCommand({
+    command: `git diff --name-only ${state.targetRepository.branch ?? ""}`,
+    workdir: repoPath,
+    timeout: TIMEOUT_SEC,
+    sandbox,
+  });
 
   logger.info("Git diff result", {
     exitCode: gitDiffRes.exitCode,
