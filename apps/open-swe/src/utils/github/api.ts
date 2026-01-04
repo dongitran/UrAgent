@@ -214,7 +214,7 @@ async function withGitHubRetry<T>(
     }
 
     // Skip logging for 404 errors if option is set (e.g., checking if branch exists)
-    const is404Error = errorFields.message?.includes("404") || errorFields.message?.includes("Not Found");
+    const is404Error = errorFields.message?.includes("404") || errorFields.message?.toLowerCase().includes("not found");
     if (options?.skipLogOn404 && is404Error) {
       return null;
     }
