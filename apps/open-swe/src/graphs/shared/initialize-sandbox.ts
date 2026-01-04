@@ -287,29 +287,35 @@ export async function initializeSandbox(
     // Use provider abstraction to create sandbox - works with Daytona, E2B, and Multi
     const provider = getProvider();
     
-    // For multi-provider, the provider itself handles template/user selection
-    // For single providers, we need to determine the correct template/user
-    let template: string;
-    let user: string;
+    // For multi-provider, it handles template/user selection internally based on selected sub-provider
+    // For single providers, we determine the correct template/user based on provider type
+    let createOptions: { template?: string; user?: string; autoDeleteInterval?: number };
     
     if (provider.name === 'multi') {
-      // Multi-provider handles this internally, but we still need defaults
-      // The actual template/user will be determined by the selected sub-provider
-      template = getDefaultTemplate(SandboxProviderType.E2B); // Default to E2B template
-      user = getDefaultUser(SandboxProviderType.E2B);
+      // Multi-provider will determine correct template/user based on which provider it selects
+      // We only pass autoDeleteInterval, let multi-provider handle the rest
+      createOptions = {
+        autoDeleteInterval: DEFAULT_SANDBOX_CREATE_PARAMS.autoDeleteInterval,
+      };
+      logger.info(`Creating sandbox using multi-provider (template/user will be auto-selected)`);
     } else {
+      // Single provider mode - determine template/user based on provider type
       const providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
-      template = getDefaultTemplate(providerType);
-      user = getDefaultUser(providerType);
+      const template = getDefaultTemplate(providerType);
+      const user = getDefaultUser(providerType);
+      createOptions = {
+        template,
+        user,
+        autoDeleteInterval: DEFAULT_SANDBOX_CREATE_PARAMS.autoDeleteInterval,
+      };
+      logger.info(`Creating sandbox using provider: ${provider.name}`, { template, user });
     }
     
-    logger.info(`Creating sandbox using provider: ${provider.name}`, { template, user });
-    sandboxInstance = await provider.create({
-      template,
-      user,
-      autoDeleteInterval: DEFAULT_SANDBOX_CREATE_PARAMS.autoDeleteInterval,
+    sandboxInstance = await provider.create(createOptions);
+    logger.info(`Sandbox created successfully via ${provider.name}`, { 
+      sandboxId: sandboxInstance.id,
+      providerType: sandboxInstance.providerType,
     });
-    logger.info(`Sandbox created successfully via ${provider.name}`, { sandboxId: sandboxInstance.id });
     emitStepEvent(baseCreateSandboxAction, "success");
   } catch (e) {
     logger.error("Failed to create sandbox environment", { e });

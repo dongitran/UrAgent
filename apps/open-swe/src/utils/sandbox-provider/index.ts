@@ -133,15 +133,38 @@ class MultiSandboxProvider implements ISandboxProvider {
     const totalKeys = this.keyManager.getTotalKeyCount();
     let lastError: Error | undefined;
     
+    // Import constants for provider-specific defaults
+    const { DAYTONA_SNAPSHOT_NAME, E2B_TEMPLATE_NAME } = await import("@openswe/shared/constants");
+    
     // Try up to totalKeys times (each key once)
     for (let attempt = 0; attempt < totalKeys; attempt++) {
       // Get next provider and key from round-robin rotation
       const { provider: providerType, apiKey, index } = this.keyManager.getNext();
       
+      // CRITICAL: Determine correct template/user based on selected provider
+      // Do NOT use options.template as it may be wrong for this provider
+      let providerOptions: CreateSandboxOptions;
+      if (providerType === SandboxProviderType.DAYTONA) {
+        providerOptions = {
+          ...options,
+          template: DAYTONA_SNAPSHOT_NAME, // e.g., "open-swe-vcpu2-mem4-disk5"
+          user: 'daytona',
+        };
+      } else if (providerType === SandboxProviderType.E2B) {
+        providerOptions = {
+          ...options,
+          template: E2B_TEMPLATE_NAME, // e.g., "base"
+          user: 'user',
+        };
+      } else {
+        providerOptions = options || {};
+      }
+      
       logger.info("[MULTI] Creating sandbox", {
         provider: providerType,
         keyIndex: index,
-        template: options?.template,
+        template: providerOptions.template,
+        user: providerOptions.user,
         attempt: attempt + 1,
         maxAttempts: totalKeys,
       });
@@ -149,12 +172,13 @@ class MultiSandboxProvider implements ISandboxProvider {
       const provider = this.getProviderInstance(providerType, apiKey);
       
       try {
-        const sandbox = await provider.create(options);
+        const sandbox = await provider.create(providerOptions);
         
         logger.info("[MULTI] Sandbox created successfully", {
           provider: providerType,
           keyIndex: index,
           sandboxId: sandbox.id,
+          template: providerOptions.template,
           attempts: attempt + 1,
         });
         

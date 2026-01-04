@@ -42,19 +42,21 @@ export function getSandboxRootDir(providerType?: string): string {
     );
   }
   
-  // Auto-detect from environment
+  // Auto-detect from environment (only when providerType not specified)
   const envProvider = process.env.SANDBOX_PROVIDER?.toLowerCase();
   if (envProvider === 'e2b') {
     return E2B_SANDBOX_ROOT_DIR;
   }
   if (envProvider === 'multi') {
-    // When env is 'multi', we can't determine the path without a sandbox instance
-    // Default to E2B path (more restrictive) - this should only happen in edge cases
-    // where code doesn't have access to sandbox instance (e.g., prompt formatting)
-    return E2B_SANDBOX_ROOT_DIR;
+    // When env is 'multi', we MUST have a providerType from sandbox instance
+    // This error means caller forgot to pass sandboxProviderType from state
+    throw new Error(
+      "getSandboxRootDir() cannot auto-detect path when SANDBOX_PROVIDER=multi. " +
+      "You must pass the actual providerType from sandbox instance (state.sandboxProviderType)."
+    );
   }
   
-  // Default to Daytona
+  // Default to Daytona (when SANDBOX_PROVIDER is 'daytona' or not set)
   return DAYTONA_SANDBOX_ROOT_DIR;
 }
 export const PLAN_INTERRUPT_DELIMITER = ":::";

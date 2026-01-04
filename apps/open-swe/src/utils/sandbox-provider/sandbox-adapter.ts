@@ -212,12 +212,21 @@ export async function getSandboxWithErrorHandling(
 
 /**
  * Create sandbox with retry logic
+ * For multi-provider, no options needed (it handles template/user internally)
+ * For single providers, options should be passed by caller if needed
  */
 async function createSandboxWithRetry(
   provider: ISandboxProvider,
   maxAttempts: number = 3,
 ): Promise<ISandbox> {
   let lastError: Error | undefined;
+  
+  // Multi-provider handles template/user selection internally
+  // For single providers, they use their default template/user if not specified
+  // This is safe because:
+  // - MultiSandboxProvider.create() determines correct template based on selected sub-provider
+  // - DaytonaSandboxProvider.create() uses defaultSnapshot if not specified
+  // - E2BSandboxProvider.create() uses defaultTemplate if not specified
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -226,6 +235,7 @@ async function createSandboxWithRetry(
       lastError = error instanceof Error ? error : new Error(String(error));
       logger.error("Failed to create sandbox", {
         attempt: attempt + 1,
+        provider: provider.name,
         error: lastError.message,
       });
     }
