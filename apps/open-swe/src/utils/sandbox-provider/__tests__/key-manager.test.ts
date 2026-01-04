@@ -73,21 +73,61 @@ describe('MultiProviderKeyManager', () => {
   });
 
   describe('round-robin rotation', () => {
-    it('should alternate between providers', () => {
+    it('should alternate between providers with equal keys', () => {
       process.env.DAYTONA_API_KEY = 'dtn_key1';
       process.env.E2B_API_KEY = 'e2b_key1';
       
       const manager = new MultiProviderKeyManager();
       
+      // With 1:1 ratio, should alternate
       const first = manager.getNext();
       const second = manager.getNext();
       const third = manager.getNext();
       const fourth = manager.getNext();
       
-      expect(first.provider).toBe(SandboxProviderType.DAYTONA);
-      expect(second.provider).toBe(SandboxProviderType.E2B);
-      expect(third.provider).toBe(SandboxProviderType.DAYTONA);
-      expect(fourth.provider).toBe(SandboxProviderType.E2B);
+      // Pattern should be interleaved (D at position 0, E at position 1)
+      // or (E at position 0, D at position 1) depending on interleave algorithm
+      const providers = [first.provider, second.provider, third.provider, fourth.provider];
+      const daytonaCount = providers.filter(p => p === SandboxProviderType.DAYTONA).length;
+      const e2bCount = providers.filter(p => p === SandboxProviderType.E2B).length;
+      
+      // Should be 2:2 ratio over 4 calls
+      expect(daytonaCount).toBe(2);
+      expect(e2bCount).toBe(2);
+    });
+
+    it('should use weighted rotation with unequal keys (1 daytona : 6 e2b)', () => {
+      process.env.DAYTONA_API_KEY = 'dtn_key1';
+      process.env.E2B_API_KEY = 'e2b_key1,e2b_key2,e2b_key3,e2b_key4,e2b_key5,e2b_key6';
+      
+      const manager = new MultiProviderKeyManager();
+      
+      // Slot pattern should have 7 slots: 1 daytona, 6 e2b
+      const slots = manager.getSlotPattern();
+      expect(slots.length).toBe(7);
+      
+      const daytonaSlots = slots.filter(s => s === SandboxProviderType.DAYTONA).length;
+      const e2bSlots = slots.filter(s => s === SandboxProviderType.E2B).length;
+      
+      expect(daytonaSlots).toBe(1);
+      expect(e2bSlots).toBe(6);
+      
+      // Over 7 calls, should use daytona 1x and each e2b key 1x
+      const results: Array<{ provider: SandboxProviderType; index: number }> = [];
+      for (let i = 0; i < 7; i++) {
+        const entry = manager.getNext();
+        results.push({ provider: entry.provider, index: entry.index });
+      }
+      
+      const daytonaResults = results.filter(r => r.provider === SandboxProviderType.DAYTONA);
+      const e2bResults = results.filter(r => r.provider === SandboxProviderType.E2B);
+      
+      expect(daytonaResults.length).toBe(1);
+      expect(e2bResults.length).toBe(6);
+      
+      // Each E2B key should be used exactly once
+      const e2bIndices = e2bResults.map(r => r.index).sort();
+      expect(e2bIndices).toEqual([0, 1, 2, 3, 4, 5]);
     });
 
     it('should rotate through keys within each provider', () => {
@@ -96,66 +136,49 @@ describe('MultiProviderKeyManager', () => {
       
       const manager = new MultiProviderKeyManager();
       
-      // Call 1: daytona key 0
-      const c1 = manager.getNext();
-      expect(c1.provider).toBe(SandboxProviderType.DAYTONA);
-      expect(c1.index).toBe(0);
-      
-      // Call 2: e2b key 0
-      const c2 = manager.getNext();
-      expect(c2.provider).toBe(SandboxProviderType.E2B);
-      expect(c2.index).toBe(0);
-      
-      // Call 3: daytona key 1
-      const c3 = manager.getNext();
-      expect(c3.provider).toBe(SandboxProviderType.DAYTONA);
-      expect(c3.index).toBe(1);
-      
-      // Call 4: e2b key 1
-      const c4 = manager.getNext();
-      expect(c4.provider).toBe(SandboxProviderType.E2B);
-      expect(c4.index).toBe(1);
-      
-      // Call 5: daytona key 0 (wrap around)
-      const c5 = manager.getNext();
-      expect(c5.provider).toBe(SandboxProviderType.DAYTONA);
-      expect(c5.index).toBe(0);
-      
-      // Call 6: e2b key 0 (wrap around)
-      const c6 = manager.getNext();
-      expect(c6.provider).toBe(SandboxProviderType.E2B);
-      expect(c6.index).toBe(0);
-    });
-
-    it('should handle unequal key counts', () => {
-      process.env.DAYTONA_API_KEY = 'dtn_key1,dtn_key2,dtn_key3';
-      process.env.E2B_API_KEY = 'e2b_key1';
-      
-      const manager = new MultiProviderKeyManager();
-      
-      // Pattern: d0 -> e0 -> d1 -> e0 -> d2 -> e0 -> d0 -> e0 ...
+      // With 2:2 ratio, over 4 calls each key should be used once
       const results: Array<{ provider: SandboxProviderType; index: number }> = [];
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 4; i++) {
         const entry = manager.getNext();
         results.push({ provider: entry.provider, index: entry.index });
       }
       
-      // Verify alternating pattern
-      expect(results[0].provider).toBe(SandboxProviderType.DAYTONA);
-      expect(results[1].provider).toBe(SandboxProviderType.E2B);
-      expect(results[2].provider).toBe(SandboxProviderType.DAYTONA);
-      expect(results[3].provider).toBe(SandboxProviderType.E2B);
-      
-      // E2B should always be index 0 (only one key)
-      const e2bResults = results.filter(r => r.provider === SandboxProviderType.E2B);
-      expect(e2bResults.every(r => r.index === 0)).toBe(true);
-      
-      // Daytona should cycle through 0, 1, 2, 0, ...
       const daytonaResults = results.filter(r => r.provider === SandboxProviderType.DAYTONA);
-      expect(daytonaResults[0].index).toBe(0);
-      expect(daytonaResults[1].index).toBe(1);
-      expect(daytonaResults[2].index).toBe(2);
-      expect(daytonaResults[3].index).toBe(0); // wrap around
+      const e2bResults = results.filter(r => r.provider === SandboxProviderType.E2B);
+      
+      expect(daytonaResults.length).toBe(2);
+      expect(e2bResults.length).toBe(2);
+      
+      // Each key should be used
+      const daytonaIndices = daytonaResults.map(r => r.index).sort();
+      const e2bIndices = e2bResults.map(r => r.index).sort();
+      
+      expect(daytonaIndices).toEqual([0, 1]);
+      expect(e2bIndices).toEqual([0, 1]);
+    });
+
+    it('should handle unequal key counts (2 daytona : 3 e2b)', () => {
+      process.env.DAYTONA_API_KEY = 'dtn_key1,dtn_key2';
+      process.env.E2B_API_KEY = 'e2b_key1,e2b_key2,e2b_key3';
+      
+      const manager = new MultiProviderKeyManager();
+      
+      // Slot pattern should have 5 slots
+      const slots = manager.getSlotPattern();
+      expect(slots.length).toBe(5);
+      
+      // Over 5 calls, should use each key exactly once
+      const results: Array<{ provider: SandboxProviderType; index: number }> = [];
+      for (let i = 0; i < 5; i++) {
+        const entry = manager.getNext();
+        results.push({ provider: entry.provider, index: entry.index });
+      }
+      
+      const daytonaResults = results.filter(r => r.provider === SandboxProviderType.DAYTONA);
+      const e2bResults = results.filter(r => r.provider === SandboxProviderType.E2B);
+      
+      expect(daytonaResults.length).toBe(2);
+      expect(e2bResults.length).toBe(3);
     });
   });
 

@@ -2,9 +2,12 @@
  * Multi-Provider Key Manager
  * 
  * Manages multiple API keys for multiple sandbox providers (Daytona, E2B)
- * with round-robin rotation between providers and keys.
+ * with WEIGHTED round-robin rotation to ensure fair distribution.
  * 
- * Rotation pattern: daytona_key1 → e2b_key1 → daytona_key2 → e2b_key2 → ...
+ * Weighted Rotation Pattern:
+ * - Keys are distributed proportionally based on count per provider
+ * - Example: 1 Daytona key + 6 E2B keys = ratio 1:6
+ *   Every 7 requests: 1 Daytona, 6 E2B (each E2B key used once)
  * 
  * Usage:
  * ```typescript
@@ -41,17 +44,23 @@ export interface ProviderStats {
 /**
  * Multi-Provider Key Manager
  * 
- * Handles round-robin rotation between multiple providers and their keys.
+ * Handles WEIGHTED round-robin rotation between multiple providers and their keys.
+ * Ensures fair distribution based on number of keys per provider.
  * Thread-safe for single-threaded Node.js environment.
  */
 export class MultiProviderKeyManager {
   private daytonaKeys: string[] = [];
   private e2bKeys: string[] = [];
   
-  // Round-robin state
-  private currentProviderIndex: number = 0; // 0 = daytona, 1 = e2b
+  // Round-robin state for keys within each provider
   private daytonaKeyIndex: number = 0;
   private e2bKeyIndex: number = 0;
+  
+  // Weighted round-robin state
+  // We create a "slot" array that determines which provider to use
+  // Example: [d, e, e, e, e, e, e] for 1 daytona : 6 e2b
+  private providerSlots: SandboxProviderType[] = [];
+  private currentSlotIndex: number = 0;
   
   // Track total calls for logging
   private totalCalls: number = 0;
@@ -73,15 +82,91 @@ export class MultiProviderKeyManager {
     const e2bEnv = process.env.E2B_API_KEY || '';
     this.e2bKeys = this.parseKeys(e2bEnv);
     
-    logger.info("[KeyManager] Initialized", {
+    // Build weighted provider slots
+    this.buildProviderSlots();
+    
+    logger.info("[KeyManager] Initialized with weighted rotation", {
       daytonaKeyCount: this.daytonaKeys.length,
       e2bKeyCount: this.e2bKeys.length,
       totalKeys: this.daytonaKeys.length + this.e2bKeys.length,
+      slotPattern: this.providerSlots.length > 0 
+        ? `${this.providerSlots.length} slots (${this.daytonaKeys.length} daytona : ${this.e2bKeys.length} e2b)`
+        : 'none',
     });
     
     if (this.daytonaKeys.length === 0 && this.e2bKeys.length === 0) {
       logger.warn("[KeyManager] No API keys found! Set DAYTONA_API_KEY and/or E2B_API_KEY");
     }
+  }
+  
+  /**
+   * Build weighted provider slots for fair distribution
+   * 
+   * Creates an array where each provider appears proportionally to its key count.
+   * Example: 1 Daytona + 6 E2B = [D, E, E, E, E, E, E]
+   * Example: 2 Daytona + 3 E2B = [D, D, E, E, E]
+   * 
+   * This ensures each KEY (not provider) gets equal usage over time.
+   */
+  private buildProviderSlots(): void {
+    this.providerSlots = [];
+    
+    // Add slots for each Daytona key
+    for (let i = 0; i < this.daytonaKeys.length; i++) {
+      this.providerSlots.push(SandboxProviderType.DAYTONA);
+    }
+    
+    // Add slots for each E2B key
+    for (let i = 0; i < this.e2bKeys.length; i++) {
+      this.providerSlots.push(SandboxProviderType.E2B);
+    }
+    
+    // Shuffle to interleave providers (optional but provides better distribution)
+    // Using a deterministic interleave pattern instead of random shuffle
+    if (this.daytonaKeys.length > 0 && this.e2bKeys.length > 0) {
+      this.providerSlots = this.interleaveSlots(
+        this.daytonaKeys.length,
+        this.e2bKeys.length
+      );
+    }
+  }
+  
+  /**
+   * Create an interleaved slot pattern for fair distribution
+   * 
+   * Example: 1 Daytona + 6 E2B
+   * Instead of [D, E, E, E, E, E, E], creates [E, E, E, D, E, E, E]
+   * (Daytona in the middle for better spread)
+   * 
+   * Example: 2 Daytona + 6 E2B  
+   * Creates [E, E, D, E, E, D, E, E] (evenly distributed)
+   */
+  private interleaveSlots(daytonaCount: number, e2bCount: number): SandboxProviderType[] {
+    const total = daytonaCount + e2bCount;
+    const slots: SandboxProviderType[] = new Array(total);
+    
+    // Calculate spacing for the smaller group
+    const minCount = Math.min(daytonaCount, e2bCount);
+    const minProvider = daytonaCount <= e2bCount ? SandboxProviderType.DAYTONA : SandboxProviderType.E2B;
+    const maxProvider = daytonaCount <= e2bCount ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
+    
+    // Fill all slots with the majority provider first
+    for (let i = 0; i < total; i++) {
+      slots[i] = maxProvider;
+    }
+    
+    // Distribute minority provider evenly
+    // Using "bresenham-like" distribution for even spacing
+    if (minCount > 0) {
+      const step = total / minCount;
+      for (let i = 0; i < minCount; i++) {
+        // Calculate position with offset to center the distribution
+        const pos = Math.floor(step * i + step / 2);
+        slots[pos] = minProvider;
+      }
+    }
+    
+    return slots;
   }
   
   /**
@@ -134,14 +219,11 @@ export class MultiProviderKeyManager {
   }
   
   /**
-   * Get next provider and API key using round-robin rotation
+   * Get next provider and API key using WEIGHTED round-robin rotation
    * 
-   * Rotation pattern (interleaved):
-   * daytona_key[0] → e2b_key[0] → daytona_key[1] → e2b_key[1] → ...
-   * 
-   * When one provider runs out of keys, it wraps around:
-   * - If daytona has 2 keys and e2b has 3 keys:
-   *   d[0] → e[0] → d[1] → e[1] → d[0] → e[2] → d[1] → e[0] → ...
+   * Weighted Rotation ensures each KEY gets equal usage:
+   * - 1 Daytona + 6 E2B: Every 7 calls, Daytona used 1x, each E2B key used 1x
+   * - 2 Daytona + 3 E2B: Every 5 calls, each Daytona key used 1x, each E2B key used 1x
    * 
    * @returns KeyEntry with provider type and API key
    * @throws Error if no keys are available
@@ -166,28 +248,23 @@ export class MultiProviderKeyManager {
       return entry;
     }
     
-    // Multi-provider round-robin
-    // Alternate between providers: daytona → e2b → daytona → e2b
-    const providers = [SandboxProviderType.DAYTONA, SandboxProviderType.E2B];
-    let provider = providers[this.currentProviderIndex];
+    // Multi-provider WEIGHTED round-robin
+    // Use the slot array to determine which provider
+    const provider = this.providerSlots[this.currentSlotIndex];
     
-    // Skip provider if it has no keys (shouldn't happen if availableProviders.length > 1)
-    if (!availableProviders.includes(provider)) {
-      this.currentProviderIndex = (this.currentProviderIndex + 1) % 2;
-      provider = providers[this.currentProviderIndex];
-    }
-    
+    // Get next key from the selected provider
     const entry = this.getNextFromProvider(provider);
     
-    // Move to next provider for next call
-    this.currentProviderIndex = (this.currentProviderIndex + 1) % 2;
+    // Move to next slot (wrap around)
+    this.currentSlotIndex = (this.currentSlotIndex + 1) % this.providerSlots.length;
     
-    logger.debug("[KeyManager] Round-robin selection", {
+    logger.debug("[KeyManager] Weighted round-robin selection", {
       call: this.totalCalls,
       provider: entry.provider,
       keyIndex: entry.index,
       maskedKey: this.maskKey(entry.apiKey),
-      nextProvider: providers[this.currentProviderIndex],
+      slotIndex: (this.currentSlotIndex - 1 + this.providerSlots.length) % this.providerSlots.length,
+      totalSlots: this.providerSlots.length,
       daytonaNextIndex: this.daytonaKeyIndex,
       e2bNextIndex: this.e2bKeyIndex,
     });
@@ -277,7 +354,7 @@ export class MultiProviderKeyManager {
    * Reset rotation state (useful for testing)
    */
   reset(): void {
-    this.currentProviderIndex = 0;
+    this.currentSlotIndex = 0;
     this.daytonaKeyIndex = 0;
     this.e2bKeyIndex = 0;
     this.totalCalls = 0;
@@ -291,6 +368,13 @@ export class MultiProviderKeyManager {
     this.loadKeysFromEnv();
     this.reset();
     logger.info("[KeyManager] Keys reloaded from environment");
+  }
+  
+  /**
+   * Get the current slot pattern (for debugging/testing)
+   */
+  getSlotPattern(): SandboxProviderType[] {
+    return [...this.providerSlots];
   }
 }
 
