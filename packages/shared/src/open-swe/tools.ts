@@ -181,13 +181,20 @@ export function createGrepToolFields(targetRepository: TargetRepository, provide
   };
 }
 
-// Only used for type inference
-const _tmpSearchToolSchema = createGrepToolFields({
-  owner: "x",
-  repo: "x",
-  branch: "main",
-}).schema;
-export type GrepCommand = z.infer<typeof _tmpSearchToolSchema>;
+// Type definition for GrepCommand - defined inline to avoid calling createGrepToolFields at module load time
+// This prevents errors when SANDBOX_PROVIDER=multi and no providerType is available
+export type GrepCommand = {
+  query: string;
+  match_string?: boolean;
+  case_sensitive?: boolean;
+  context_lines?: number;
+  exclude_files?: string;
+  include_files?: string;
+  max_results?: number;
+  file_types?: string[];
+  follow_symlinks?: boolean;
+  workdir?: string;
+};
 
 function escapeShellArg(arg: string): string {
   // If the string contains a single quote, close the string, escape the single quote, and reopen it
