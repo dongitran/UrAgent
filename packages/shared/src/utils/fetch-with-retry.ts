@@ -155,17 +155,22 @@ export async function fetchWithRetry(
 
 /**
  * Wrapper for GitHub API calls with retry
+ * Uses shorter timeout for simple GET requests
  */
 export async function fetchGitHubWithRetry(
   url: string | URL,
   init?: RequestInit,
   options?: RetryOptions,
 ): Promise<Response> {
+  // Use shorter timeout for GET requests (typically faster)
+  const isGetRequest = !init?.method || init.method === "GET";
+  const defaultTimeout = isGetRequest ? 15000 : 30000;
+  
   return fetchWithRetry(url, init, {
     maxRetries: 3,
-    initialDelayMs: 1000,
-    maxDelayMs: 10000,
-    timeoutMs: 30000,
+    initialDelayMs: 500, // Reduced from 1000ms for faster retry
+    maxDelayMs: 5000,    // Reduced from 10000ms
+    timeoutMs: defaultTimeout,
     ...options,
   });
 }

@@ -5,10 +5,67 @@ const convertEscapedNewlinesToNewlines = (str: string) =>
   str.replace(/\\n/g, "\n");
 
 /**
+ * In-memory cache for installation tokens
+ * Token expires after 1 hour, we cache for 55 minutes to be safe
+ */
+interface CachedToken {
+  token: string;
+  expiresAt: number;
+}
+
+const tokenCache = new Map<string, CachedToken>();
+const TOKEN_CACHE_TTL_MS = 55 * 60 * 1000; // 55 minutes (tokens expire after 1 hour)
+
+// Track in-flight token requests to prevent duplicate API calls
+const pendingTokenRequests = new Map<string, Promise<string>>();
+
+/**
  * Gets an installation access token for a GitHub App installation
- * Includes retry logic for transient network errors (DNS, timeout, etc.)
+ * Includes caching and retry logic for transient network errors
  */
 export async function getInstallationToken(
+  installationId: string,
+  appId: string,
+  privateKey: string,
+): Promise<string> {
+  const cacheKey = `${installationId}:${appId}`;
+  
+  // Check cache first
+  const cached = tokenCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.token;
+  }
+  
+  // Check if there's already a pending request for this token
+  const pendingRequest = pendingTokenRequests.get(cacheKey);
+  if (pendingRequest) {
+    return pendingRequest;
+  }
+  
+  // Create new token request
+  const tokenPromise = fetchInstallationToken(installationId, appId, privateKey);
+  pendingTokenRequests.set(cacheKey, tokenPromise);
+  
+  try {
+    const token = await tokenPromise;
+    
+    // Cache the token
+    tokenCache.set(cacheKey, {
+      token,
+      expiresAt: Date.now() + TOKEN_CACHE_TTL_MS,
+    });
+    
+    return token;
+  } finally {
+    // Clean up pending request
+    pendingTokenRequests.delete(cacheKey);
+  }
+}
+
+/**
+ * Internal function to fetch installation token from GitHub API
+ */
+async function fetchInstallationToken(
   installationId: string,
   appId: string,
   privateKey: string,
@@ -57,4 +114,78 @@ export async function getInstallationToken(
     throw new Error("No token returned after fetching installation token");
   }
   return data.token as string;
+}
+
+/**
+ * Invalidate cached token for a specific installation
+ * Useful when token is rejected by GitHub API
+ */
+export function invalidateInstallationToken(
+  installationId: string,
+  appId: string,
+): void {
+  const cacheKey = `${installationId}:${appId}`;
+  tokenCache.delete(cacheKey);
+}
+
+/**
+ * Clear all cached tokens
+ */
+export function clearTokenCache(): void {
+  tokenCache.clear();
+}
+
+/**
+ * Pre-warm token cache for known installation ID from environment
+ * Call this on server startup to ensure first request is fast
+ */
+export async function warmupTokenCache(): Promise<boolean> {
+  const installationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
+  const appId = process.env.GITHUB_APP_ID;
+  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
+
+  if (!installationId || !appId || !privateKey) {
+    return false;
+  }
+
+  try {
+    const token = await getInstallationToken(installationId, appId, privateKey);
+    console.log(`[Warmup] Token: ${token.substring(0, 8)}...`);
+    return true;
+  } catch (error) {
+    console.error("[Warmup] Token failed:", error);
+    return false;
+  }
+}
+
+/**
+ * Start background token refresh scheduler
+ * Refreshes token every 25 minutes (before 1 hour expiry)
+ */
+let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
+export function startTokenRefreshScheduler(): void {
+  if (refreshInterval) {
+    return; // Already running
+  }
+
+  const REFRESH_INTERVAL_MS = 25 * 60 * 1000; // 25 minutes
+
+  // Warm up immediately on start
+  warmupTokenCache();
+
+  // Schedule periodic refresh
+  refreshInterval = setInterval(() => {
+    warmupTokenCache();
+  }, REFRESH_INTERVAL_MS);
+
+  console.log("[Scheduler] Token refresh started (25min interval)");
+}
+
+export function stopTokenRefreshScheduler(): void {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+    console.log("[Scheduler] Token refresh stopped");
+  }
 }

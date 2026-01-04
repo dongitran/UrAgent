@@ -59,32 +59,16 @@ export async function getInstallationRepositories(
 
 /**
  * Fetches branches for a specific repository using OAuth access token
+ * Optimized to reduce API calls by fetching repo info only when needed
  */
 export async function getRepositoryBranches(
   owner: string,
   repo: string,
   page: number = 1,
   perPage: number = 30,
-): Promise<{ branches: Branch[]; hasMore: boolean; totalCount?: number }> {
-  // First, get repository info to ensure we have the default branch
-
-  const repoResponse = await fetch(
-    `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}`,
-    {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "OpenSWE-Agent",
-      },
-    },
-  );
-
-  let defaultBranch: string | null = null;
-  if (repoResponse.ok) {
-    const repoData = await repoResponse.json();
-    defaultBranch = repoData.default_branch;
-  }
-
-  // Fetch first 30 branches only
+  defaultBranch?: string, // Optional: pass default branch to avoid extra API call
+): Promise<{ branches: Branch[]; hasMore: boolean; totalCount?: number; defaultBranch?: string }> {
+  // Fetch branches first
   const response = await fetch(
     `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
     {
@@ -107,18 +91,13 @@ export async function getRepositoryBranches(
     return { branches: [], hasMore: false };
   }
 
-  // Ensure default branch is at the beginning if it exists
-  if (defaultBranch && page === 1) {
-    const defaultBranchIndex = branches.findIndex(
-      (branch) => branch.name === defaultBranch,
-    );
-    if (defaultBranchIndex > 0) {
-      const defaultBranchData = branches[defaultBranchIndex];
-      branches.splice(defaultBranchIndex, 1);
-      branches.unshift(defaultBranchData);
-    } else if (defaultBranchIndex === -1) {
-      const defaultBranchResponse = await fetch(
-        `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches/${defaultBranch}`,
+  // Only fetch repo info if we need default branch and it's not provided
+  let resolvedDefaultBranch = defaultBranch;
+  if (!resolvedDefaultBranch && page === 1) {
+    // Try to get default branch from repo info (this call will be cached)
+    try {
+      const repoResponse = await fetch(
+        `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}`,
         {
           headers: {
             Accept: "application/vnd.github.v3+json",
@@ -126,14 +105,43 @@ export async function getRepositoryBranches(
           },
         },
       );
-      if (!defaultBranchResponse.ok) {
-        const errorData = await defaultBranchResponse.json();
-        throw new Error(
-          `Failed to fetch default branch: ${JSON.stringify(errorData)}`,
-        );
+      if (repoResponse.ok) {
+        const repoData = await repoResponse.json();
+        resolvedDefaultBranch = repoData.default_branch;
       }
-      const defaultBranchData = await defaultBranchResponse.json();
+    } catch {
+      // Ignore error, default branch sorting is optional
+    }
+  }
+
+  // Ensure default branch is at the beginning if it exists (only on first page)
+  if (resolvedDefaultBranch && page === 1) {
+    const defaultBranchIndex = branches.findIndex(
+      (branch) => branch.name === resolvedDefaultBranch,
+    );
+    if (defaultBranchIndex > 0) {
+      const defaultBranchData = branches[defaultBranchIndex];
+      branches.splice(defaultBranchIndex, 1);
       branches.unshift(defaultBranchData);
+    } else if (defaultBranchIndex === -1) {
+      // Default branch not in current page, fetch it separately
+      try {
+        const defaultBranchResponse = await fetch(
+          `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches/${resolvedDefaultBranch}`,
+          {
+            headers: {
+              Accept: "application/vnd.github.v3+json",
+              "User-Agent": "OpenSWE-Agent",
+            },
+          },
+        );
+        if (defaultBranchResponse.ok) {
+          const defaultBranchData = await defaultBranchResponse.json();
+          branches.unshift(defaultBranchData);
+        }
+      } catch {
+        // Ignore error, default branch at top is optional
+      }
     }
   }
 
@@ -141,6 +149,7 @@ export async function getRepositoryBranches(
     branches,
     hasMore: branches.length >= perPage,
     totalCount: branches.length,
+    defaultBranch: resolvedDefaultBranch,
   };
 }
 
