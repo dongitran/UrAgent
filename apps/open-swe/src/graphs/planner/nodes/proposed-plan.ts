@@ -119,7 +119,7 @@ async function startProgrammerRun(input: {
 
   const programmerThreadId = uuidv4();
   // Restart the sandbox.
-  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+  const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
     await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
@@ -132,6 +132,9 @@ async function startProgrammerRun(input: {
     dependenciesInstalled !== null
       ? dependenciesInstalled
       : runInput.dependenciesInstalled;
+  if (sandboxProviderType) {
+    runInput.sandboxProviderType = sandboxProviderType;
+  }
 
   const run = await langGraphClient.runs.create(
     programmerThreadId,

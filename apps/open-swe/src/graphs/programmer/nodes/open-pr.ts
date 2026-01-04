@@ -109,7 +109,7 @@ export async function openPullRequest(
 
   const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
 
-  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+  const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
     await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
@@ -129,7 +129,7 @@ export async function openPullRequest(
     );
   }
 
-  const repoPath = getRepoAbsolutePath(state.targetRepository);
+  const repoPath = getRepoAbsolutePath(state.targetRepository, undefined, sandboxInstance.providerType);
 
   // First, verify that there are changed files
   logger.info("Checking for changed files...", {
@@ -437,6 +437,7 @@ export async function openPullRequest(
       sandboxSessionId: undefined,
       dependenciesInstalled: false,
     }),
+    ...(sandboxProviderType && { sandboxProviderType }),
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     tokenData: trackCachePerformance(response, modelName),

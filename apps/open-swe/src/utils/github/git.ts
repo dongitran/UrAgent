@@ -1017,7 +1017,8 @@ export async function checkoutBranchAndCommitWithInstance(
     githubIssueId: number;
   },
 ): Promise<{ branchName: string; updatedTaskPlan?: TaskPlan }> {
-  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+  // Use sandboxInstance.providerType for correct path resolution in multi-provider mode
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, sandboxInstance.providerType);
   const branchName = options.branchName || getBranchName(config);
 
   logger.info("=== CHECKOUT BRANCH AND COMMIT (ISandbox) STARTED ===", {
@@ -1028,6 +1029,7 @@ export async function checkoutBranchAndCommitWithInstance(
     isFeatureBranch: branchName !== targetRepository.branch,
     absoluteRepoDir,
     sandboxId: sandboxInstance.id,
+    providerType: sandboxInstance.providerType,
   });
 
   // IMPORTANT: Prevent committing directly to base branch
@@ -1291,7 +1293,8 @@ export async function pushEmptyCommitWithInstance(
   const userEmail = `${botAppName}@users.noreply.github.com`;
 
   try {
-    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+    // Use sandboxInstance.providerType for correct path resolution in multi-provider mode
+    const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, sandboxInstance.providerType);
     const executor = createShellExecutor(config);
     
     const setGitConfigRes = await executor.executeCommand({
@@ -1328,7 +1331,10 @@ export async function pushEmptyCommitWithInstance(
       token: options.githubInstallationToken,
     });
 
-    logger.info("Successfully pushed empty commit");
+    logger.info("Successfully pushed empty commit", {
+      sandboxId: sandboxInstance.id,
+      providerType: sandboxInstance.providerType,
+    });
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     logger.error(`Failed to push empty commit`, {

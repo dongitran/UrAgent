@@ -17,6 +17,7 @@ import {
   GitCloneOptions,
   GitOperationOptions,
   GitCommitOptions,
+  SandboxProviderType,
 } from "./types.js";
 
 const logger = createLogger(LogLevel.DEBUG, "DaytonaSandboxProvider");
@@ -94,6 +95,10 @@ export class DaytonaSandboxWrapper implements ISandbox {
   
   get state(): SandboxState {
     return mapDaytonaState(this.sandbox.state || 'unknown');
+  }
+  
+  get providerType(): SandboxProviderType {
+    return SandboxProviderType.DAYTONA;
   }
   
   async executeCommand(options: ExecuteCommandOptions): Promise<ExecuteCommandResult> {

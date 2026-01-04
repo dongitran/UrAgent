@@ -21,7 +21,7 @@ import { getLocalShellExecutor } from "../../utils/shell-executor/index.js";
 const logger = createLogger(LogLevel.INFO, "TextEditorTool");
 
 export function createTextEditorTool(
-  state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & { sandboxProviderType?: string },
   config: GraphConfig,
 ) {
   const textEditorTool = tool(
@@ -39,7 +39,7 @@ export function createTextEditorTool(
 
         const localMode = isLocalMode(config);
         const localAbsolutePath = getLocalWorkingDirectory();
-        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
+        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType);
         const workDir = localMode ? localAbsolutePath : sandboxAbsolutePath;
         let result: string;
 
@@ -236,7 +236,7 @@ export function createTextEditorTool(
         };
       }
     },
-    createTextEditorToolFields(state.targetRepository, config),
+    createTextEditorToolFields(state.targetRepository, config, state.sandboxProviderType),
   );
 
   return textEditorTool;

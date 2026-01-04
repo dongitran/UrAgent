@@ -18,13 +18,13 @@ const DEFAULT_ENV = {
 };
 
 export function createInstallDependenciesTool(
-  state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & { sandboxProviderType?: string },
   config: GraphConfig,
 ) {
   const installDependenciesTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const repoRoot = getRepoAbsolutePath(state.targetRepository);
+        const repoRoot = getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType);
         const command = input.command.join(" ");
 
         let workdir = repoRoot;
@@ -153,7 +153,7 @@ export function createInstallDependenciesTool(
         throw e;
       }
     },
-    createInstallDependenciesToolFields(state.targetRepository),
+    createInstallDependenciesToolFields(state.targetRepository, state.sandboxProviderType),
   );
 
   return installDependenciesTool;

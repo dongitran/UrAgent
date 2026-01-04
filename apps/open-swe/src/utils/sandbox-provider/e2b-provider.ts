@@ -32,6 +32,7 @@ import {
   GitCloneOptions,
   GitOperationOptions,
   GitCommitOptions,
+  SandboxProviderType,
 } from "./types.js";
 
 const logger = createLogger(LogLevel.DEBUG, "E2BSandboxProvider");
@@ -135,6 +136,10 @@ export class E2BSandboxWrapper implements ISandbox {
   
   get state(): SandboxState {
     return this._state;
+  }
+  
+  get providerType(): SandboxProviderType {
+    return SandboxProviderType.E2B;
   }
   
   async executeCommand(options: ExecuteCommandOptions): Promise<ExecuteCommandResult> {

@@ -8,6 +8,7 @@ import { DEFAULT_EXCLUDED_PATTERNS } from "../utils/github/constants.js";
 describe("Git File Validation", () => {
   describe("Realistic git status scenarios", () => {
     it("should handle typical development workspace changes", () => {
+      // NOTE: .env files are NOT excluded because this is a private repository
       const gitStatusOutput = ` M apps/open-swe/src/utils/github/git.ts
 ?? apps/open-swe/src/__tests__/git-file-validation.test.ts
  M package.json
@@ -33,6 +34,7 @@ describe("Git File Validation", () => {
         "apps/open-swe/src/__tests__/git-file-validation.test.ts",
         "package.json",
         "old-config.json",
+        ".env.local", // .env files are NOT excluded (private repo)
         "README.md",
         "temp-backup.txt",
       ]);
@@ -40,7 +42,6 @@ describe("Git File Validation", () => {
       expect(excludedFiles).toEqual([
         "node_modules/.cache/package-lock.json",
         "dist/bundle.js",
-        ".env.local",
         "logs/error.log",
         ".DS_Store",
       ]);
@@ -48,6 +49,7 @@ describe("Git File Validation", () => {
 
     it("should handle file moves and renames", () => {
       // Git status with file moves (R) and renames
+      // NOTE: .env files are NOT excluded because this is a private repository
       const gitStatusOutput = `R  src/old-file.ts -> src/new-file.ts
  M src/components/Button.tsx
 ?? node_modules/react/index.js
@@ -68,13 +70,13 @@ describe("Git File Validation", () => {
       expect(validFiles).toEqual([
         "src/old-file.ts -> src/new-file.ts",
         "src/components/Button.tsx",
+        ".env.production", // .env files are NOT excluded (private repo)
         "package.json",
       ]);
 
       expect(excludedFiles).toEqual([
         "node_modules/react/index.js",
         "dist/assets/main.css",
-        ".env.production",
         "logs/debug.log",
         ".DS_Store",
       ]);
@@ -82,6 +84,7 @@ describe("Git File Validation", () => {
 
     it("should handle nested directory structures", () => {
       // Complex nested directory structure
+      // NOTE: .env files are NOT excluded because this is a private repository
       const gitStatusOutput = ` M apps/web/src/components/ui/button.tsx
 ?? apps/web/node_modules/react/index.js
 ?? apps/web/dist/assets/main.css
@@ -103,6 +106,7 @@ describe("Git File Validation", () => {
 
       expect(validFiles).toEqual([
         "apps/web/src/components/ui/button.tsx",
+        "apps/open-swe/.env.development", // .env files are NOT excluded (private repo)
         "packages/shared/src/utils.ts",
       ]);
 
@@ -110,7 +114,6 @@ describe("Git File Validation", () => {
         "apps/web/node_modules/react/index.js",
         "apps/web/dist/assets/main.css",
         "apps/open-swe/src/langgraph_api/server.py",
-        "apps/open-swe/.env.development",
         ".turbo/cache/file",
         "coverage/lcov.info",
         "logs/app.log",
@@ -120,6 +123,7 @@ describe("Git File Validation", () => {
 
     it("should handle Windows-style paths", () => {
       // Git status with Windows backslashes
+      // NOTE: .env files are NOT excluded because this is a private repository
       const gitStatusOutput = ` M src\\components\\Button.tsx
 ?? node_modules\\react\\index.js
 ?? dist\\bundle.js
@@ -138,13 +142,13 @@ describe("Git File Validation", () => {
 
       expect(validFiles).toEqual([
         "src\\components\\Button.tsx",
+        ".env.local", // .env files are NOT excluded (private repo)
         "package.json",
       ]);
 
       expect(excludedFiles).toEqual([
         "node_modules\\react\\index.js",
         "dist\\bundle.js",
-        ".env.local",
         "logs\\error.log",
         ".DS_Store",
       ]);

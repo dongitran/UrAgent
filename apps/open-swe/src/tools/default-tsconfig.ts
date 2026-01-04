@@ -33,7 +33,7 @@ const DEFAULT_TS_CONFIG = {
 };
 
 export function createWriteDefaultTsConfigTool(
-  state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & { sandboxProviderType?: string },
   config: GraphConfig,
 ) {
   const writeDefaultTsConfigTool = tool(
@@ -76,7 +76,7 @@ export function createWriteDefaultTsConfigTool(
         };
       }
     },
-    createWriteDefaultTsConfigToolFields(state.targetRepository),
+    createWriteDefaultTsConfigToolFields(state.targetRepository, state.sandboxProviderType),
   );
 
   return writeDefaultTsConfigTool;

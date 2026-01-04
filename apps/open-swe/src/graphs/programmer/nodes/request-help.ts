@@ -125,7 +125,7 @@ Please check the UrAgent interface to respond to this request.`;
       throw new Error("Interrupt response expected to be a string.");
     }
 
-    const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+    const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
       await getSandboxInstanceWithErrorHandling(
         state.sandboxSessionId,
         state.targetRepository,
@@ -164,6 +164,7 @@ Please check the UrAgent interface to respond to this request.`;
       messages: [toolMessage, humanResponseCustomEventMsg],
       internalMessages: [toolMessage],
       sandboxSessionId: sandboxInstance.id,
+      ...(sandboxProviderType && { sandboxProviderType }),
       ...(codebaseTree && { codebaseTree }),
       ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     };

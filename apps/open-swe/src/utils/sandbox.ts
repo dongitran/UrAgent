@@ -301,11 +301,12 @@ export async function getSandboxWithErrorHandling(
       stateBranchName: branchName,
     });
 
-    // Get codebase tree
+    // Get codebase tree - this is Daytona-specific function so always use DAYTONA provider type
     const codebaseTree = await getCodebaseTree(
       config,
       sandbox.id,
       targetRepository,
+      SandboxProviderType.DAYTONA,
     );
     const codebaseTreeToReturn =
       codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;
@@ -336,6 +337,7 @@ export async function getSandboxInstanceWithErrorHandling(
   sandboxInstance: ISandbox;
   codebaseTree: string | null;
   dependenciesInstalled: boolean | null;
+  sandboxProviderType?: string;
 }> {
   const provider = getProvider();
   
@@ -349,9 +351,10 @@ export async function getSandboxInstanceWithErrorHandling(
 
   if (isLocalMode(config)) {
     // In local mode, create a mock ISandbox
-    const mockSandbox = {
+    const mockSandbox: ISandbox = {
       id: sandboxSessionId || "local-mock-sandbox",
       state: SandboxState.STARTED,
+      providerType: SandboxProviderType.LOCAL,
       executeCommand: async () => ({ exitCode: 0, result: "" }),
       readFile: async () => "",
       writeFile: async () => {},
@@ -370,7 +373,7 @@ export async function getSandboxInstanceWithErrorHandling(
       start: async () => {},
       stop: async () => {},
       getNative: () => null as any,
-    } as ISandbox;
+    };
 
     logger.debug("[SANDBOX] Local mode - returning mock sandbox", {
       mockSandboxId: mockSandbox.id,
@@ -380,6 +383,7 @@ export async function getSandboxInstanceWithErrorHandling(
       sandboxInstance: mockSandbox,
       codebaseTree: null,
       dependenciesInstalled: null,
+      sandboxProviderType: SandboxProviderType.LOCAL,
     };
   }
 
@@ -416,6 +420,7 @@ export async function getSandboxInstanceWithErrorHandling(
         sandboxInstance,
         codebaseTree: null,
         dependenciesInstalled: null,
+        sandboxProviderType: sandboxInstance.providerType,
       };
     }
 
@@ -434,6 +439,7 @@ export async function getSandboxInstanceWithErrorHandling(
         sandboxInstance,
         codebaseTree: null,
         dependenciesInstalled: null,
+        sandboxProviderType: sandboxInstance.providerType,
       };
     }
 
@@ -494,8 +500,10 @@ export async function getSandboxInstanceWithErrorHandling(
 
     const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
     
-    // Get provider-aware path (reuse providerType from above)
-    const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, provider.name);
+    // Get provider-aware path - MUST use sandboxInstance.providerType (not provider.name)
+    // because in multi-provider mode, provider.name is 'multi' but sandboxInstance.providerType
+    // is the actual provider ('daytona' or 'e2b')
+    const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, sandboxInstance.providerType);
     const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
 
     // Clone repository using ISandbox.git.clone()
@@ -503,6 +511,8 @@ export async function getSandboxInstanceWithErrorHandling(
       sandboxId: sandboxInstance.id,
       targetRepository: `${targetRepository.owner}/${targetRepository.repo}`,
       provider: provider.name,
+      actualProviderType: sandboxInstance.providerType,
+      absoluteRepoDir,
     });
     
     await sandboxInstance.git.clone({
@@ -533,11 +543,12 @@ export async function getSandboxInstanceWithErrorHandling(
       }
     }
 
-    // Get codebase tree
+    // Get codebase tree - use sandboxInstance.providerType for correct path
     const codebaseTree = await getCodebaseTree(
       config,
       sandboxInstance.id,
       targetRepository,
+      sandboxInstance.providerType,
     );
     const codebaseTreeToReturn =
       codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;

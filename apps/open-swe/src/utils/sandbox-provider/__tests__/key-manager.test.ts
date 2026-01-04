@@ -1,10 +1,10 @@
 /**
  * Unit tests for MultiProviderKeyManager
  * 
- * Run with: npx vitest run src/utils/sandbox-provider/__tests__/key-manager.test.ts
+ * Run with: npm run test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { MultiProviderKeyManager, resetKeyManager } from '../key-manager.js';
 import { SandboxProviderType } from '../types.js';
 

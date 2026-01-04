@@ -184,9 +184,9 @@ export async function getSandboxWithErrorHandling(
 
     const sandbox = await createSandboxWithRetry(provider);
     
-    // Clone repository - use provider-aware path
-    const providerType = provider.name; // 'daytona' or 'e2b'
-    const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, providerType);
+    // Clone repository - use provider-aware path from sandbox instance
+    // sandbox.providerType gives us the actual provider ('daytona' or 'e2b')
+    const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, sandbox.providerType);
     const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
     
     // Get GitHub token from config
@@ -243,6 +243,7 @@ function createMockLocalSandbox(sandboxId?: string): ISandbox {
   return {
     id,
     state: SandboxState.STARTED,
+    providerType: SandboxProviderType.LOCAL,
     
     async executeCommand() {
       throw new Error("Local mode: use LocalShellExecutor instead");

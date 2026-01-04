@@ -67,7 +67,7 @@ function formatSystemPrompt(
   )
     .replaceAll(
       "{CURRENT_WORKING_DIRECTORY}",
-      getRepoAbsolutePath(state.targetRepository),
+      getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType),
     )
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll("{CHANGED_FILES}", state.changedFiles)

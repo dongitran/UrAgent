@@ -17,7 +17,8 @@ export const E2B_TEMPLATE_NAME =
 
 /**
  * Get the sandbox root directory based on provider type
- * @param providerType - 'daytona', 'e2b', or undefined (auto-detect from env)
+ * @param providerType - 'daytona', 'e2b', 'local', or undefined (auto-detect from env)
+ * @throws Error if providerType is 'multi' - caller should use sandbox.providerType instead
  */
 export function getSandboxRootDir(providerType?: string): string {
   // If explicitly specified
@@ -27,10 +28,29 @@ export function getSandboxRootDir(providerType?: string): string {
   if (providerType === 'daytona') {
     return DAYTONA_SANDBOX_ROOT_DIR;
   }
+  if (providerType === 'local') {
+    // Local mode doesn't use sandbox root dir, but return Daytona path as fallback
+    return DAYTONA_SANDBOX_ROOT_DIR;
+  }
+  
+  // 'multi' should never be passed here - caller should use sandbox.providerType
+  // which returns the actual provider type ('daytona' or 'e2b')
+  if (providerType === 'multi') {
+    throw new Error(
+      "getSandboxRootDir() cannot be called with 'multi' provider type. " +
+      "Use sandbox.providerType to get the actual provider type after sandbox creation."
+    );
+  }
   
   // Auto-detect from environment
   const envProvider = process.env.SANDBOX_PROVIDER?.toLowerCase();
   if (envProvider === 'e2b') {
+    return E2B_SANDBOX_ROOT_DIR;
+  }
+  if (envProvider === 'multi') {
+    // When env is 'multi', we can't determine the path without a sandbox instance
+    // Default to E2B path (more restrictive) - this should only happen in edge cases
+    // where code doesn't have access to sandbox instance (e.g., prompt formatting)
     return E2B_SANDBOX_ROOT_DIR;
   }
   

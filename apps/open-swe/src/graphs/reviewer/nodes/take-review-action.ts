@@ -86,7 +86,7 @@ export async function takeReviewerActions(
     }
   }
 
-  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+  const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
     await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
@@ -175,7 +175,7 @@ export async function takeReviewerActions(
   let updatedTaskPlan: TaskPlan | undefined;
 
   if (!isLocalMode(config)) {
-    const repoPath = getRepoAbsolutePath(state.targetRepository, config);
+    const repoPath = getRepoAbsolutePath(state.targetRepository, config, sandboxInstance.providerType);
     const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
 
     if (changedFiles.length > 0) {
@@ -246,6 +246,8 @@ export async function takeReviewerActions(
   const commandUpdate: ReviewerGraphUpdate = {
     messages: userFacingMessagesUpdate,
     reviewerMessages: reviewerMessagesUpdate,
+    sandboxSessionId: sandboxInstance.id,
+    ...(sandboxProviderType && { sandboxProviderType }),
     ...(branchName && { branchName }),
     ...(updatedTaskPlan && {
       taskPlan: updatedTaskPlan,

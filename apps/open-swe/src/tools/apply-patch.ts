@@ -110,7 +110,7 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
       const { diff, file_path } = input;
       const workDir = isLocalMode(config)
         ? getLocalWorkingDirectory()
-        : getRepoAbsolutePath(state.targetRepository);
+        : getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType);
 
       // Get sandbox for sandbox mode (will be undefined for local mode)
       const sandboxInstance = isLocalMode(config)
@@ -264,7 +264,7 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
         status: "success",
       };
     },
-    createApplyPatchToolFields(state.targetRepository),
+    createApplyPatchToolFields(state.targetRepository, state.sandboxProviderType),
   );
   return applyPatchTool;
 }

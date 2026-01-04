@@ -166,7 +166,7 @@ export async function takeAction(
     }
   }
 
-  const { sandboxInstance, dependenciesInstalled } = await getSandboxInstanceWithErrorHandling(
+  const { sandboxInstance, dependenciesInstalled, sandboxProviderType } = await getSandboxInstanceWithErrorHandling(
     state.sandboxSessionId,
     state.targetRepository,
     state.branchName,
@@ -294,7 +294,7 @@ export async function takeAction(
   });
 
   if (!isLocalMode(config)) {
-    const repoPath = getRepoAbsolutePath(state.targetRepository);
+    const repoPath = getRepoAbsolutePath(state.targetRepository, undefined, sandboxInstance.providerType);
     const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
 
     logger.info("Changed files check in take-action", {
@@ -352,7 +352,7 @@ export async function takeAction(
     ...toolCallResults,
   ]);
 
-  const codebaseTree = await getCodebaseTree(config);
+  const codebaseTree = await getCodebaseTree(config, state.sandboxSessionId, state.targetRepository, sandboxInstance.providerType);
   // If the codebase tree failed to generate, fallback to the previous codebase tree, or if that's not defined, use the failed to generate message.
   const codebaseTreeToReturn =
     codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE
@@ -394,6 +394,7 @@ export async function takeAction(
     }),
     codebaseTree: codebaseTreeToReturn,
     sandboxSessionId: sandboxInstance.id,
+    ...(sandboxProviderType && { sandboxProviderType }),
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
     }),
