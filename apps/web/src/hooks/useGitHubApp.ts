@@ -267,10 +267,19 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setBranchesError(null);
 
       try {
+        // Pass defaultBranch from repositories list to avoid extra API call
+        const repoDefaultBranch = repositories.find(
+          (repo) =>
+            repo.full_name ===
+            `${selectedRepository.owner}/${selectedRepository.repo}`,
+        )?.default_branch;
+
         const branchData = await getRepositoryBranches(
           selectedRepository.owner,
           selectedRepository.repo,
           page,
+          30,
+          repoDefaultBranch, // Pass default branch to avoid extra API call
         );
 
         if (append) {
@@ -300,7 +309,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
         if (append) setBranchesLoadingMore(false);
       }
     },
-    [selectedRepository?.owner, selectedRepository?.repo],
+    [selectedRepository?.owner, selectedRepository?.repo, repositories],
   );
 
   // Load more functions

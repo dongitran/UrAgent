@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getInstallationToken } from "@openswe/shared/github/auth";
+import { getInstallationToken, invalidateInstallationToken } from "@openswe/shared/github/auth";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 import { fetchGitHubWithRetry } from "@openswe/shared/utils/fetch-with-retry";
 import { githubApiCache } from "@/utils/cache";
@@ -97,6 +97,36 @@ async function handler(req: NextRequest) {
       body:
         req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
     });
+
+    // If token is rejected (401), invalidate cache and retry once
+    if (response.status === 401) {
+      invalidateInstallationToken(installationIdCookie, appId);
+      
+      // Get fresh token and retry
+      const freshToken = await getInstallationToken(
+        installationIdCookie,
+        appId,
+        privateAppKey,
+      );
+      
+      headers.set("Authorization", `Bearer ${freshToken}`);
+      
+      const retryResponse = await fetchGitHubWithRetry(targetUrl.toString(), {
+        method: req.method,
+        headers: headers,
+        body:
+          req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+      });
+      
+      const retryResponseHeaders = new Headers(retryResponse.headers);
+      retryResponseHeaders.delete("Content-Encoding");
+      
+      return new NextResponse(retryResponse.body, {
+        status: retryResponse.status,
+        statusText: retryResponse.statusText,
+        headers: retryResponseHeaders,
+      });
+    }
 
     const responseHeaders = new Headers(response.headers);
     responseHeaders.delete("Content-Encoding"); // Prevent ERR_CONTENT_DECODING_FAILED error.
