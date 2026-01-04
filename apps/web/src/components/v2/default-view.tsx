@@ -28,29 +28,10 @@ import { Thread } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
-import { Settings, BookOpen } from "lucide-react";
-import NextLink from "next/link";
+import { BookOpen } from "lucide-react";
 import { UrAgentLogo } from "../icons/uragent-logo";
 import { OpenSWEIcon } from "../icons/openswe-icon";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
-
-function OpenSettingsButton() {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          asChild
-          className="hover:bg-accent hover:text-accent-foreground size-6 rounded-md p-1 hover:cursor-pointer"
-        >
-          <NextLink href="/settings">
-            <Settings className="size-4" />
-          </NextLink>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Open Settings</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
 
 const DOCUMENTATION_URL = "https://docs.langchain.com/labs/swe";
 
@@ -140,7 +121,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
             </div>
             <OpenDocumentationButton />
-            <OpenSettingsButton />
             <ThemeToggle />
             <UserPopover />
           </div>
