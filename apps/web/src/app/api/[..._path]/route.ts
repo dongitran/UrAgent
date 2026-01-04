@@ -20,7 +20,7 @@ import { encryptSecret } from "@openswe/shared/crypto";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
   initApiPassthrough({
     apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
-    runtime: "edge", // default
+    runtime: "nodejs", // Use nodejs to share cache with warmup
     disableWarningLog: true,
     bodyParameters: (req, body) => {
       if (body.config?.configurable && "apiKeys" in body.config.configurable) {
@@ -50,6 +50,7 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
       return body;
     },
     headers: async (req) => {
+      const startTime = Date.now();
       const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
       if (!encryptionKey) {
         throw new Error(
@@ -58,7 +59,10 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
       }
 
       // Verify authentication (Keycloak or GitHub or default config)
+      const t1 = Date.now();
       const authResult = await verifyRequestAuth(req);
+      const authTime = Date.now() - t1;
+      
       if (!authResult.authenticated) {
         throw new Error(
           "Unauthorized: " + (authResult.error || "Not authenticated"),
@@ -80,10 +84,15 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
         );
       }
 
+      const t2 = Date.now();
       const [installationToken, installationName] = await Promise.all([
         getGitHubInstallationTokenOrThrow(installationId, encryptionKey),
         getInstallationNameFromReq(req.clone(), installationId),
       ]);
+      const tokenTime = Date.now() - t2;
+
+      const totalTime = Date.now() - startTime;
+      console.log(`[API Timing] auth=${authTime}ms token=${tokenTime}ms total=${totalTime}ms`);
 
       return {
         [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
