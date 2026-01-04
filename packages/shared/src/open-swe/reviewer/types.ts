@@ -52,6 +52,17 @@ export const ReviewerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  /**
+   * The provider type of the sandbox ('daytona', 'e2b', 'local').
+   * Used for correct path resolution when SANDBOX_PROVIDER=multi.
+   */
+  sandboxProviderType: withLangGraph(z.string(), {
+    reducer: {
+      schema: z.string(),
+      fn: (_state: string, update: string) => update,
+    },
+    default: () => "",
+  }),
   targetRepository: withLangGraph(z.custom<TargetRepository>(), {
     reducer: {
       schema: z.custom<TargetRepository>(),

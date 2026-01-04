@@ -109,16 +109,18 @@ export async function initializeState(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
-  const repoRoot = getRepoAbsolutePath(state.targetRepository, config);
   logger.info("Initializing state for reviewer");
   // get the base branch name, then get the changed files
-  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+  const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
     await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
       config,
     );
+
+  // Get repo root AFTER sandbox is created to use correct provider type
+  const repoRoot = getRepoAbsolutePath(state.targetRepository, config, sandboxInstance.providerType);
 
   let baseBranchName = state.targetRepository.branch;
   if (!baseBranchName) {
@@ -134,6 +136,8 @@ export async function initializeState(
     baseBranchName,
     changedFiles,
     messages: createReviewStartedMessage(),
+    sandboxSessionId: sandboxInstance.id,
+    ...(sandboxProviderType && { sandboxProviderType }),
     ...(codebaseTree ? { codebaseTree } : {}),
     ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {}),
   };

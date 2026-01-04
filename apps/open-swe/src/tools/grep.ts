@@ -19,7 +19,7 @@ import { join, isAbsolute } from "path";
 const logger = createLogger(LogLevel.INFO, "GrepTool");
 
 export function createGrepTool(
-  state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & { sandboxProviderType?: string },
   config: GraphConfig,
 ) {
   const grepTool = tool(
@@ -28,7 +28,7 @@ export function createGrepTool(
         const command = formatGrepCommand(input);
         const localMode = isLocalMode(config);
         const localAbsolutePath = getLocalWorkingDirectory();
-        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
+        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType);
         const repoRoot = localMode ? localAbsolutePath : sandboxAbsolutePath;
 
         let workDir = repoRoot;
@@ -92,7 +92,7 @@ export function createGrepTool(
         };
       }
     },
-    createGrepToolFields(state.targetRepository),
+    createGrepToolFields(state.targetRepository, state.sandboxProviderType),
   );
 
   return grepTool;

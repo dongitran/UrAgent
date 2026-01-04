@@ -102,7 +102,7 @@ export async function handleCompletedTask(
       config,
     );
 
-    const repoPath = getRepoAbsolutePath(state.targetRepository);
+    const repoPath = getRepoAbsolutePath(state.targetRepository, undefined, sandboxInstance.providerType);
     const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
 
     logger.info("=== HANDLE COMPLETED TASK - CHECKING FOR COMMITS ===", {

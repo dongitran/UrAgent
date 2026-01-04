@@ -32,6 +32,7 @@ import {
   GitCloneOptions,
   GitOperationOptions,
   GitCommitOptions,
+  SandboxProviderType,
 } from "./types.js";
 
 const logger = createLogger(LogLevel.DEBUG, "E2BSandboxProvider");
@@ -135,6 +136,10 @@ export class E2BSandboxWrapper implements ISandbox {
   
   get state(): SandboxState {
     return this._state;
+  }
+  
+  get providerType(): SandboxProviderType {
+    return SandboxProviderType.E2B;
   }
   
   async executeCommand(options: ExecuteCommandOptions): Promise<ExecuteCommandResult> {
@@ -719,7 +724,8 @@ export class E2BSandboxWrapper implements ISandbox {
  */
 export class E2BSandboxProvider implements ISandboxProvider {
   private SandboxClass: E2BSandboxClass | null = null;
-  private apiKey: string;
+  private apiKeys: string[] = [];
+  private currentKeyIndex: number = 0;
   private defaultTemplate: string;
   /** Reserved for future E2B custom domain support */
   private _domain?: string;
@@ -731,19 +737,48 @@ export class E2BSandboxProvider implements ISandboxProvider {
     defaultTemplate?: string;
     domain?: string;
   }) {
-    this.apiKey = config?.apiKey || process.env.E2B_API_KEY || '';
+    // Support multiple comma-separated keys for round-robin
+    const keyString = config?.apiKey || process.env.E2B_API_KEY || '';
+    this.apiKeys = keyString.split(',').map(k => k.trim()).filter(k => k.length > 0);
+    
     // Use E2B_TEMPLATE env var, then config, then 'base' as default
     this.defaultTemplate = process.env.E2B_TEMPLATE || config?.defaultTemplate || 'base';
     this._domain = config?.domain; // Reserved for future use
     
-    if (!this.apiKey) {
+    if (this.apiKeys.length === 0) {
       logger.warn("[E2B] No API key provided. Set E2B_API_KEY environment variable.");
     }
     
     logger.debug("[E2B] Provider initialized", {
       defaultTemplate: this.defaultTemplate,
-      hasApiKey: !!this.apiKey,
+      keyCount: this.apiKeys.length,
+      hasCustomApiKey: !!config?.apiKey,
     });
+  }
+  
+  /**
+   * Get next API key using round-robin rotation
+   */
+  private getNextApiKey(): string {
+    if (this.apiKeys.length === 0) {
+      throw new Error("No E2B API keys available");
+    }
+    
+    const key = this.apiKeys[this.currentKeyIndex];
+    const usedIndex = this.currentKeyIndex;
+    
+    // Advance to next key (wrap around)
+    this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
+    
+    if (this.apiKeys.length > 1) {
+      logger.debug("[E2B] Round-robin key selection", {
+        keyIndex: usedIndex,
+        nextKeyIndex: this.currentKeyIndex,
+        totalKeys: this.apiKeys.length,
+      });
+    }
+    
+    return key;
   }
   
   /**
@@ -790,10 +825,14 @@ export class E2BSandboxProvider implements ISandboxProvider {
     // Pro users can set up to 24 hours (86_400_000 ms)
     const sandboxLifetimeMs = 3600000; // 1 hour = 3,600,000 ms
     
+    // Get API key using round-robin if multiple keys configured
+    const apiKeyToUse = this.getNextApiKey();
+    
     logger.debug("[E2B] Creating sandbox", {
       template: useDefaultTemplate ? '(default)' : template,
       timeout: options?.timeout,
       sandboxLifetimeMs,
+      keyIndex: (this.currentKeyIndex - 1 + this.apiKeys.length) % this.apiKeys.length,
     });
     
     const startTime = Date.now();
@@ -804,7 +843,7 @@ export class E2BSandboxProvider implements ISandboxProvider {
         let sandbox: E2BSandbox;
         
         const createOpts = {
-          apiKey: this.apiKey,
+          apiKey: apiKeyToUse,
           // timeoutMs is the sandbox lifetime (how long it stays alive)
           // E2B SDK uses milliseconds for this parameter
           // Max: 24h (86_400_000ms) for Pro, 1h (3_600_000ms) for Hobby
@@ -849,29 +888,50 @@ export class E2BSandboxProvider implements ISandboxProvider {
     logger.debug("[E2B] Connecting to sandbox", { sandboxId });
     
     const startTime = Date.now();
-    const sandbox = await Sandbox.connect(sandboxId, {
-      apiKey: this.apiKey,
-    });
+    let lastError: Error | undefined;
     
-    logger.debug("[E2B] Connected to sandbox", {
-      sandboxId,
-      durationMs: Date.now() - startTime,
-    });
-    
-    const wrapper = new E2BSandboxWrapper(sandbox);
-    
-    // Extend timeout on reconnect to ensure sandbox stays alive
-    // This is important for long-running tasks
-    try {
-      await wrapper.extendTimeout(3600000); // 1 hour
-    } catch (e) {
-      logger.warn("[E2B] Failed to extend timeout on reconnect", {
-        sandboxId,
-        error: e instanceof Error ? e.message : String(e),
-      });
+    // Try each API key until one works
+    for (let i = 0; i < this.apiKeys.length; i++) {
+      const apiKey = this.apiKeys[i];
+      try {
+        const sandbox = await Sandbox.connect(sandboxId, {
+          apiKey,
+        });
+        
+        logger.debug("[E2B] Connected to sandbox", {
+          sandboxId,
+          durationMs: Date.now() - startTime,
+          keyIndex: i,
+        });
+        
+        const wrapper = new E2BSandboxWrapper(sandbox);
+        
+        // Extend timeout on reconnect to ensure sandbox stays alive
+        // This is important for long-running tasks
+        try {
+          await wrapper.extendTimeout(3600000); // 1 hour
+        } catch (e) {
+          logger.warn("[E2B] Failed to extend timeout on reconnect", {
+            sandboxId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+        
+        return wrapper;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        // Continue trying other keys
+        if (this.apiKeys.length > 1) {
+          logger.debug("[E2B] Failed to connect with key, trying next", {
+            sandboxId,
+            keyIndex: i,
+            error: lastError.message,
+          });
+        }
+      }
     }
     
-    return wrapper;
+    throw lastError ?? new Error(`Failed to connect to sandbox: ${sandboxId}`);
   }
   
   async stop(sandboxId: string): Promise<void> {
@@ -885,20 +945,30 @@ export class E2BSandboxProvider implements ISandboxProvider {
     
     logger.debug("[E2B] Killing sandbox", { sandboxId });
     
-    try {
-      const result = await Sandbox.kill(sandboxId, {
-        apiKey: this.apiKey,
-      });
-      
-      logger.debug("[E2B] Sandbox killed", { sandboxId, result });
-      return result;
-    } catch (error) {
-      logger.error("[E2B] Failed to kill sandbox", {
-        sandboxId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
+    // Try each API key until one works
+    for (let i = 0; i < this.apiKeys.length; i++) {
+      const apiKey = this.apiKeys[i];
+      try {
+        const result = await Sandbox.kill(sandboxId, {
+          apiKey,
+        });
+        
+        logger.debug("[E2B] Sandbox killed", { sandboxId, result, keyIndex: i });
+        return result;
+      } catch (error) {
+        // Continue trying other keys
+        if (this.apiKeys.length > 1) {
+          logger.debug("[E2B] Failed to kill with key, trying next", {
+            sandboxId,
+            keyIndex: i,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
+    
+    logger.error("[E2B] Failed to kill sandbox with any key", { sandboxId });
+    return false;
   }
   
   async list(): Promise<SandboxInfo[]> {
@@ -906,24 +976,38 @@ export class E2BSandboxProvider implements ISandboxProvider {
     
     logger.debug("[E2B] Listing sandboxes");
     
-    try {
-      const sandboxes = await Sandbox.list({
-        apiKey: this.apiKey,
-      });
-      
-      return sandboxes.map(s => ({
-        id: s.sandboxId,
-        state: SandboxState.STARTED, // E2B only returns running sandboxes
-        template: s.templateId,
-        createdAt: s.startedAt ? new Date(s.startedAt) : undefined,
-        metadata: s.metadata,
-      }));
-    } catch (error) {
-      logger.error("[E2B] Failed to list sandboxes", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return [];
+    const allSandboxes: SandboxInfo[] = [];
+    const seenIds = new Set<string>();
+    
+    // List from all API keys and deduplicate
+    for (let i = 0; i < this.apiKeys.length; i++) {
+      const apiKey = this.apiKeys[i];
+      try {
+        const sandboxes = await Sandbox.list({
+          apiKey,
+        });
+        
+        for (const s of sandboxes) {
+          if (!seenIds.has(s.sandboxId)) {
+            seenIds.add(s.sandboxId);
+            allSandboxes.push({
+              id: s.sandboxId,
+              state: SandboxState.STARTED, // E2B only returns running sandboxes
+              template: s.templateId,
+              createdAt: s.startedAt ? new Date(s.startedAt) : undefined,
+              metadata: s.metadata,
+            });
+          }
+        }
+      } catch (error) {
+        logger.warn("[E2B] Failed to list sandboxes with key", {
+          keyIndex: i,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
+    
+    return allSandboxes;
   }
 }
 

@@ -103,7 +103,7 @@ const formatDynamicContextPrompt = (state: GraphState) => {
       "{PLAN_GENERATION_NOTES}",
       state.contextGatheringNotes || "No context gathering notes available.",
     )
-    .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
+    .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType))
     .replaceAll(
       "{DEPENDENCIES_INSTALLED_PROMPT}",
       state.dependenciesInstalled
@@ -126,7 +126,7 @@ const formatStaticInstructionsPrompt = (
       ? STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS
       : STATIC_SYSTEM_INSTRUCTIONS
   )
-    .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
+    .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType))
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replace(
       "{CUSTOM_FRAMEWORK_PROMPT}",

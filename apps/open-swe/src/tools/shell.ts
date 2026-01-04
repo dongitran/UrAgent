@@ -13,14 +13,14 @@ const DEFAULT_ENV = {
 };
 
 export function createShellTool(
-  state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & { sandboxProviderType?: string },
   config: GraphConfig,
 ) {
   const shellTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
         const { command, workdir, timeout } = input;
-        const repoRoot = getRepoAbsolutePath(state.targetRepository);
+        const repoRoot = getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType);
 
         let resolvedWorkdir = repoRoot;
         if (workdir) {
@@ -67,7 +67,7 @@ export function createShellTool(
         };
       }
     },
-    createShellToolFields(state.targetRepository),
+    createShellToolFields(state.targetRepository, state.sandboxProviderType),
   );
 
   return shellTool;

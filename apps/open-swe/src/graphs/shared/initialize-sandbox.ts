@@ -34,6 +34,7 @@ type InitializeSandboxState = {
   targetRepository: TargetRepository;
   branchName: string;
   sandboxSessionId?: string;
+  sandboxProviderType?: string;
   codebaseTree?: string;
   messages?: BaseMessage[];
   internalMessages?: BaseMessage[];
@@ -47,11 +48,8 @@ export async function initializeSandbox(
 ): Promise<Partial<InitializeSandboxState>> {
   const { sandboxSessionId, targetRepository, branchName } = state;
   
-  // Determine provider type for path resolution
-  const provider = getProvider();
-  const providerType = provider.name; // 'daytona' or 'e2b'
-  
-  const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, providerType);
+  // Note: We'll determine the actual provider type AFTER sandbox is created/resumed
+  // because in multi-provider mode, we don't know which provider will be selected
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
 
   const events: CustomNodeEvent[] = [];
@@ -154,6 +152,16 @@ export async function initializeSandbox(
       logger.info(`Resuming sandbox using provider: ${provider.name}`, { sandboxSessionId });
       const existingSandboxInstance = await provider.get(sandboxSessionId);
       emitStepEvent(baseResumeSandboxAction, "success");
+      
+      // Get the actual provider type from the sandbox instance for correct path resolution
+      const actualProviderType = existingSandboxInstance.providerType;
+      const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, actualProviderType);
+      
+      logger.info("Sandbox resumed with provider type", {
+        sandboxId: existingSandboxInstance.id,
+        providerType: actualProviderType,
+        repoDir: absoluteRepoDir,
+      });
 
       const pullLatestChangesActionId = uuidv4();
       const basePullLatestChangesAction: CustomNodeEvent = {
@@ -201,7 +209,7 @@ export async function initializeSandbox(
       };
       emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
       try {
-        const codebaseTree = await getCodebaseTree(config, existingSandboxInstance.id);
+        const codebaseTree = await getCodebaseTree(config, existingSandboxInstance.id, undefined, actualProviderType);
         if (codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE) {
           emitStepEvent(
             baseGenerateCodebaseTreeAction,
@@ -217,6 +225,7 @@ export async function initializeSandbox(
 
         return {
           sandboxSessionId: existingSandboxInstance.id,
+          sandboxProviderType: actualProviderType,
           codebaseTree,
           messages: eventsMessages,
           internalMessages: [...userMessages, ...eventsMessages],
@@ -237,6 +246,7 @@ export async function initializeSandbox(
 
         return {
           sandboxSessionId: existingSandboxInstance.id,
+          sandboxProviderType: actualProviderType,
           codebaseTree: FAILED_TO_GENERATE_TREE_MESSAGE,
           messages: eventsMessages,
           internalMessages: [...userMessages, ...eventsMessages],
@@ -274,19 +284,38 @@ export async function initializeSandbox(
   emitStepEvent(baseCreateSandboxAction, "pending");
   let sandboxInstance: ISandbox;
   try {
-    // Use provider abstraction to create sandbox - works with both Daytona and E2B
+    // Use provider abstraction to create sandbox - works with Daytona, E2B, and Multi
     const provider = getProvider();
-    const providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
-    const template = getDefaultTemplate(providerType);
-    const user = getDefaultUser(providerType);
     
-    logger.info(`Creating sandbox using provider: ${provider.name}`, { template, user });
-    sandboxInstance = await provider.create({
-      template,
-      user,
-      autoDeleteInterval: DEFAULT_SANDBOX_CREATE_PARAMS.autoDeleteInterval,
+    // For multi-provider, it handles template/user selection internally based on selected sub-provider
+    // For single providers, we determine the correct template/user based on provider type
+    let createOptions: { template?: string; user?: string; autoDeleteInterval?: number };
+    
+    if (provider.name === 'multi') {
+      // Multi-provider will determine correct template/user based on which provider it selects
+      // We only pass autoDeleteInterval, let multi-provider handle the rest
+      createOptions = {
+        autoDeleteInterval: DEFAULT_SANDBOX_CREATE_PARAMS.autoDeleteInterval,
+      };
+      logger.info(`Creating sandbox using multi-provider (template/user will be auto-selected)`);
+    } else {
+      // Single provider mode - determine template/user based on provider type
+      const providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
+      const template = getDefaultTemplate(providerType);
+      const user = getDefaultUser(providerType);
+      createOptions = {
+        template,
+        user,
+        autoDeleteInterval: DEFAULT_SANDBOX_CREATE_PARAMS.autoDeleteInterval,
+      };
+      logger.info(`Creating sandbox using provider: ${provider.name}`, { template, user });
+    }
+    
+    sandboxInstance = await provider.create(createOptions);
+    logger.info(`Sandbox created successfully via ${provider.name}`, { 
+      sandboxId: sandboxInstance.id,
+      providerType: sandboxInstance.providerType,
     });
-    logger.info(`Sandbox created successfully via ${provider.name}`, { sandboxId: sandboxInstance.id });
     emitStepEvent(baseCreateSandboxAction, "success");
   } catch (e) {
     logger.error("Failed to create sandbox environment", { e });
@@ -297,6 +326,16 @@ export async function initializeSandbox(
     );
     throw new Error("Failed to create sandbox environment.");
   }
+
+  // Get the actual provider type from the sandbox instance for correct path resolution
+  const actualProviderType = sandboxInstance.providerType;
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, actualProviderType);
+  
+  logger.info("Sandbox created with provider type", {
+    sandboxId: sandboxInstance.id,
+    providerType: actualProviderType,
+    repoDir: absoluteRepoDir,
+  });
 
   // Cloning repository using ISandbox.git.clone()
   const cloneRepoActionId = uuidv4();
@@ -453,7 +492,7 @@ export async function initializeSandbox(
   emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
   let codebaseTree: string | undefined;
   try {
-    codebaseTree = await getCodebaseTree(config, sandboxInstance.id);
+    codebaseTree = await getCodebaseTree(config, sandboxInstance.id, undefined, actualProviderType);
     emitStepEvent(baseGenerateCodebaseTreeAction, "success");
   } catch (_) {
     emitStepEvent(
@@ -468,6 +507,7 @@ export async function initializeSandbox(
 
   return {
     sandboxSessionId: sandboxInstance.id,
+    sandboxProviderType: actualProviderType,
     targetRepository,
     codebaseTree,
     messages: eventsMessages,
@@ -582,6 +622,7 @@ async function initializeSandboxLocal(
 
   return {
     sandboxSessionId: mockSandboxId,
+    sandboxProviderType: 'local',
     targetRepository,
     codebaseTree,
     messages: eventsMessages,

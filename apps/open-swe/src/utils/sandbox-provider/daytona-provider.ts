@@ -17,6 +17,7 @@ import {
   GitCloneOptions,
   GitOperationOptions,
   GitCommitOptions,
+  SandboxProviderType,
 } from "./types.js";
 
 const logger = createLogger(LogLevel.DEBUG, "DaytonaSandboxProvider");
@@ -94,6 +95,10 @@ export class DaytonaSandboxWrapper implements ISandbox {
   
   get state(): SandboxState {
     return mapDaytonaState(this.sandbox.state || 'unknown');
+  }
+  
+  get providerType(): SandboxProviderType {
+    return SandboxProviderType.DAYTONA;
   }
   
   async executeCommand(options: ExecuteCommandOptions): Promise<ExecuteCommandResult> {
@@ -348,9 +353,12 @@ ${delimiter}`;
  * Daytona Sandbox Provider
  */
 export class DaytonaSandboxProvider implements ISandboxProvider {
-  private client: Daytona;
+  private client: Daytona | null = null;
+  private apiKeys: string[] = [];
+  private currentKeyIndex: number = 0;
   private defaultSnapshot: string;
   private defaultUser: string;
+  private apiUrl?: string;
   
   readonly name = 'daytona';
   
@@ -360,14 +368,69 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
     defaultSnapshot?: string;
     defaultUser?: string;
   }) {
-    this.client = new Daytona();
+    // Support multiple comma-separated keys for round-robin
+    const keyString = config?.apiKey || process.env.DAYTONA_API_KEY || '';
+    this.apiKeys = keyString.split(',').map(k => k.trim()).filter(k => k.length > 0);
+    this.apiUrl = config?.apiUrl || process.env.DAYTONA_API_URL;
+    
     this.defaultSnapshot = config?.defaultSnapshot || process.env.DAYTONA_SNAPSHOT_NAME || 'daytona-small';
     this.defaultUser = config?.defaultUser || 'daytona';
     
     logger.debug("[DAYTONA] Provider initialized", {
       defaultSnapshot: this.defaultSnapshot,
       defaultUser: this.defaultUser,
+      keyCount: this.apiKeys.length,
+      hasCustomApiKey: !!config?.apiKey,
     });
+  }
+  
+  /**
+   * Get next API key using round-robin rotation and create client
+   */
+  private getClientWithNextKey(): Daytona {
+    if (this.apiKeys.length === 0) {
+      throw new Error("No Daytona API keys available");
+    }
+    
+    const key = this.apiKeys[this.currentKeyIndex];
+    const usedIndex = this.currentKeyIndex;
+    
+    // Advance to next key (wrap around)
+    this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
+    
+    if (this.apiKeys.length > 1) {
+      logger.debug("[DAYTONA] Round-robin key selection", {
+        keyIndex: usedIndex,
+        nextKeyIndex: this.currentKeyIndex,
+        totalKeys: this.apiKeys.length,
+      });
+    }
+    
+    // Set env vars for Daytona SDK (it reads from env)
+    process.env.DAYTONA_API_KEY = key;
+    if (this.apiUrl) {
+      process.env.DAYTONA_API_URL = this.apiUrl;
+    }
+    
+    // Create new client with the selected key
+    return new Daytona();
+  }
+  
+  /**
+   * Get client for operations that don't need round-robin (get, stop, delete)
+   * Uses the first key by default
+   */
+  private getDefaultClient(): Daytona {
+    if (!this.client) {
+      if (this.apiKeys.length > 0) {
+        process.env.DAYTONA_API_KEY = this.apiKeys[0];
+      }
+      if (this.apiUrl) {
+        process.env.DAYTONA_API_URL = this.apiUrl;
+      }
+      this.client = new Daytona();
+    }
+    return this.client;
   }
   
   async create(options?: CreateSandboxOptions): Promise<ISandbox> {
@@ -377,20 +440,25 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
       autoDeleteInterval: options?.autoDeleteInterval || 15,
     };
     
-    logger.debug("[DAYTONA] Creating sandbox", { createParams });
+    // Get client with round-robin key selection
+    const client = this.getClientWithNextKey();
+    const keyIndex = (this.currentKeyIndex - 1 + this.apiKeys.length) % this.apiKeys.length;
+    
+    logger.debug("[DAYTONA] Creating sandbox", { createParams, keyIndex });
     
     const startTime = Date.now();
     let lastError: Error | undefined;
     
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const sandbox = await this.client.create(createParams, {
+        const sandbox = await client.create(createParams, {
           timeout: options?.timeout || 100,
         });
         
         logger.debug("[DAYTONA] Sandbox created", {
           sandboxId: sandbox.id,
           durationMs: Date.now() - startTime,
+          keyIndex,
         });
         
         return new DaytonaSandboxWrapper(sandbox);
@@ -398,6 +466,7 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
         lastError = error instanceof Error ? error : new Error(String(error));
         logger.error("[DAYTONA] Failed to create sandbox", {
           attempt: attempt + 1,
+          keyIndex,
           error: lastError.message,
         });
         
@@ -414,49 +483,114 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
     logger.debug("[DAYTONA] Getting sandbox", { sandboxId });
     
     const startTime = Date.now();
-    const sandbox = await this.client.get(sandboxId);
+    let lastError: Error | undefined;
     
-    logger.debug("[DAYTONA] Got sandbox", {
-      sandboxId,
-      state: sandbox.state,
-      durationMs: Date.now() - startTime,
-    });
+    // Try each API key until one works
+    for (let i = 0; i < this.apiKeys.length; i++) {
+      try {
+        // Set env for this key
+        process.env.DAYTONA_API_KEY = this.apiKeys[i];
+        if (this.apiUrl) {
+          process.env.DAYTONA_API_URL = this.apiUrl;
+        }
+        const client = new Daytona();
+        
+        const sandbox = await client.get(sandboxId);
+        
+        logger.debug("[DAYTONA] Got sandbox", {
+          sandboxId,
+          state: sandbox.state,
+          durationMs: Date.now() - startTime,
+          keyIndex: i,
+        });
+        
+        return new DaytonaSandboxWrapper(sandbox);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        // Continue trying other keys
+        if (this.apiKeys.length > 1) {
+          logger.debug("[DAYTONA] Failed to get sandbox with key, trying next", {
+            sandboxId,
+            keyIndex: i,
+            error: lastError.message,
+          });
+        }
+      }
+    }
     
-    return new DaytonaSandboxWrapper(sandbox);
+    throw lastError ?? new Error(`Failed to get sandbox: ${sandboxId}`);
   }
   
   async stop(sandboxId: string): Promise<void> {
     logger.debug("[DAYTONA] Stopping sandbox", { sandboxId });
     
-    const sandbox = await this.client.get(sandboxId);
-    
-    if (sandbox.state === DaytonaSandboxState.STOPPED || 
-        sandbox.state === DaytonaSandboxState.ARCHIVED) {
-      logger.debug("[DAYTONA] Sandbox already stopped", { sandboxId });
-      return;
+    // Try each API key until one works
+    for (let i = 0; i < this.apiKeys.length; i++) {
+      try {
+        process.env.DAYTONA_API_KEY = this.apiKeys[i];
+        if (this.apiUrl) {
+          process.env.DAYTONA_API_URL = this.apiUrl;
+        }
+        const client = new Daytona();
+        
+        const sandbox = await client.get(sandboxId);
+        
+        if (sandbox.state === DaytonaSandboxState.STOPPED || 
+            sandbox.state === DaytonaSandboxState.ARCHIVED) {
+          logger.debug("[DAYTONA] Sandbox already stopped", { sandboxId, keyIndex: i });
+          return;
+        }
+        
+        if (sandbox.state === 'started') {
+          await client.stop(sandbox);
+          logger.debug("[DAYTONA] Sandbox stopped", { sandboxId, keyIndex: i });
+          return;
+        }
+      } catch (error) {
+        // Continue trying other keys
+        if (this.apiKeys.length > 1) {
+          logger.debug("[DAYTONA] Failed to stop sandbox with key, trying next", {
+            sandboxId,
+            keyIndex: i,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
     
-    if (sandbox.state === 'started') {
-      await this.client.stop(sandbox);
-      logger.debug("[DAYTONA] Sandbox stopped", { sandboxId });
-    }
+    logger.warn("[DAYTONA] Failed to stop sandbox with any key", { sandboxId });
   }
   
   async delete(sandboxId: string): Promise<boolean> {
     logger.debug("[DAYTONA] Deleting sandbox", { sandboxId });
     
-    try {
-      const sandbox = await this.client.get(sandboxId);
-      await this.client.delete(sandbox);
-      logger.debug("[DAYTONA] Sandbox deleted", { sandboxId });
-      return true;
-    } catch (error) {
-      logger.error("[DAYTONA] Failed to delete sandbox", {
-        sandboxId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
+    // Try each API key until one works
+    for (let i = 0; i < this.apiKeys.length; i++) {
+      try {
+        process.env.DAYTONA_API_KEY = this.apiKeys[i];
+        if (this.apiUrl) {
+          process.env.DAYTONA_API_URL = this.apiUrl;
+        }
+        const client = new Daytona();
+        
+        const sandbox = await client.get(sandboxId);
+        await client.delete(sandbox);
+        logger.debug("[DAYTONA] Sandbox deleted", { sandboxId, keyIndex: i });
+        return true;
+      } catch (error) {
+        // Continue trying other keys
+        if (this.apiKeys.length > 1) {
+          logger.debug("[DAYTONA] Failed to delete sandbox with key, trying next", {
+            sandboxId,
+            keyIndex: i,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
+    
+    logger.error("[DAYTONA] Failed to delete sandbox with any key", { sandboxId });
+    return false;
   }
   
   async list(): Promise<SandboxInfo[]> {
@@ -470,7 +604,7 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
    * Get the underlying Daytona client
    */
   getClient(): Daytona {
-    return this.client;
+    return this.getDefaultClient();
   }
 }
 

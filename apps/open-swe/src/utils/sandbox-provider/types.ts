@@ -124,6 +124,9 @@ export interface ISandbox {
   /** Current state */
   readonly state: SandboxState;
   
+  /** Provider type that created this sandbox ('daytona' or 'e2b') */
+  readonly providerType: SandboxProviderType;
+  
   /**
    * Execute a command in the sandbox
    */
@@ -231,6 +234,8 @@ export enum SandboxProviderType {
   DAYTONA = 'daytona',
   E2B = 'e2b',
   LOCAL = 'local',
+  /** Multi-provider mode: round-robin between Daytona and E2B */
+  MULTI = 'multi',
 }
 
 /**

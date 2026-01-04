@@ -72,7 +72,7 @@ function formatSystemPrompt(
       "{CURRENT_WORKING_DIRECTORY}",
       isLocalMode(config)
         ? getLocalWorkingDirectory()
-        : getRepoAbsolutePath(state.targetRepository),
+        : getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType),
     )
     .replaceAll(
       "{LOCAL_MODE_NOTE}",

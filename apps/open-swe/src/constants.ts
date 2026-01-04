@@ -22,11 +22,18 @@ export const DEFAULT_E2B_SANDBOX_PARAMS = {
 /**
  * Get the appropriate template/snapshot name based on provider type
  */
-export function getDefaultTemplate(providerType: SandboxProviderType): string {
+export function getDefaultTemplate(providerType: SandboxProviderType | string): string {
   switch (providerType) {
     case SandboxProviderType.E2B:
+    case 'e2b':
+      return E2B_TEMPLATE_NAME;
+    case SandboxProviderType.MULTI:
+    case 'multi':
+      // For multi-provider, return E2B template as default
+      // The actual template will be determined by the selected provider
       return E2B_TEMPLATE_NAME;
     case SandboxProviderType.DAYTONA:
+    case 'daytona':
     default:
       return DAYTONA_SNAPSHOT_NAME;
   }
@@ -35,11 +42,18 @@ export function getDefaultTemplate(providerType: SandboxProviderType): string {
 /**
  * Get the appropriate user based on provider type
  */
-export function getDefaultUser(providerType: SandboxProviderType): string {
+export function getDefaultUser(providerType: SandboxProviderType | string): string {
   switch (providerType) {
     case SandboxProviderType.E2B:
+    case 'e2b':
       return "user"; // E2B default user
+    case SandboxProviderType.MULTI:
+    case 'multi':
+      // For multi-provider, return E2B user as default
+      // The actual user will be determined by the selected provider
+      return "user";
     case SandboxProviderType.DAYTONA:
+    case 'daytona':
     default:
       return "daytona";
   }

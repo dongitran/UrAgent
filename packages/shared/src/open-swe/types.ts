@@ -201,6 +201,17 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => "",
   }),
   /**
+   * The provider type of the sandbox ('daytona', 'e2b', 'local').
+   * Used for correct path resolution when SANDBOX_PROVIDER=multi.
+   */
+  sandboxProviderType: withLangGraph(z.custom<string>(), {
+    reducer: {
+      schema: z.custom<string>(),
+      fn: (_state, update) => update,
+    },
+    default: () => "",
+  }),
+  /**
    * The name of the branch changes in this thread will be pushed to
    */
   branchName: withLangGraph(z.custom<string>(), {

@@ -9,33 +9,45 @@ import {
   formatGetURLContentCommand,
   formatStrReplaceEditCommand,
   GrepCommand,
-  createShellToolFields,
-  createViewToolFields,
-  createSearchDocumentForToolFields,
-  createGetURLContentToolFields,
-  createTextEditorToolFields,
 } from "@openswe/shared/open-swe/tools";
 import { ToolCall } from "@langchain/core/messages/tool";
-import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "CommandEvaluation");
 
-// Type definitions for tool call arguments - derived from actual tool schemas. Underscores so the linter doesn't complain.
-const dummyRepo = { owner: "dummy", repo: "dummy", branch: "main" };
-const _shellTool = createShellToolFields(dummyRepo);
-type ShellToolArgs = z.infer<typeof _shellTool.schema>;
+// Type definitions for tool call arguments - defined inline to avoid calling tool creation functions at module load time
+// This prevents errors when SANDBOX_PROVIDER=multi and no providerType is available during module initialization
 
-const _viewTool = createViewToolFields(dummyRepo);
-type ViewToolArgs = z.infer<typeof _viewTool.schema>;
+type ShellToolArgs = {
+  command: string[];
+  workdir?: string;
+  timeout?: number;
+};
 
-const _searchDocumentsTool = createSearchDocumentForToolFields();
-type SearchDocumentsToolArgs = z.infer<typeof _searchDocumentsTool.schema>;
+type ViewToolArgs = {
+  command: "view";
+  path: string;
+  view_range?: number[];
+  workdir?: string;
+};
 
-const _getURLContentTool = createGetURLContentToolFields();
-type GetURLContentToolArgs = z.infer<typeof _getURLContentTool.schema>;
+type SearchDocumentsToolArgs = {
+  url: string;
+  query: string;
+};
 
-const _textEditorTool = createTextEditorToolFields(dummyRepo, {});
-type StrReplaceEditToolArgs = z.infer<typeof _textEditorTool.schema>;
+type GetURLContentToolArgs = {
+  url: string;
+};
+
+type StrReplaceEditToolArgs = {
+  command: "view" | "str_replace" | "create" | "insert";
+  path: string;
+  view_range?: [number, number];
+  old_str?: string;
+  new_str?: string;
+  file_text?: string;
+  insert_line?: number;
+};
 
 export interface CommandEvaluation {
   toolCall: ToolCall;

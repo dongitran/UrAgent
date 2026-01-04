@@ -85,7 +85,7 @@ export async function takeActions(
     throw new Error("No tool calls found.");
   }
 
-  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+  const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
     await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
@@ -204,7 +204,7 @@ export async function takeActions(
   if (!isLocalMode(config)) {
     const repoPath = isLocalMode(config)
       ? getLocalWorkingDirectory()
-      : getRepoAbsolutePath(state.targetRepository);
+      : getRepoAbsolutePath(state.targetRepository, undefined, sandboxInstance.providerType);
     const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
     if (changedFiles?.length > 0) {
       logger.warn(
@@ -242,6 +242,7 @@ export async function takeActions(
   const commandUpdate: PlannerGraphUpdate = {
     messages: toolCallResults,
     sandboxSessionId: sandboxInstance.id,
+    ...(sandboxProviderType && { sandboxProviderType }),
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     ...allStateUpdates,

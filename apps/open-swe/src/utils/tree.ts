@@ -10,6 +10,7 @@ import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createShellExecutor } from "./shell-executor/index.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { SandboxProviderType } from "./sandbox-provider/types.js";
 
 const logger = createLogger(LogLevel.INFO, "Tree");
 
@@ -40,14 +41,24 @@ const FALLBACK_TREE_COMMAND = `git ls-files | head -1000 | awk -F/ '
   print indent "├── " $NF
 }' | head -500`;
 
+/**
+ * Get the codebase tree for a repository
+ * @param config - Graph configuration
+ * @param sandboxSessionId_ - Optional sandbox session ID
+ * @param targetRepository_ - Optional target repository
+ * @param providerType_ - Optional provider type ('daytona' or 'e2b') for correct path resolution
+ *                        Required when SANDBOX_PROVIDER=multi to avoid incorrect path
+ */
 export async function getCodebaseTree(
   config: GraphConfig,
   sandboxSessionId_?: string,
   targetRepository_?: TargetRepository,
+  providerType_?: SandboxProviderType,
 ): Promise<string> {
   try {
     let sandboxSessionId = sandboxSessionId_;
     let targetRepository = targetRepository_;
+    let providerType = providerType_;
 
     // Check if we're in local mode
     if (isLocalMode(config)) {
@@ -77,8 +88,8 @@ export async function getCodebaseTree(
 
     const executor = createShellExecutor(config);
     // Use provider-aware path resolution via getRepoAbsolutePath
-    // This automatically detects the provider from SANDBOX_PROVIDER env var
-    const repoDir = getRepoAbsolutePath(targetRepository);
+    // providerType is required for correct path when SANDBOX_PROVIDER=multi
+    const repoDir = getRepoAbsolutePath(targetRepository, undefined, providerType);
     
     // Use fallback command directly (tree is not available in E2B sandbox)
     // This uses git ls-files which is always available in git repos
@@ -98,6 +109,7 @@ export async function getCodebaseTree(
       exitCode: response.exitCode,
       result: response.result ?? response.artifacts?.stdout,
       repoDir,
+      providerType,
     });
     throw new Error(
       `Failed to generate tree: ${response.result ?? response.artifacts?.stdout}`,

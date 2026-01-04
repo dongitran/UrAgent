@@ -4,8 +4,8 @@ import { getRepoAbsolutePath } from "../git.js";
 import { TIMEOUT_SEC } from "../constants.js";
 import { isLocalMode, getLocalWorkingDirectory } from "./local-mode.js";
 
-export function createApplyPatchToolFields(targetRepository: TargetRepository) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
+export function createApplyPatchToolFields(targetRepository: TargetRepository, providerType?: string) {
+  const repoRoot = getRepoAbsolutePath(targetRepository, undefined, providerType);
   const applyPatchToolSchema = z.object({
     diff: z
       .string()
@@ -60,8 +60,8 @@ export function createSessionPlanToolFields() {
   };
 }
 
-export function createShellToolFields(targetRepository: TargetRepository) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
+export function createShellToolFields(targetRepository: TargetRepository, providerType?: string) {
+  const repoRoot = getRepoAbsolutePath(targetRepository, undefined, providerType);
   const shellToolSchema = z.object({
     command: z
       .array(z.string())
@@ -109,8 +109,8 @@ export function createUpdatePlanToolFields() {
   };
 }
 
-export function createGrepToolFields(targetRepository: TargetRepository) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
+export function createGrepToolFields(targetRepository: TargetRepository, providerType?: string) {
+  const repoRoot = getRepoAbsolutePath(targetRepository, undefined, providerType);
   const searchSchema = z.object({
     query: z
       .string()
@@ -181,13 +181,20 @@ export function createGrepToolFields(targetRepository: TargetRepository) {
   };
 }
 
-// Only used for type inference
-const _tmpSearchToolSchema = createGrepToolFields({
-  owner: "x",
-  repo: "x",
-  branch: "main",
-}).schema;
-export type GrepCommand = z.infer<typeof _tmpSearchToolSchema>;
+// Type definition for GrepCommand - defined inline to avoid calling createGrepToolFields at module load time
+// This prevents errors when SANDBOX_PROVIDER=multi and no providerType is available
+export type GrepCommand = {
+  query: string;
+  match_string?: boolean;
+  case_sensitive?: boolean;
+  context_lines?: number;
+  exclude_files?: string;
+  include_files?: string;
+  max_results?: number;
+  file_types?: string[];
+  follow_symlinks?: boolean;
+  workdir?: string;
+};
 
 function escapeShellArg(arg: string): string {
   // If the string contains a single quote, close the string, escape the single quote, and reopen it
@@ -337,8 +344,9 @@ export function createMarkTaskCompletedToolFields() {
 
 export function createInstallDependenciesToolFields(
   targetRepository: TargetRepository,
+  providerType?: string,
 ) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
+  const repoRoot = getRepoAbsolutePath(targetRepository, undefined, providerType);
 
   const installDependenciesToolSchema = z.object({
     command: z
@@ -564,10 +572,11 @@ export function createReviewStartedToolFields() {
 export function createTextEditorToolFields(
   targetRepository: TargetRepository,
   config: GraphConfig,
+  providerType?: string,
 ) {
   const repoRoot = isLocalMode(config)
     ? getLocalWorkingDirectory()
-    : getRepoAbsolutePath(targetRepository);
+    : getRepoAbsolutePath(targetRepository, undefined, providerType);
   const textEditorToolSchema = z.object({
     command: z
       .enum(["view", "str_replace", "create", "insert"])
@@ -620,11 +629,12 @@ export function createTextEditorToolFields(
 export function createViewToolFields(
   targetRepository: TargetRepository,
   config?: GraphConfig,
+  providerType?: string,
 ) {
   const repoRoot =
     config && isLocalMode(config)
       ? getLocalWorkingDirectory()
-      : getRepoAbsolutePath(targetRepository);
+      : getRepoAbsolutePath(targetRepository, undefined, providerType);
   const viewSchema = z.object({
     command: z
       .enum(["view"])
@@ -659,8 +669,9 @@ export function createViewToolFields(
 
 export function createWriteDefaultTsConfigToolFields(
   targetRepository: TargetRepository,
+  providerType?: string,
 ) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
+  const repoRoot = getRepoAbsolutePath(targetRepository, undefined, providerType);
 
   const writeDefaultTsConfigToolSchema = z.object({
     workdir: z

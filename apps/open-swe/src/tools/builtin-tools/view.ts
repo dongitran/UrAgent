@@ -16,7 +16,7 @@ import { createShellExecutor } from "../../utils/shell-executor/index.js";
 const logger = createLogger(LogLevel.INFO, "ViewTool");
 
 export function createViewTool(
-  state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & { sandboxProviderType?: string },
   config: GraphConfig,
 ) {
   const viewTool = tool(
@@ -39,7 +39,7 @@ export function createViewTool(
 
         const repoRoot = isLocalMode(config)
           ? getLocalWorkingDirectory()
-          : getRepoAbsolutePath(state.targetRepository);
+          : getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType);
 
         let workDir = repoRoot;
         if (inputWorkdir) {
@@ -115,7 +115,7 @@ export function createViewTool(
         };
       }
     },
-    createViewToolFields(state.targetRepository),
+    createViewToolFields(state.targetRepository, config, state.sandboxProviderType),
   );
 
   return viewTool;
