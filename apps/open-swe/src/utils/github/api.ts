@@ -146,6 +146,8 @@ async function withNetworkRetry<T>(
  * Retries on:
  * - 401 errors (authentication) - refreshes token and retries
  * - Transient network errors (DNS, timeout, connection reset, etc.)
+ * 
+ * @param options.skipLogOn404 - If true, don't log error for 404 responses (useful for checking if resource exists)
  */
 async function withGitHubRetry<T>(
   operation: (token: string) => Promise<T>,
@@ -154,6 +156,7 @@ async function withGitHubRetry<T>(
   additionalLogFields?: Record<string, any>,
   numRetries = 1,
   maxRetries = 3,
+  options?: { skipLogOn404?: boolean },
 ): Promise<T | null> {
   try {
     return await operation(initialToken);
@@ -184,6 +187,7 @@ async function withGitHubRetry<T>(
         additionalLogFields,
         numRetries + 1,
         maxRetries,
+        options,
       );
     }
 
@@ -205,7 +209,14 @@ async function withGitHubRetry<T>(
         additionalLogFields,
         numRetries + 1,
         maxRetries,
+        options,
       );
+    }
+
+    // Skip logging for 404 errors if option is set (e.g., checking if branch exists)
+    const is404Error = errorFields.message?.includes("404") || errorFields.message?.includes("Not Found");
+    if (options?.skipLogOn404 && is404Error) {
+      return null;
     }
 
     logger.error(errorMessage, {
@@ -790,6 +801,8 @@ export async function getBranch({
     "Failed to get branch",
     undefined,
     1,
+    3,
+    { skipLogOn404: true }, // Don't log error when branch doesn't exist (expected for new branches)
   );
 }
 
