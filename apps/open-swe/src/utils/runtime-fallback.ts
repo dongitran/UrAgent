@@ -22,6 +22,15 @@ import { MODELS_NO_PARALLEL_TOOL_CALLING } from "./llms/load-model.js";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
+// Debug logging controlled by GEMINI_DEBUG env var
+const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (GEMINI_DEBUG) {
+    logger.debug(message, data);
+  }
+}
+
 // Retry configuration for FallbackRunnable
 const FALLBACK_MAX_RETRIES = 5;
 const FALLBACK_INITIAL_DELAY_MS = 1000; // 1 second
@@ -156,7 +165,7 @@ export class FallbackRunnable<
       this.getPrimaryModel(),
     );
 
-    logger.error(`[Gemini Debug] FallbackRunnable.invoke starting`, {
+    debugLog(`[Gemini Debug] FallbackRunnable.invoke starting`, {
       task: this.task,
       totalConfigs: modelConfigs.length,
       configProviders: modelConfigs.map((c) => c.provider),
@@ -172,7 +181,7 @@ export class FallbackRunnable<
       const modelConfig = modelConfigs[i];
       const modelKey = `${modelConfig.provider}:${modelConfig.modelName}`;
 
-      logger.error(
+      debugLog(
         `[Gemini Debug] Trying model ${i + 1}/${modelConfigs.length}`,
         {
           modelKey,
@@ -189,7 +198,7 @@ export class FallbackRunnable<
       const graphConfig = getConfig() as GraphConfig;
 
       try {
-        logger.error(`[Gemini Debug] About to initializeModel for fallback`, {
+        debugLog(`[Gemini Debug] About to initializeModel for fallback`, {
           provider: modelConfig.provider,
           modelName: modelConfig.modelName,
         });
@@ -199,7 +208,7 @@ export class FallbackRunnable<
           graphConfig,
         );
 
-        logger.error(`[Gemini Debug] Model initialized for fallback`, {
+        debugLog(`[Gemini Debug] Model initialized for fallback`, {
           provider: modelConfig.provider,
           modelType: model?.constructor?.name,
           modelLlmType: (model as any)?._llmType?.(),
@@ -221,14 +230,14 @@ export class FallbackRunnable<
             tools: providerSpecificTools,
             kwargs: extractedTools?.kwargs || {},
           };
-          logger.error(`[Gemini Debug] Using provider-specific tools`, {
+          debugLog(`[Gemini Debug] Using provider-specific tools`, {
             provider: modelConfig.provider,
             toolCount: providerSpecificTools.length,
           });
         } else {
           // Fall back to extracted bound tools from primary model
           toolsToUse = this.extractBoundTools();
-          logger.error(`[Gemini Debug] Using extracted bound tools`, {
+          debugLog(`[Gemini Debug] Using extracted bound tools`, {
             provider: modelConfig.provider,
             hasTools: !!toolsToUse,
             toolCount: toolsToUse?.tools?.length || 0,
@@ -251,7 +260,7 @@ export class FallbackRunnable<
           }
 
           // Deep inspection of tools before bindTools
-          logger.error(`[Gemini Debug] DEEP TOOL INSPECTION before bindTools`, {
+          debugLog(`[Gemini Debug] DEEP TOOL INSPECTION before bindTools`, {
             toolsCount: toolsToUse.tools?.length,
             toolsDetails: toolsToUse.tools?.map((t: any, idx: number) => ({
               index: idx,
@@ -268,7 +277,7 @@ export class FallbackRunnable<
             kwargs,
           });
 
-          logger.error(`[Gemini Debug] Before bindTools on new model`, {
+          debugLog(`[Gemini Debug] Before bindTools on new model`, {
             runnableToUseType: runnableToUse?.constructor?.name,
             hasBoundTools: !!(runnableToUse as any)?.boundTools,
             toolsCount: toolsToUse.tools?.length,
@@ -280,7 +289,7 @@ export class FallbackRunnable<
             kwargs,
           );
 
-          logger.error(`[Gemini Debug] After bindTools on new model`, {
+          debugLog(`[Gemini Debug] After bindTools on new model`, {
             runnableToUseType: runnableToUse?.constructor?.name,
             hasBoundTools: !!(runnableToUse as any)?.boundTools,
             boundToolsCount: (runnableToUse as any)?.boundTools?.length ?? 0,
@@ -293,7 +302,7 @@ export class FallbackRunnable<
         const config = this.extractConfig();
         const modelHasBoundTools = !!(runnableToUse as any)?.boundTools;
         
-        logger.error(`[Gemini Debug] Before withConfig decision`, {
+        debugLog(`[Gemini Debug] Before withConfig decision`, {
           hasConfig: !!config,
           configKeys: config ? Object.keys(config) : [],
           modelHasBoundTools,
@@ -305,12 +314,12 @@ export class FallbackRunnable<
         if (config && !modelHasBoundTools) {
           runnableToUse = runnableToUse.withConfig(config);
           
-          logger.error(`[Gemini Debug] After withConfig`, {
+          debugLog(`[Gemini Debug] After withConfig`, {
             runnableToUseType: runnableToUse?.constructor?.name,
             hasBoundTools: !!(runnableToUse as any)?.boundTools,
           });
         } else if (config && modelHasBoundTools) {
-          logger.error(`[Gemini Debug] Skipping withConfig to preserve boundTools`);
+          debugLog(`[Gemini Debug] Skipping withConfig to preserve boundTools`);
         }
 
         const messagesToInvoke = useProviderMessages(
@@ -319,7 +328,7 @@ export class FallbackRunnable<
           modelConfig.provider,
         );
 
-        logger.error(`[Gemini Debug] About to invoke model`, {
+        debugLog(`[Gemini Debug] About to invoke model`, {
           provider: modelConfig.provider,
           modelKey,
           inputType: Array.isArray(input) ? "array" : typeof input,
@@ -343,7 +352,7 @@ export class FallbackRunnable<
           try {
             const result = await runnableToUse.invoke(messagesToInvoke, options);
 
-            logger.error(`[Gemini Debug] Model invocation successful`, {
+            debugLog(`[Gemini Debug] Model invocation successful`, {
               provider: modelConfig.provider,
               modelKey,
               retryAttempt,
@@ -357,20 +366,18 @@ export class FallbackRunnable<
             // Check if error is retryable and we have retries left
             if (isRetryableError(invokeError) && retryAttempt < FALLBACK_MAX_RETRIES - 1) {
               const delay = calculateRetryDelay(retryAttempt);
-              logger.error(`[Gemini Retry] Model invoke attempt ${retryAttempt + 1}/${FALLBACK_MAX_RETRIES} failed, retrying in ${delay}ms`, {
+              logger.warn(`[Retry] Model invoke attempt ${retryAttempt + 1}/${FALLBACK_MAX_RETRIES} failed, retrying in ${delay}ms`, {
                 provider: modelConfig.provider,
                 modelKey,
                 error: modelLastError.message,
-                errorName: modelLastError.name,
               });
               await sleep(delay);
             } else {
               // Non-retryable error or last retry attempt - break to try next model
-              logger.error(`[Gemini Retry] Model invoke failed after ${retryAttempt + 1} attempts`, {
+              logger.warn(`[Retry] Model invoke failed after ${retryAttempt + 1} attempts`, {
                 provider: modelConfig.provider,
                 modelKey,
                 error: modelLastError.message,
-                errorName: modelLastError.name,
                 isRetryable: isRetryableError(invokeError),
               });
               throw modelLastError;
@@ -381,7 +388,7 @@ export class FallbackRunnable<
         // Should not reach here, but just in case
         throw modelLastError || new Error("Unknown error in model invoke");
       } catch (error) {
-        logger.error(`[Gemini Debug] ${modelKey} failed`, {
+        debugLog(`[Gemini Debug] ${modelKey} failed`, {
           provider: modelConfig.provider,
           error: error instanceof Error ? error.message : String(error),
           errorStack: error instanceof Error ? error.stack : undefined,
@@ -400,7 +407,7 @@ export class FallbackRunnable<
     tools: BindToolsInput[],
     kwargs?: Record<string, any>,
   ): ConfigurableModel<RunInput, CallOptions> {
-    logger.error(`[Gemini Debug] FallbackRunnable.bindTools called`, {
+    debugLog(`[Gemini Debug] FallbackRunnable.bindTools called`, {
       toolCount: tools?.length,
       toolNames: tools?.map((t: any) => t?.name || 'unnamed'),
       kwargs,
@@ -426,7 +433,7 @@ export class FallbackRunnable<
       configToolsLength: Array.isArray(boundPrimary?.config?.tools) ? boundPrimary.config.tools.length : 0,
     };
 
-    logger.error(`[Gemini Debug] FallbackRunnable.bindTools - boundPrimary inspection`, inspectBoundPrimary);
+    debugLog(`[Gemini Debug] FallbackRunnable.bindTools - boundPrimary inspection`, inspectBoundPrimary);
 
     const newFallback = new FallbackRunnable(
       boundPrimary,
@@ -439,7 +446,7 @@ export class FallbackRunnable<
       },
     );
 
-    logger.error(`[Gemini Debug] FallbackRunnable.bindTools - created new FallbackRunnable`, {
+    debugLog(`[Gemini Debug] FallbackRunnable.bindTools - created new FallbackRunnable`, {
       newFallbackPrimaryRunnableType: (newFallback as any).primaryRunnable?.constructor?.name,
       newFallbackPrimaryHasQueuedOps: !!(newFallback as any).primaryRunnable?._queuedMethodOperations,
       newFallbackPrimaryHasConfig: !!(newFallback as any).primaryRunnable?.config,
@@ -513,7 +520,7 @@ export class FallbackRunnable<
       };
     };
 
-    logger.error(`[Gemini Debug] extractBoundTools starting - DEEP INSPECTION`, {
+    debugLog(`[Gemini Debug] extractBoundTools starting - DEEP INSPECTION`, {
       primaryRunnable: inspectObject(this.primaryRunnable, 'primaryRunnable'),
       primaryRunnable_bound: inspectObject(this.primaryRunnable?.bound, 'primaryRunnable.bound'),
       primaryRunnable_bound_bound: inspectObject(this.primaryRunnable?.bound?.bound, 'primaryRunnable.bound.bound'),
@@ -525,7 +532,7 @@ export class FallbackRunnable<
       if (Array.isArray(bindToolsOp) && bindToolsOp.length > 0) {
         const tools = bindToolsOp[0] as StructuredToolInterface[];
         const toolOptions = bindToolsOp[1] || {};
-        logger.error(`[Gemini Debug] Found tools in primaryRunnable._queuedMethodOperations.bindTools`, {
+        debugLog(`[Gemini Debug] Found tools in primaryRunnable._queuedMethodOperations.bindTools`, {
           toolCount: Array.isArray(tools) ? tools.length : 'not array',
           toolNames: Array.isArray(tools) ? tools.map((t: any) => t?.name || 'unnamed') : [],
           toolOptions,
@@ -543,7 +550,7 @@ export class FallbackRunnable<
     // Check if tools are directly in config (RunnableBinding from withConfig stores it there)
     if (this.primaryRunnable?.config?.tools) {
       const config = this.primaryRunnable.config;
-      logger.error(`[Gemini Debug] Found tools in primaryRunnable.config`, {
+      debugLog(`[Gemini Debug] Found tools in primaryRunnable.config`, {
         toolCount: Array.isArray(config.tools) ? config.tools.length : 'not array',
         toolNames: Array.isArray(config.tools) ? config.tools.map((t: any) => t?.name || 'unnamed') : [],
         tool_choice: config.tool_choice,
@@ -558,7 +565,7 @@ export class FallbackRunnable<
     }
 
     while (current) {
-      logger.error(`[Gemini Debug] extractBoundTools traversing`, {
+      debugLog(`[Gemini Debug] extractBoundTools traversing`, {
         depth,
         currentType: current?.constructor?.name,
         has_queuedMethodOperations: !!current?._queuedMethodOperations,
@@ -572,7 +579,7 @@ export class FallbackRunnable<
       // Check config.tools (RunnableBinding pattern from withConfig)
       if (current?.config?.tools) {
         const config = current.config;
-        logger.error(`[Gemini Debug] Found tools in config at depth ${depth}`, {
+        debugLog(`[Gemini Debug] Found tools in config at depth ${depth}`, {
           toolCount: Array.isArray(config.tools) ? config.tools.length : 'not array',
           toolNames: Array.isArray(config.tools) ? config.tools.map((t: any) => t?.name || 'unnamed') : [],
           tool_choice: config.tool_choice,
@@ -594,7 +601,7 @@ export class FallbackRunnable<
           const tools = bindToolsOp[0] as StructuredToolInterface[];
           const toolOptions = bindToolsOp[1] || {};
 
-          logger.error(`[Gemini Debug] Found tools in _queuedMethodOperations at depth ${depth}`, {
+          debugLog(`[Gemini Debug] Found tools in _queuedMethodOperations at depth ${depth}`, {
             toolCount: Array.isArray(tools) ? tools.length : 'not array',
             toolNames: Array.isArray(tools) ? tools.map((t: any) => t?.name || 'unnamed') : [],
             toolOptions,
@@ -615,7 +622,7 @@ export class FallbackRunnable<
       current = current.bound;
     }
 
-    logger.error(`[Gemini Debug] extractBoundTools found nothing after ${depth} iterations`);
+    debugLog(`[Gemini Debug] extractBoundTools found nothing after ${depth} iterations`);
     return null;
   }
 

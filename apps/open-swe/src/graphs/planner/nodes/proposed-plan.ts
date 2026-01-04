@@ -13,7 +13,7 @@ import {
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import { createNewTask } from "@openswe/shared/open-swe/tasks";
 import {
   getInitialUserRequest,
@@ -119,14 +119,14 @@ async function startProgrammerRun(input: {
 
   const programmerThreadId = uuidv4();
   // Restart the sandbox.
-  const { sandbox, codebaseTree, dependenciesInstalled } =
-    await getSandboxWithErrorHandling(
+  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+    await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
       config,
     );
-  runInput.sandboxSessionId = sandbox.id;
+  runInput.sandboxSessionId = sandboxInstance.id;
   runInput.codebaseTree = codebaseTree ?? runInput.codebaseTree;
   runInput.dependenciesInstalled =
     dependenciesInstalled !== null

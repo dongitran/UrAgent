@@ -17,8 +17,8 @@ import {
   TaskPlan,
 } from "@openswe/shared/open-swe/types";
 import {
-  checkoutBranchAndCommit,
-  getChangedFilesStatus,
+  checkoutBranchAndCommitWithInstance,
+  getChangedFilesStatusWithInstance,
 } from "../../../utils/github/git.js";
 import {
   safeSchemaToString,
@@ -27,7 +27,7 @@ import {
 import { Command, END } from "@langchain/langgraph";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
@@ -166,7 +166,7 @@ export async function takeAction(
     }
   }
 
-  const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(
+  const { sandboxInstance, dependenciesInstalled } = await getSandboxInstanceWithErrorHandling(
     state.sandboxSessionId,
     state.targetRepository,
     state.branchName,
@@ -196,7 +196,7 @@ export async function takeAction(
         await tool.invoke({
           ...toolCall.args,
           // Only pass sandbox session ID in sandbox mode, not local mode
-          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
+          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         });
       if (typeof toolResult === "string") {
         result = toolResult;
@@ -295,7 +295,7 @@ export async function takeAction(
 
   if (!isLocalMode(config)) {
     const repoPath = getRepoAbsolutePath(state.targetRepository);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+    const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
 
     logger.info("Changed files check in take-action", {
       changedFilesCount: changedFiles.length,
@@ -320,10 +320,10 @@ export async function takeAction(
 
         const { githubInstallationToken } =
           await getGitHubTokensFromConfig(config);
-        const result = await checkoutBranchAndCommit(
+        const result = await checkoutBranchAndCommitWithInstance(
           config,
           state.targetRepository,
-          sandbox,
+          sandboxInstance,
           {
             branchName,
             githubInstallationToken,
@@ -393,7 +393,7 @@ export async function takeAction(
       taskPlan: updatedTaskPlan,
     }),
     codebaseTree: codebaseTreeToReturn,
-    sandboxSessionId: sandbox.id,
+    sandboxSessionId: sandboxInstance.id,
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
     }),

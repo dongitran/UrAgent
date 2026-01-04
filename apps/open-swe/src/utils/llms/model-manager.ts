@@ -258,14 +258,6 @@ export class ModelManager {
         thinkingConfig: thinkingConfig,
       });
 
-      logger.error("[Gemini Debug] ChatGoogleGenAI created", {
-        modelName,
-        modelType: googleModel?.constructor?.name,
-        modelLlmType: googleModel?._llmType?.(),
-        hasBindTools: typeof googleModel?.bindTools === 'function',
-        thinkingConfig: thinkingConfig,
-      });
-
       return googleModel as unknown as ConfigurableModel;
     }
 
@@ -315,26 +307,12 @@ export class ModelManager {
     const configs: ModelLoadConfig[] = [];
     const baseConfig = this.getBaseConfigForTask(config, task);
 
-    logger.error("[Gemini Debug] ModelManager.getModelConfigs", {
-      task,
-      baseConfigProvider: baseConfig.provider,
-      baseConfigModelName: baseConfig.modelName,
-      fallbackOrder: this.config.fallbackOrder,
-    });
-
     const defaultConfig = selectedModel._defaultConfig;
     let selectedModelConfig: ModelLoadConfig | null = null;
 
     if (defaultConfig) {
       const provider = defaultConfig.modelProvider as Provider;
       const modelName = defaultConfig.model;
-
-      logger.error("[Gemini Debug] Selected model default config", {
-        provider,
-        modelName,
-        hasMaxTokens: !!defaultConfig.maxTokens,
-        hasTemperature: !!defaultConfig.temperature,
-      });
 
       if (provider && modelName) {
         const isThinkingModel = baseConfig.thinkingModel;
@@ -360,12 +338,6 @@ export class ModelManager {
             : {}),
         };
         configs.push(selectedModelConfig);
-
-        logger.error("[Gemini Debug] Added selected model config", {
-          provider: selectedModelConfig.provider,
-          modelName: selectedModelConfig.modelName,
-          isThinkingModel,
-        });
       }
     }
 

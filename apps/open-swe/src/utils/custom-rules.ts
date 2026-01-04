@@ -10,6 +10,7 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
+import { ISandbox } from "./sandbox-provider/types.js";
 
 const logger = createLogger(LogLevel.INFO, "CustomRules");
 
@@ -220,6 +221,71 @@ async function getCustomRulesLocal(
     }
   } catch (error) {
     logger.error("Failed to get custom rules in local mode", { error });
+  }
+
+  return undefined;
+}
+
+/**
+ * Get custom rules using ISandbox interface (provider-agnostic)
+ * This is the new recommended way to get custom rules
+ */
+export async function getCustomRulesWithSandboxInstance(
+  sandboxInstance: ISandbox,
+  rootDir: string,
+  config: GraphConfig,
+): Promise<CustomRules | undefined> {
+  try {
+    if (isLocalMode(config)) {
+      return getCustomRulesLocal(rootDir);
+    }
+
+    const executor = createShellExecutor(config);
+
+    const catAgentsMdFileCommand = ["cat", "AGENTS.md"];
+    const agentsMdRes = await executor.executeCommand({
+      command: catAgentsMdFileCommand.join(" "),
+      workdir: rootDir,
+      sandboxInstance,
+    });
+    if (agentsMdRes.exitCode === 0 && agentsMdRes.result?.length > 0) {
+      return parseCustomRulesFromString(agentsMdRes.result);
+    }
+
+    const catAgentMdFileCommand = ["cat", "AGENT.md"];
+    const catClaudeMdFileCommand = ["cat", "CLAUDE.md"];
+    const catCursorMdFileCommand = ["cat", "CURSOR.md"];
+    const [agentMdRes, claudeMdRes, cursorMdRes] = await Promise.all([
+      executor.executeCommand({
+        command: catAgentMdFileCommand.join(" "),
+        workdir: rootDir,
+        sandboxInstance,
+      }),
+      executor.executeCommand({
+        command: catClaudeMdFileCommand.join(" "),
+        workdir: rootDir,
+        sandboxInstance,
+      }),
+      executor.executeCommand({
+        command: catCursorMdFileCommand.join(" "),
+        workdir: rootDir,
+        sandboxInstance,
+      }),
+    ]);
+    if (agentMdRes.exitCode === 0 && agentMdRes.result?.length > 0) {
+      return parseCustomRulesFromString(agentMdRes.result);
+    }
+    if (claudeMdRes.exitCode === 0 && claudeMdRes.result?.length > 0) {
+      return parseCustomRulesFromString(claudeMdRes.result);
+    }
+    if (cursorMdRes.exitCode === 0 && cursorMdRes.result?.length > 0) {
+      return parseCustomRulesFromString(cursorMdRes.result);
+    }
+  } catch (error) {
+    const sandboxErrorFields = getSandboxErrorFields(error);
+    logger.error("Failed to get custom rules with sandbox instance", {
+      ...(sandboxErrorFields ? { ...sandboxErrorFields } : { error }),
+    });
   }
 
   return undefined;

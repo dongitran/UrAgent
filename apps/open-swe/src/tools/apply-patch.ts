@@ -1,13 +1,13 @@
 import { tool } from "@langchain/core/tools";
 import { applyPatch } from "diff";
 import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
-import { readFile, writeFile } from "../utils/read-write.js";
+import { readFile, writeFile, readFileWithInstance, writeFileWithInstance } from "../utils/read-write.js";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { createApplyPatchToolFields } from "@openswe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
-import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-import { Sandbox } from "@daytonaio/sdk";
+import { getSandboxInstanceOrThrow } from "./utils/get-sandbox-id.js";
+import { ISandbox } from "../utils/sandbox-provider/types.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
@@ -25,14 +25,14 @@ const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
 
 /**
  * Attempts to apply a patch using Git CLI
- * @param sandbox The sandbox session (optional in local mode)
+ * @param sandboxInstance The sandbox instance (optional in local mode)
  * @param workDir The working directory
  * @param diffContent The diff content
  * @param config The graph config to determine if in local mode
  * @returns Object with success status and output or error message
  */
 async function applyPatchWithGit(
-  sandbox: Sandbox | null,
+  sandboxInstance: ISandbox | null,
   workDir: string,
   diffContent: string,
   config: GraphConfig,
@@ -49,7 +49,7 @@ async function applyPatchWithGit(
       command: `cat > "${tempPatchFile}" << 'EOF'\n${diffContent}\nEOF`,
       workdir: workDir,
       timeout: 10, // 10 seconds timeout for file creation
-      sandbox: sandbox || undefined,
+      sandboxInstance: sandboxInstance || undefined,
     });
 
     if (createFileResponse.exitCode !== 0) {
@@ -64,7 +64,7 @@ async function applyPatchWithGit(
       command: `git apply --verbose "${tempPatchFile}"`,
       workdir: workDir,
       timeout: 30,
-      sandbox: sandbox || undefined,
+      sandboxInstance: sandboxInstance || undefined,
     });
 
     if (response.exitCode !== 0) {
@@ -94,7 +94,7 @@ async function applyPatchWithGit(
         command: `rm -f "${tempPatchFile}"`,
         workdir: workDir,
         timeout: 5, // 5 seconds timeout for cleanup
-        sandbox: sandbox || undefined,
+        sandboxInstance: sandboxInstance || undefined,
       });
     } catch (cleanupError) {
       logger.warn(`Failed to clean up temp patch file: ${tempPatchFile}`, {
@@ -113,17 +113,24 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
         : getRepoAbsolutePath(state.targetRepository);
 
       // Get sandbox for sandbox mode (will be undefined for local mode)
-      const sandbox = isLocalMode(config)
+      const sandboxInstance = isLocalMode(config)
         ? null
-        : await getSandboxSessionOrThrow(input);
+        : await getSandboxInstanceOrThrow(input);
 
-      // Read the file using unified readFile function
-      const readFileResult = await readFile({
-        sandbox,
-        filePath: file_path,
-        workDir,
-        config,
-      });
+      // Read the file using unified readFile function (or ISandbox version)
+      const readFileResult = sandboxInstance
+        ? await readFileWithInstance({
+            sandboxInstance,
+            filePath: file_path,
+            workDir,
+            config,
+          })
+        : await readFile({
+            sandbox: null,
+            filePath: file_path,
+            workDir,
+            config,
+          });
 
       if (!readFileResult.success) {
         throw new Error(readFileResult.output);
@@ -131,18 +138,25 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
 
       // Apply the patch using Git CLI for better error messages
       logger.info(`Attempting to apply patch to ${file_path} using Git CLI`);
-      const gitResult = await applyPatchWithGit(sandbox, workDir, diff, config);
+      const gitResult = await applyPatchWithGit(sandboxInstance, workDir, diff, config);
 
       const readFileOutput = readFileResult.output;
 
       // If Git successfully applied the patch, read the updated file and return success
       if (gitResult.success) {
-        const readUpdatedResult = await readFile({
-          sandbox,
-          filePath: file_path,
-          workDir,
-          config,
-        });
+        const readUpdatedResult = sandboxInstance
+          ? await readFileWithInstance({
+              sandboxInstance,
+              filePath: file_path,
+              workDir,
+              config,
+            })
+          : await readFile({
+              sandbox: null,
+              filePath: file_path,
+              workDir,
+              config,
+            });
 
         if (!readUpdatedResult.success) {
           throw new Error(
@@ -212,14 +226,22 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
         );
       }
 
-      // Write the patched content using unified writeFile function
-      const writeFileResult = await writeFile({
-        sandbox,
-        filePath: file_path,
-        content: patchedContent,
-        workDir,
-        config,
-      });
+      // Write the patched content using unified writeFile function (or ISandbox version)
+      const writeFileResult = sandboxInstance
+        ? await writeFileWithInstance({
+            sandboxInstance,
+            filePath: file_path,
+            content: patchedContent,
+            workDir,
+            config,
+          })
+        : await writeFile({
+            sandbox: null,
+            filePath: file_path,
+            content: patchedContent,
+            workDir,
+            config,
+          });
 
       if (!writeFileResult.success) {
         throw new Error(writeFileResult.output);

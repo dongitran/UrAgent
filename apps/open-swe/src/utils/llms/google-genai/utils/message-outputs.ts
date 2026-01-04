@@ -22,6 +22,15 @@ import {
   PartWithThoughtSignature,
 } from "../types.js";
 
+// Debug flag - controlled via GEMINI_DEBUG env var
+const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+
+function debugLog(message: string, data?: Record<string, unknown>) {
+  if (GEMINI_DEBUG) {
+    console.error(`[Gemini Debug] ${message}`, data ?? {});
+  }
+}
+
 /**
  * Extracts usage metadata from Google's format to LangChain's format.
  */
@@ -68,7 +77,7 @@ function validateAndFixThoughtSignature(signature: string): string | undefined {
   const concatenationPattern = /=+[A-Za-z0-9+/]/;
   
   if (concatenationPattern.test(signature)) {
-    console.error(`[Gemini Debug] DETECTED CONCATENATED SIGNATURES!`, {
+    debugLog(`DETECTED CONCATENATED SIGNATURES!`, {
       signatureLength: signature.length,
       signaturePreview: signature.slice(0, 100) + '...',
     });
@@ -78,7 +87,7 @@ function validateAndFixThoughtSignature(signature: string): string | undefined {
     const parts = signature.split(/(?<==)(?=[A-Z])/);
     if (parts.length > 1) {
       const lastSignature = parts[parts.length - 1];
-      console.error(`[Gemini Debug] Extracted last signature from ${parts.length} concatenated parts`, {
+      debugLog(`Extracted last signature from ${parts.length} concatenated parts`, {
         lastSignaturePreview: lastSignature.slice(0, 50) + '...',
       });
       return lastSignature;
@@ -112,7 +121,7 @@ function convertPartToChunk(
     const validatedSignature = validateAndFixThoughtSignature(part.thoughtSignature);
     if (validatedSignature) {
       responseMetadata["thoughtSignature"] = validatedSignature;
-      console.error(`[Gemini Debug] convertPartToChunk: Captured thoughtSignature`, {
+      debugLog(`convertPartToChunk: Captured thoughtSignature`, {
         partIndex: index,
         hasFunctionCall: !!part.functionCall,
         functionCallName: part.functionCall?.name,
@@ -188,7 +197,7 @@ export function convertGoogleStreamChunkToLangChainChunk(
   // Debug: Log if any part has thoughtSignature
   const partsWithSignature = parts?.filter(p => p.thoughtSignature) ?? [];
   if (partsWithSignature.length > 0) {
-    console.error(`[Gemini Debug] Stream chunk has thoughtSignature`, {
+    debugLog(`Stream chunk has thoughtSignature`, {
       partsCount: parts?.length ?? 0,
       partsWithSignatureCount: partsWithSignature.length,
       signaturePreview: partsWithSignature[0]?.thoughtSignature?.slice(0, 50) + '...',
@@ -240,7 +249,7 @@ export function convertGoogleStreamChunkToLangChainChunk(
       usage_metadata: chunk.usage_metadata,
     });
     
-    console.error(`[Gemini Debug] Chunk response_metadata has thoughtSignature (corrected)`, {
+    debugLog(`Chunk response_metadata has thoughtSignature (corrected)`, {
       signaturePreview: lastSignatureFromParts.slice(0, 50) + '...',
       hasToolCalls: (correctedChunk.tool_call_chunks?.length ?? 0) > 0,
       toolCallNames: correctedChunk.tool_call_chunks?.map(tc => tc.name) ?? [],
@@ -275,14 +284,14 @@ export function convertGoogleStreamChunkToLangChainChunk(
     const validatedSignature = validateAndFixThoughtSignature(existingSignature);
     
     if (validatedSignature && validatedSignature !== existingSignature) {
-      console.error(`[Gemini Debug] Fixed concatenated signature in chunk`, {
+      debugLog(`Fixed concatenated signature in chunk`, {
         originalLength: existingSignature.length,
         fixedLength: validatedSignature.length,
       });
       chunk.response_metadata["thoughtSignature"] = validatedSignature;
     }
     
-    console.error(`[Gemini Debug] Chunk response_metadata has thoughtSignature`, {
+    debugLog(`Chunk response_metadata has thoughtSignature`, {
       signaturePreview: (chunk.response_metadata.thoughtSignature as string).slice(0, 50) + '...',
       hasToolCalls: (chunk.tool_call_chunks?.length ?? 0) > 0,
       toolCallNames: chunk.tool_call_chunks?.map(tc => tc.name) ?? [],

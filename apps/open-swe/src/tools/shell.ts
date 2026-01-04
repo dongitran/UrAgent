@@ -35,6 +35,7 @@ export function createShellTool(
           workdir: resolvedWorkdir,
           timeout: timeout ?? TIMEOUT_SEC,
           env: DEFAULT_ENV,
+          sandboxSessionId: state.sandboxSessionId,
         });
 
         if (response.exitCode !== 0) {

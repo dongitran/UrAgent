@@ -2,7 +2,7 @@ import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
 } from "@openswe/shared/open-swe/reviewer/types";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
@@ -10,7 +10,7 @@ import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { v4 as uuidv4 } from "uuid";
 import { createReviewStartedToolFields } from "@openswe/shared/open-swe/tools";
 import { getSandboxErrorFields } from "../../../utils/sandbox-error-fields.js";
-import { Sandbox } from "@daytonaio/sdk";
+import { ISandbox } from "../../../utils/sandbox-provider/types.js";
 import { createShellExecutor } from "../../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
@@ -47,7 +47,7 @@ function createReviewStartedMessage() {
 }
 
 async function getChangedFiles(
-  sandbox: Sandbox,
+  sandboxInstance: ISandbox,
   baseBranchName: string,
   repoRoot: string,
   config: GraphConfig,
@@ -58,7 +58,7 @@ async function getChangedFiles(
       command: `git diff ${baseBranchName} --name-only`,
       workdir: repoRoot,
       timeout: 30,
-      sandbox,
+      sandboxInstance,
     });
 
     if (changedFilesRes.exitCode !== 0) {
@@ -76,7 +76,7 @@ async function getChangedFiles(
 }
 
 async function getBaseBranchName(
-  sandbox: Sandbox,
+  sandboxInstance: ISandbox,
   repoRoot: string,
   config: GraphConfig,
 ): Promise<string> {
@@ -86,7 +86,7 @@ async function getBaseBranchName(
       command: "git config init.defaultBranch",
       workdir: repoRoot,
       timeout: 30,
-      sandbox,
+      sandboxInstance,
     });
 
     if (baseBranchNameRes.exitCode !== 0) {
@@ -112,8 +112,8 @@ export async function initializeState(
   const repoRoot = getRepoAbsolutePath(state.targetRepository, config);
   logger.info("Initializing state for reviewer");
   // get the base branch name, then get the changed files
-  const { sandbox, codebaseTree, dependenciesInstalled } =
-    await getSandboxWithErrorHandling(
+  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+    await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
@@ -122,10 +122,10 @@ export async function initializeState(
 
   let baseBranchName = state.targetRepository.branch;
   if (!baseBranchName) {
-    baseBranchName = await getBaseBranchName(sandbox, repoRoot, config);
+    baseBranchName = await getBaseBranchName(sandboxInstance, repoRoot, config);
   }
   const changedFiles = baseBranchName
-    ? await getChangedFiles(sandbox, baseBranchName, repoRoot, config)
+    ? await getChangedFiles(sandboxInstance, baseBranchName, repoRoot, config)
     : "";
 
   logger.info("Finished getting state for reviewer");

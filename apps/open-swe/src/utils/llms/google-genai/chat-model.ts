@@ -19,6 +19,15 @@
 import { GoogleGenAI, type GoogleGenAIOptions, type HttpOptions } from "@google/genai";
 import { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 
+// Debug flag - controlled via GEMINI_DEBUG env var
+const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+
+function debugLog(message: string, data?: Record<string, unknown>) {
+  if (GEMINI_DEBUG) {
+    console.error(`[Gemini Debug] ${message}`, data ?? {});
+  }
+}
+
 // Retry configuration
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY_MS = 1000; // 1 second
@@ -333,7 +342,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     // Handle tool_choice - convert to Google GenAI toolConfig format
     const toolConfig = convertToolChoiceToConfig(toolChoiceToUse, options.toolConfig);
 
-    console.error(`[Gemini Debug] ChatGoogleGenAI._generate`, {
+    debugLog(`ChatGoogleGenAI._generate`, {
       hasOptionsTools: !!options.tools,
       hasBoundTools: !!this.boundTools,
       toolsToUseCount: Array.isArray(toolsToUse) ? toolsToUse.length : 0,
@@ -407,7 +416,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     // Handle tool_choice - convert to Google GenAI toolConfig format
     const toolConfig = convertToolChoiceToConfig(toolChoiceToUse, options.toolConfig);
 
-    console.error(`[Gemini Debug] ChatGoogleGenAI._streamResponseChunks`, {
+    debugLog(`ChatGoogleGenAI._streamResponseChunks`, {
       hasOptionsTools: !!options.tools,
       optionsToolsCount: Array.isArray(options.tools) ? options.tools.length : 0,
       hasBoundTools: !!this.boundTools,
@@ -434,7 +443,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     };
 
     // Debug: Log thinkingConfig to verify it's being passed
-    console.error(`[Gemini Debug] _streamResponseChunks: Config with thinkingConfig`, {
+    debugLog(`_streamResponseChunks: Config with thinkingConfig`, {
       hasThinkingConfig: !!params.thinkingConfig,
       thinkingConfig: params.thinkingConfig,
       includeThoughts: params.thinkingConfig?.includeThoughts,
@@ -492,7 +501,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         const chunkSignature = generationChunk.message.response_metadata?.thoughtSignature as string | undefined;
         if (chunkSignature) {
           lastThoughtSignature = chunkSignature;
-          console.error(`[Gemini Debug] Captured thoughtSignature from stream chunk`, {
+          debugLog(`Captured thoughtSignature from stream chunk`, {
             signaturePreview: chunkSignature.slice(0, 50) + '...',
           });
         }
@@ -508,7 +517,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
           if (lastThoughtSignature && accumulatedChunk.message.response_metadata) {
             const currentSignature = accumulatedChunk.message.response_metadata.thoughtSignature as string | undefined;
             if (currentSignature && currentSignature !== lastThoughtSignature) {
-              console.error(`[Gemini Debug] Fixing corrupted signature after concat`, {
+              debugLog(`Fixing corrupted signature after concat`, {
                 currentLength: currentSignature.length,
                 lastGoodLength: lastThoughtSignature.length,
               });
@@ -540,7 +549,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       if (finalMetadata?.thoughtSignature && lastThoughtSignature) {
         const finalSignature = finalMetadata.thoughtSignature as string;
         if (finalSignature !== lastThoughtSignature) {
-          console.error(`[Gemini Debug] FINAL FIX: Signature was corrupted, using last good signature`, {
+          debugLog(`FINAL FIX: Signature was corrupted, using last good signature`, {
             corruptedLength: finalSignature.length,
             lastGoodLength: lastThoughtSignature.length,
           });
@@ -548,7 +557,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         }
       }
       
-      console.error(`[Gemini Debug] Stream completed - final accumulated chunk`, {
+      debugLog(`Stream completed - final accumulated chunk`, {
         hasResponseMetadata: !!finalMetadata,
         hasThoughtSignature: !!finalMetadata?.thoughtSignature,
         thoughtSignaturePreview: finalMetadata?.thoughtSignature 
@@ -565,7 +574,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     tools: ChatGoogleGenAICallOptions["tools"],
     kwargs?: Partial<ChatGoogleGenAICallOptions>
   ): Runnable<BaseLanguageModelInput, AIMessageChunk, ChatGoogleGenAICallOptions> {
-    console.error(`[Gemini Debug] ChatGoogleGenAI.bindTools called`, {
+    debugLog(`ChatGoogleGenAI.bindTools called`, {
       toolCount: Array.isArray(tools) ? tools.length : 'not array',
       toolNames: Array.isArray(tools) ? tools.map((t: any) => t?.name || 'unnamed') : [],
       kwargs,
@@ -596,7 +605,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       bindTools: [tools, kwargs || {}],
     };
 
-    console.error(`[Gemini Debug] ChatGoogleGenAI.bindTools result`, {
+    debugLog(`ChatGoogleGenAI.bindTools result`, {
       boundInstanceType: boundInstance?.constructor?.name,
       hasBoundTools: !!boundInstance.boundTools,
       boundToolsCount: boundInstance.boundTools?.length ?? 0,
@@ -640,7 +649,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         (newInstance as any)._queuedMethodOperations = (this as any)._queuedMethodOperations;
       }
 
-      console.error(`[Gemini Debug] ChatGoogleGenAI.withConfig preserving bound tools`, {
+      debugLog(`ChatGoogleGenAI.withConfig preserving bound tools`, {
         hasBoundTools: !!newInstance.boundTools,
         boundToolsCount: newInstance.boundTools?.length ?? 0,
       });
@@ -724,7 +733,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
   private _formatTools(
     tools?: ChatGoogleGenAICallOptions["tools"]
   ): Tool[] | undefined {
-    console.error(`[Gemini Debug] _formatTools ENTRY`, {
+    debugLog(`_formatTools ENTRY`, {
       toolsProvided: !!tools,
       toolsType: typeof tools,
       toolsIsArray: Array.isArray(tools),
@@ -732,24 +741,24 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     });
 
     if (!tools) {
-      console.error(`[Gemini Debug] _formatTools: tools is falsy, returning undefined`);
+      debugLog(`_formatTools: tools is falsy, returning undefined`);
       return undefined;
     }
 
     const toolList = Array.isArray(tools) ? tools : [tools];
-    console.error(`[Gemini Debug] _formatTools: toolList created`, {
+    debugLog(`_formatTools: toolList created`, {
       toolListLength: toolList.length,
     });
 
     if (toolList.length === 0) {
-      console.error(`[Gemini Debug] _formatTools: toolList is empty, returning undefined`);
+      debugLog(`_formatTools: toolList is empty, returning undefined`);
       return undefined;
     }
 
     const functionDeclarations: FunctionDeclaration[] = [];
     const googleTools: Tool[] = [];
 
-    console.error(`[Gemini Debug] _formatTools processing`, {
+    debugLog(`_formatTools processing`, {
       toolCount: toolList.length,
       toolTypes: toolList.map((t, idx) => {
         const keys = t ? Object.keys(t) : [];
@@ -777,13 +786,13 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
 
     for (let i = 0; i < toolList.length; i++) {
       const tool = toolList[i];
-      console.error(`[Gemini Debug] _formatTools: Processing tool ${i}`, {
+      debugLog(`_formatTools: Processing tool ${i}`, {
         toolExists: !!tool,
         toolType: typeof tool,
       });
 
       if (!tool) {
-        console.error(`[Gemini Debug] _formatTools: Tool ${i} is null/undefined, skipping`);
+        debugLog(`_formatTools: Tool ${i} is null/undefined, skipping`);
         continue;
       }
 
@@ -794,7 +803,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         "codeExecution" in tool
       ) {
         googleTools.push(tool as Tool);
-        console.error(`[Gemini Debug] _formatTools: Added Google Native Tool at index ${i}`);
+        debugLog(`_formatTools: Added Google Native Tool at index ${i}`);
         continue;
       }
 
@@ -805,7 +814,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       const hasNameProp = 'name' in lcTool;
       const hasSchemaProp = 'schema' in lcTool;
       
-      console.error(`[Gemini Debug] _formatTools: Tool ${i} type check`, {
+      debugLog(`_formatTools: Tool ${i} type check`, {
         isStructuredTool: isStructured,
         hasNameProp,
         hasSchemaProp,
@@ -817,7 +826,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       if (isStructured) {
         // StructuredTool - use its schema directly
         const schemaIsZod = isInteropZodSchema(lcTool.schema);
-        console.error(`[Gemini Debug] _formatTools: StructuredTool schema check`, {
+        debugLog(`_formatTools: StructuredTool schema check`, {
           name: lcTool.name,
           schemaIsZod,
         });
@@ -830,14 +839,14 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
           description: lcTool.description,
           parameters: schema as Schema,
         });
-        console.error(`[Gemini Debug] _formatTools: Added StructuredTool`, { name: lcTool.name });
+        debugLog(`_formatTools: Added StructuredTool`, { name: lcTool.name });
       } else if (hasNameProp && hasSchemaProp) {
         // Plain tool definition object with { name, description, schema }
         // This is the format used by LangChain's bindTools when passing tool definitions
         const toolDef = lcTool as { name: string; description?: string; schema: any };
         
         const schemaIsZod = isInteropZodSchema(toolDef.schema);
-        console.error(`[Gemini Debug] _formatTools processing plain tool definition`, {
+        debugLog(`_formatTools processing plain tool definition`, {
           name: toolDef.name,
           hasDescription: !!toolDef.description,
           schemaType: typeof toolDef.schema,
@@ -852,21 +861,21 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         let schema: any;
         try {
           if (schemaIsZod) {
-            console.error(`[Gemini Debug] _formatTools: Converting Zod schema to JSON schema`);
+            debugLog(`_formatTools: Converting Zod schema to JSON schema`);
             schema = toJsonSchema(toolDef.schema);
           } else {
-            console.error(`[Gemini Debug] _formatTools: Using schema as-is (not Zod)`);
+            debugLog(`_formatTools: Using schema as-is (not Zod)`);
             schema = toolDef.schema;
           }
           
-          console.error(`[Gemini Debug] _formatTools schema converted`, {
+          debugLog(`_formatTools schema converted`, {
             name: toolDef.name,
             convertedSchemaType: typeof schema,
             convertedSchemaKeys: schema ? Object.keys(schema).slice(0, 15) : [],
             convertedSchema: JSON.stringify(schema).slice(0, 500),
           });
         } catch (err) {
-          console.error(`[Gemini Debug] _formatTools schema conversion error`, {
+          debugLog(`_formatTools schema conversion error`, {
             name: toolDef.name,
             error: err instanceof Error ? err.message : String(err),
             errorStack: err instanceof Error ? err.stack : undefined,
@@ -879,12 +888,12 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
           description: toolDef.description || '',
           parameters: schema as Schema,
         });
-        console.error(`[Gemini Debug] _formatTools: Added plain tool definition`, { 
+        debugLog(`_formatTools: Added plain tool definition`, { 
           name: toolDef.name,
           functionDeclarationsCountNow: functionDeclarations.length,
         });
       } else {
-        console.error(`[Gemini Debug] _formatTools: Tool ${i} not recognized - SKIPPING`, {
+        debugLog(`_formatTools: Tool ${i} not recognized - SKIPPING`, {
           toolKeys: Object.keys(tool),
           hasName: 'name' in tool,
           hasSchema: 'schema' in tool,
@@ -893,7 +902,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       }
     }
 
-    console.error(`[Gemini Debug] _formatTools FINAL result`, {
+    debugLog(`_formatTools FINAL result`, {
       functionDeclarationsCount: functionDeclarations.length,
       functionNames: functionDeclarations.map(f => f.name),
       googleToolsCount: googleTools.length,
@@ -905,7 +914,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     }
 
     const result = googleTools.length > 0 ? googleTools : undefined;
-    console.error(`[Gemini Debug] _formatTools RETURNING`, {
+    debugLog(`_formatTools RETURNING`, {
       resultExists: !!result,
       resultLength: result?.length ?? 0,
     });

@@ -1,8 +1,42 @@
 export const TIMEOUT_SEC = 60; // 1 minute
-export const SANDBOX_ROOT_DIR = "/home/daytona";
+
+// Sandbox root directories for different providers
+export const DAYTONA_SANDBOX_ROOT_DIR = "/home/daytona";
+export const E2B_SANDBOX_ROOT_DIR = "/home/user";
+
+// Legacy constant - defaults to Daytona path for backward compatibility
+// Use getSandboxRootDir() for provider-aware path resolution
+export const SANDBOX_ROOT_DIR = process.env.SANDBOX_ROOT_DIR || DAYTONA_SANDBOX_ROOT_DIR;
+
 export const DAYTONA_IMAGE_NAME = "daytonaio/langchain-open-swe:0.1.0";
 export const DAYTONA_SNAPSHOT_NAME =
   process.env.DAYTONA_SNAPSHOT_NAME || "open-swe-vcpu2-mem4-disk5";
+// E2B template name - default to "base" which is E2B's default template
+export const E2B_TEMPLATE_NAME =
+  process.env.E2B_TEMPLATE || "base";
+
+/**
+ * Get the sandbox root directory based on provider type
+ * @param providerType - 'daytona', 'e2b', or undefined (auto-detect from env)
+ */
+export function getSandboxRootDir(providerType?: string): string {
+  // If explicitly specified
+  if (providerType === 'e2b') {
+    return E2B_SANDBOX_ROOT_DIR;
+  }
+  if (providerType === 'daytona') {
+    return DAYTONA_SANDBOX_ROOT_DIR;
+  }
+  
+  // Auto-detect from environment
+  const envProvider = process.env.SANDBOX_PROVIDER?.toLowerCase();
+  if (envProvider === 'e2b') {
+    return E2B_SANDBOX_ROOT_DIR;
+  }
+  
+  // Default to Daytona
+  return DAYTONA_SANDBOX_ROOT_DIR;
+}
 export const PLAN_INTERRUPT_DELIMITER = ":::";
 export const PLAN_INTERRUPT_ACTION_TITLE = "Approve/Edit Plan";
 

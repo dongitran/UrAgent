@@ -20,10 +20,10 @@ import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createGrepTool } from "../../../tools/grep.js";
 import {
-  checkoutBranchAndCommit,
-  getChangedFilesStatus,
+  checkoutBranchAndCommitWithInstance,
+  getChangedFilesStatusWithInstance,
 } from "../../../utils/github/git.js";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
@@ -86,8 +86,8 @@ export async function takeReviewerActions(
     }
   }
 
-  const { sandbox, codebaseTree, dependenciesInstalled } =
-    await getSandboxWithErrorHandling(
+  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+    await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
@@ -121,7 +121,7 @@ export async function takeReviewerActions(
         (await tool.invoke({
           ...toolCall.args,
           // Only pass sandbox session ID in sandbox mode, not local mode
-          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
+          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         })) as {
           result: string;
           status: "success" | "error";
@@ -176,7 +176,7 @@ export async function takeReviewerActions(
 
   if (!isLocalMode(config)) {
     const repoPath = getRepoAbsolutePath(state.targetRepository, config);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+    const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
 
     if (changedFiles.length > 0) {
       logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
@@ -185,10 +185,10 @@ export async function takeReviewerActions(
 
       const { githubInstallationToken } =
         await getGitHubTokensFromConfig(config);
-      const result = await checkoutBranchAndCommit(
+      const result = await checkoutBranchAndCommitWithInstance(
         config,
         state.targetRepository,
-        sandbox,
+        sandboxInstance,
         {
           branchName,
           githubInstallationToken,

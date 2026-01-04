@@ -22,6 +22,7 @@ import { escapeRegExp } from "../string-utils.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createShellExecutor } from "../shell-executor/index.js";
 import { shouldCreateIssue } from "../should-create-issue.js";
+import { ISandbox } from "../sandbox-provider/types.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -408,7 +409,7 @@ export async function checkoutBranchAndCommit(
     async () => {
       return await sandbox.git.push(
         absoluteRepoDir,
-        "git",
+        "x-access-token",
         options.githubInstallationToken,
       );
     },
@@ -433,7 +434,7 @@ export async function checkoutBranchAndCommit(
       async () => {
         return await sandbox.git.pull(
           absoluteRepoDir,
-          "git",
+          "x-access-token",
           options.githubInstallationToken,
         );
       },
@@ -459,7 +460,7 @@ export async function checkoutBranchAndCommit(
       async () => {
         return await sandbox.git.push(
           absoluteRepoDir,
-          "git",
+          "x-access-token",
           options.githubInstallationToken,
         );
       },
@@ -616,7 +617,7 @@ export async function pushEmptyCommit(
 
     await sandbox.git.push(
       absoluteRepoDir,
-      "git",
+      "x-access-token",
       options.githubInstallationToken,
     );
 
@@ -644,7 +645,7 @@ export async function pullLatestChanges(
   try {
     await sandbox.git.pull(
       absoluteRepoDir,
-      "git",
+      "x-access-token",
       args.githubInstallationToken,
     );
     return true;
@@ -773,7 +774,7 @@ async function performClone(
     absoluteRepoDir,
     branchExists ? branchName : targetRepository.branch,
     branchExists ? undefined : targetRepository.baseCommit,
-    "git",
+    "x-access-token",
     githubInstallationToken,
   );
 
@@ -830,7 +831,7 @@ async function performClone(
     });
 
     const pushStartTime = Date.now();
-    await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
+    await sandbox.git.push(absoluteRepoDir, "x-access-token", githubInstallationToken);
 
     logger.info("[DAYTONA] Pushed empty commit to remote", {
       sandboxId: sandbox.id,
@@ -923,5 +924,420 @@ export async function checkoutFilesFromCommit(
             : error,
       });
     }
+  }
+}
+
+// ============================================================================
+// ISandbox-compatible functions (Provider-agnostic)
+// These functions work with both Daytona and E2B providers
+// ============================================================================
+
+/**
+ * Get changed files status using ISandbox interface (provider-agnostic)
+ */
+export async function getChangedFilesStatusWithInstance(
+  absoluteRepoDir: string,
+  sandboxInstance: ISandbox,
+  config: GraphConfig,
+): Promise<string[]> {
+  const executor = createShellExecutor(config);
+  const gitStatusOutput = await executor.executeCommand({
+    command: "git status --porcelain",
+    workdir: absoluteRepoDir,
+    timeout: TIMEOUT_SEC,
+    sandboxInstance,
+  });
+
+  if (gitStatusOutput.exitCode !== 0) {
+    logger.error(`Failed to get changed files status`, {
+      gitStatusOutput,
+    });
+    return [];
+  }
+
+  return parseGitStatusOutput(gitStatusOutput.result);
+}
+
+/**
+ * Validates and filters files before git add operation using ISandbox interface.
+ * Excludes files/directories that should not be committed.
+ */
+async function getValidFilesToCommitWithInstance(
+  absoluteRepoDir: string,
+  sandboxInstance: ISandbox,
+  config: GraphConfig,
+  excludePatterns: string[] = DEFAULT_EXCLUDED_PATTERNS,
+): Promise<string[]> {
+  const executor = createShellExecutor(config);
+  const gitStatusOutput = await executor.executeCommand({
+    command: "git status --porcelain",
+    workdir: absoluteRepoDir,
+    timeout: TIMEOUT_SEC,
+    sandboxInstance,
+  });
+
+  if (gitStatusOutput.exitCode !== 0) {
+    logger.error(`Failed to get git status for file validation`, {
+      gitStatusOutput,
+    });
+    throw new Error("Failed to get git status for file validation");
+  }
+
+  const allFiles = parseGitStatusOutput(gitStatusOutput.result);
+
+  const validFiles = allFiles.filter((filePath) => {
+    return !shouldExcludeFile(filePath, excludePatterns);
+  });
+
+  const excludedFiles = allFiles.filter((filePath) => {
+    return shouldExcludeFile(filePath, excludePatterns);
+  });
+
+  if (excludedFiles.length > 0) {
+    logger.info(`Excluded ${excludedFiles.length} files from commit:`, {
+      excludedFiles: excludedFiles,
+    });
+  }
+
+  return validFiles;
+}
+
+/**
+ * Checkout branch and commit using ISandbox interface (provider-agnostic)
+ * This is the new recommended way to commit changes
+ */
+export async function checkoutBranchAndCommitWithInstance(
+  config: GraphConfig,
+  targetRepository: TargetRepository,
+  sandboxInstance: ISandbox,
+  options: {
+    branchName?: string;
+    githubInstallationToken: string;
+    taskPlan: TaskPlan;
+    githubIssueId: number;
+  },
+): Promise<{ branchName: string; updatedTaskPlan?: TaskPlan }> {
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+  const branchName = options.branchName || getBranchName(config);
+
+  logger.info("=== CHECKOUT BRANCH AND COMMIT (ISandbox) STARTED ===", {
+    optionsBranchName: options.branchName,
+    generatedBranchName: getBranchName(config),
+    finalBranchName: branchName,
+    baseBranch: targetRepository.branch,
+    isFeatureBranch: branchName !== targetRepository.branch,
+    absoluteRepoDir,
+    sandboxId: sandboxInstance.id,
+  });
+
+  // IMPORTANT: Prevent committing directly to base branch
+  if (branchName === targetRepository.branch) {
+    logger.warn(
+      "⚠️ WARNING: Attempting to commit to base branch! Creating feature branch instead.",
+      {
+        baseBranch: targetRepository.branch,
+        branchName,
+        threadId: config.configurable?.thread_id,
+      },
+    );
+    // Force create a new feature branch
+    const featureBranchName = getBranchName(config);
+    logger.info(`Creating feature branch instead: ${featureBranchName}`, {
+      oldBranchName: branchName,
+      newBranchName: featureBranchName,
+    });
+    return checkoutBranchAndCommitWithInstance(config, targetRepository, sandboxInstance, {
+      ...options,
+      branchName: featureBranchName,
+    });
+  }
+
+  logger.info(`✅ Branch is valid feature branch, proceeding with commit`, {
+    branchName,
+    baseBranch: targetRepository.branch,
+  });
+
+  // Validate and filter files before committing
+  const validFiles = await getValidFilesToCommitWithInstance(
+    absoluteRepoDir,
+    sandboxInstance,
+    config,
+  );
+
+  if (validFiles.length === 0) {
+    logger.info("No valid files to commit after filtering");
+    return { branchName, updatedTaskPlan: options.taskPlan };
+  }
+
+  // Add only validated files using ISandbox.git.add()
+  await sandboxInstance.git.add(absoluteRepoDir, validFiles);
+
+  const botAppName = process.env.GITHUB_APP_NAME;
+  if (!botAppName) {
+    logger.error("GITHUB_APP_NAME environment variable is not set.");
+    throw new Error("GITHUB_APP_NAME environment variable is not set.");
+  }
+  const userName = `${botAppName}[bot]`;
+  const userEmail = `${botAppName}@users.noreply.github.com`;
+  
+  // Commit using ISandbox.git.commit()
+  await sandboxInstance.git.commit({
+    workdir: absoluteRepoDir,
+    message: constructCommitMessage(),
+    authorName: userName,
+    authorEmail: userEmail,
+  });
+
+  // Push the changes using ISandbox.git.push()
+  const pushRes = await withRetry(
+    async () => {
+      try {
+        await sandboxInstance.git.push({
+          workdir: absoluteRepoDir,
+          username: "x-access-token",
+          token: options.githubInstallationToken,
+          branch: branchName,
+        });
+        return true;
+      } catch (error) {
+        throw error;
+      }
+    },
+    { retries: 3, delay: 0 },
+  );
+
+  if (pushRes instanceof Error) {
+    const errorFields =
+      pushRes instanceof Error
+        ? {
+            message: pushRes.message,
+            name: pushRes.name,
+          }
+        : pushRes;
+
+    logger.error("Failed to push changes, attempting to pull and push again", {
+      ...errorFields,
+    });
+
+    // attempt to git pull, then push again
+    const pullRes = await withRetry(
+      async () => {
+        try {
+          await sandboxInstance.git.pull({
+            workdir: absoluteRepoDir,
+            username: "x-access-token",
+            token: options.githubInstallationToken,
+          });
+          return true;
+        } catch (error) {
+          throw error;
+        }
+      },
+      { retries: 1, delay: 0 },
+    );
+
+    if (pullRes instanceof Error) {
+      const errorFields =
+        pullRes instanceof Error
+          ? {
+              message: pullRes.message,
+              name: pullRes.name,
+            }
+          : pullRes;
+      logger.error("Failed to pull changes after a push failed.", {
+        ...errorFields,
+      });
+    } else {
+      logger.info("Successfully pulled changes. Pushing again.");
+    }
+
+    const pushRes2 = await withRetry(
+      async () => {
+        try {
+          await sandboxInstance.git.push({
+            workdir: absoluteRepoDir,
+            username: "x-access-token",
+            token: options.githubInstallationToken,
+            branch: branchName,
+          });
+          return true;
+        } catch (error) {
+          throw error;
+        }
+      },
+      { retries: 3, delay: 0 },
+    );
+
+    if (pushRes2 instanceof Error) {
+      const gitStatus = await sandboxInstance.git.status(absoluteRepoDir);
+      const errorFields = {
+        ...(pushRes2 instanceof Error
+          ? {
+              name: pushRes2.name,
+              message: pushRes2.message,
+              stack: pushRes2.stack,
+              cause: pushRes2.cause,
+            }
+          : pushRes2),
+      };
+      logger.error("Failed to push changes", {
+        ...errorFields,
+        gitStatus,
+      });
+      throw new Error("Failed to push changes");
+    } else {
+      logger.info("Pulling changes before pushing succeeded");
+    }
+  } else {
+    logger.info("Successfully pushed changes");
+  }
+
+  // Check if the active task has a PR associated with it. If not, create a draft PR.
+  let updatedTaskPlan: TaskPlan | undefined;
+  const activeTask = getActiveTask(options.taskPlan);
+  const prForTask = getPullRequestNumberFromActiveTask(options.taskPlan);
+
+  logger.info("Checking if draft PR needs to be created", {
+    hasActiveTask: !!activeTask,
+    activeTaskTitle: activeTask?.title,
+    prForTask,
+    branchName,
+    baseBranch: targetRepository.branch,
+  });
+
+  if (!prForTask) {
+    logger.info("First commit detected, creating a draft pull request.", {
+      branchName,
+      baseBranch: targetRepository.branch,
+      activeTaskTitle: activeTask?.title,
+    });
+    const hasIssue = shouldCreateIssue(config);
+
+    const reviewPullNumber = config.configurable?.reviewPullNumber;
+
+    const pullRequest = await createPullRequest({
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+      headBranch: branchName,
+      title: `[WIP]: ${activeTask?.title ?? "Open SWE task"}`,
+      body: `**WORK IN PROGRESS OPEN SWE PR**${hasIssue ? `\n\nFixes: #${options.githubIssueId}` : ""}${reviewPullNumber ? `\n\nTriggered from pull request: #${reviewPullNumber}` : ""}`,
+      githubInstallationToken: options.githubInstallationToken,
+      draft: true,
+      baseBranch: targetRepository.branch,
+      nullOnError: true,
+    });
+
+    if (pullRequest) {
+      logger.info(`✅ Draft pull request created successfully!`, {
+        prNumber: pullRequest.number,
+        prUrl: pullRequest.html_url,
+        branchName,
+        baseBranch: targetRepository.branch,
+      });
+      updatedTaskPlan = addPullRequestNumberToActiveTask(
+        options.taskPlan,
+        pullRequest.number,
+      );
+      if (hasIssue) {
+        await addTaskPlanToIssue(
+          {
+            githubIssueId: options.githubIssueId,
+            targetRepository,
+          },
+          config,
+          updatedTaskPlan,
+        );
+        logger.info(
+          `Draft pull request linked to issue: #${options.githubIssueId}`,
+        );
+      }
+    } else {
+      logger.warn("Failed to create draft pull request", {
+        branchName,
+        baseBranch: targetRepository.branch,
+      });
+    }
+  } else {
+    logger.info("PR already exists for this task, skipping draft PR creation", {
+      prForTask,
+      branchName,
+    });
+  }
+
+  logger.info("Successfully checked out & committed changes.", {
+    commitAuthor: userName,
+  });
+
+  return { branchName, updatedTaskPlan };
+}
+
+/**
+ * Push empty commit using ISandbox interface (provider-agnostic)
+ */
+export async function pushEmptyCommitWithInstance(
+  targetRepository: TargetRepository,
+  sandboxInstance: ISandbox,
+  config: GraphConfig,
+  options: {
+    githubInstallationToken: string;
+  },
+) {
+  const botAppName = process.env.GITHUB_APP_NAME;
+  if (!botAppName) {
+    logger.error("GITHUB_APP_NAME environment variable is not set.");
+    throw new Error("GITHUB_APP_NAME environment variable is not set.");
+  }
+  const userName = `${botAppName}[bot]`;
+  const userEmail = `${botAppName}@users.noreply.github.com`;
+
+  try {
+    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+    const executor = createShellExecutor(config);
+    
+    const setGitConfigRes = await executor.executeCommand({
+      command: `git config user.name "${userName}" && git config user.email "${userEmail}"`,
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+      sandboxInstance,
+    });
+    if (setGitConfigRes.exitCode !== 0) {
+      logger.error(`Failed to set git config`, {
+        exitCode: setGitConfigRes.exitCode,
+        result: setGitConfigRes.result,
+      });
+      return;
+    }
+
+    const emptyCommitRes = await executor.executeCommand({
+      command: "git commit --allow-empty -m 'Empty commit to trigger CI'",
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+      sandboxInstance,
+    });
+    if (emptyCommitRes.exitCode !== 0) {
+      logger.error(`Failed to push empty commit`, {
+        exitCode: emptyCommitRes.exitCode,
+        result: emptyCommitRes.result,
+      });
+      return;
+    }
+
+    await sandboxInstance.git.push({
+      workdir: absoluteRepoDir,
+      username: "x-access-token",
+      token: options.githubInstallationToken,
+    });
+
+    logger.info("Successfully pushed empty commit");
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error(`Failed to push empty commit`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
   }
 }

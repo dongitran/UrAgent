@@ -5,7 +5,7 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { createInstallDependenciesToolFields } from "@openswe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
-import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
+import { getSandboxInstanceOrThrow } from "./utils/get-sandbox-id.js";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { join, isAbsolute } from "path";
@@ -46,13 +46,13 @@ export function createInstallDependenciesTool(
 
         // Use unified shell executor
         const executor = createShellExecutor(config);
-        const sandbox = isLocalMode(config)
+        const sandboxInstance = isLocalMode(config)
           ? undefined
-          : await getSandboxSessionOrThrow(input);
+          : await getSandboxInstanceOrThrow(input);
 
-        logger.debug("[DAYTONA] Sandbox retrieved for install dependencies", {
-          sandboxId: sandbox?.id,
-          sandboxState: sandbox?.state,
+        logger.debug("[SANDBOX] Sandbox retrieved for install dependencies", {
+          sandboxId: sandboxInstance?.id,
+          sandboxState: sandboxInstance?.state,
           command,
           workdir,
         });
@@ -63,12 +63,12 @@ export function createInstallDependenciesTool(
           workdir: workdir,
           env: DEFAULT_ENV,
           timeout,
-          sandbox,
+          sandboxInstance,
         });
         const duration = Date.now() - startTime;
 
-        logger.debug("[DAYTONA] Install dependencies response received", {
-          sandboxId: sandbox?.id,
+        logger.debug("[SANDBOX] Install dependencies response received", {
+          sandboxId: sandboxInstance?.id,
           command,
           workdir,
           durationMs: duration,
@@ -90,10 +90,10 @@ export function createInstallDependenciesTool(
 
           if (response.exitCode === -1) {
             logger.error(
-              "[DAYTONA] Install dependencies returned exit code -1",
+              "[SANDBOX] Install dependencies returned exit code -1",
               {
-                sandboxId: sandbox?.id,
-                sandboxState: sandbox?.state,
+                sandboxId: sandboxInstance?.id,
+                sandboxState: sandboxInstance?.state,
                 command,
                 workdir,
                 timeout,
@@ -101,14 +101,14 @@ export function createInstallDependenciesTool(
                 fullResponse: JSON.stringify(response),
               },
             );
-            errorMessage = `Failed to install dependencies. Exit code: -1 (Daytona sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal error: ${errorResult || "No output"}`;
+            errorMessage = `Failed to install dependencies. Exit code: -1 (Sandbox issue - possible causes: sandbox disconnected, command timeout, or resource limits exceeded). Try running the command again or check sandbox status.\nOriginal error: ${errorResult || "No output"}`;
           }
 
           throw new Error(errorMessage);
         }
 
-        logger.info("[DAYTONA] Install dependencies completed successfully", {
-          sandboxId: sandbox?.id,
+        logger.info("[SANDBOX] Install dependencies completed successfully", {
+          sandboxId: sandboxInstance?.id,
           command,
           durationMs: duration,
           resultLength: response.result?.length ?? 0,

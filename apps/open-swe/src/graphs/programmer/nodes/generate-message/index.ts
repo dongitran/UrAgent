@@ -22,7 +22,7 @@ import {
   createWriteDefaultTsConfigTool,
 } from "../../../../tools/index.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
-import { stopSandbox } from "../../../../utils/sandbox.js";
+import { getProvider } from "../../../../utils/sandbox.js";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@openswe/shared/messages";
@@ -78,6 +78,15 @@ import {
 } from "../../../../utils/loop-detection.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
+
+// Debug logging controlled by GEMINI_DEBUG env var
+const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (GEMINI_DEBUG) {
+    logger.debug(message, data);
+  }
+}
 
 const formatDynamicContextPrompt = (state: GraphState) => {
   const activePlanItems = state.taskPlan
@@ -261,7 +270,7 @@ async function createToolsAndPrompt(
 
   const rawMessages = [...state.internalMessages, ...options.missingMessages];
 
-  logger.error("[Gemini Debug] Raw messages BEFORE filtering", {
+  debugLog("[Gemini Debug] Raw messages BEFORE filtering", {
     totalRawMessages: rawMessages.length,
     rawMessageDetails: rawMessages.map((m: BaseMessage, idx: number) => ({
       index: idx,
@@ -285,7 +294,7 @@ async function createToolsAndPrompt(
 
   const inputMessages = filterMessagesWithoutContent(rawMessages);
 
-  logger.error("[Gemini Debug] Input messages after filtering", {
+  debugLog("[Gemini Debug] Input messages after filtering", {
     totalInternalMessages: state.internalMessages.length,
     totalMissingMessages: options.missingMessages.length,
     filteredInputMessages: inputMessages.length,
@@ -317,7 +326,7 @@ async function createToolsAndPrompt(
   const loopWarning = options.loopWarning || "";
   const effectiveTaskPlan = options.latestTaskPlan ?? state.taskPlan;
 
-  logger.error("[Gemini Debug] Building message arrays", {
+  debugLog("[Gemini Debug] Building message arrays", {
     loopWarning: !!loopWarning,
     hasEffectiveTaskPlan: !!effectiveTaskPlan,
     inputMessagesCount: inputMessages.length,
@@ -407,7 +416,7 @@ async function createToolsAndPrompt(
 
         processedMessages.push(mergedToolMessage);
 
-        logger.error("[Gemini Debug] Merged consecutive ToolMessages", {
+        debugLog("[Gemini Debug] Merged consecutive ToolMessages", {
           originalCount: toolMessages.length,
           startIndex: i,
           endIndex: j - 1,
@@ -515,7 +524,7 @@ async function createToolsAndPrompt(
     formatSpecificPlanPrompt(effectiveTaskPlan, loopWarning),
   ];
 
-  logger.error("[Gemini Debug] Message structure prepared", {
+  debugLog("[Gemini Debug] Message structure prepared", {
     totalInputMessages: inputMessages.length,
     anthropicMessagesCount: anthropicMessages.length,
     nonAnthropicMessagesCount: nonAnthropicMessages.length,
@@ -528,7 +537,7 @@ async function createToolsAndPrompt(
     })),
   });
 
-  logger.error("[Gemini Debug] Detailed Gemini message sequence", {
+  debugLog("[Gemini Debug] Detailed Gemini message sequence", {
     messages: geminiMessages.map((m: any, idx: number) => {
       const isSystemMsg = typeof m === "object" && m.role === "system";
       const isLangChainMsg = m.constructor?.name?.includes("Message");
@@ -814,7 +823,7 @@ export async function generateAction(
 
   const isGeminiModel = modelName.includes("gemini");
 
-  logger.error("[Gemini Debug] Model detection", {
+  debugLog("[Gemini Debug] Model detection", {
     modelName,
     isAnthropicModel,
     isGeminiModel,
@@ -847,7 +856,7 @@ export async function generateAction(
   // FallbackRunnable will use providerMessages to select the correct messages for each provider
   const baseMessagesForFallback = providerMessages.anthropic;
 
-  logger.error("[Gemini Debug] Final messages to invoke", {
+  debugLog("[Gemini Debug] Final messages to invoke", {
     messageCount: messagesToUse.length,
     baseMessagesCount: baseMessagesForFallback.length,
     willUseProviderMessages: true,
@@ -938,7 +947,7 @@ export async function generateAction(
       toolNames: response.tool_calls?.map((tc) => tc.name) || [],
     });
 
-    logger.error("[Gemini Debug] Model invocation successful", {
+    debugLog("[Gemini Debug] Model invocation successful", {
       responseType: response.constructor?.name,
       hasToolCalls: !!response.tool_calls?.length,
       toolCallsCount: response.tool_calls?.length || 0,
@@ -950,7 +959,7 @@ export async function generateAction(
       error: error instanceof Error ? error.message : String(error),
     });
 
-    logger.error("[Gemini Debug] Model invocation failed", {
+    debugLog("[Gemini Debug] Model invocation failed", {
       error: error instanceof Error ? error.message : String(error),
       errorName: error instanceof Error ? error.name : "Unknown",
       errorStack:
@@ -972,7 +981,10 @@ export async function generateAction(
     });
 
     logger.info("No tool calls found. Stopping sandbox...");
-    newSandboxSessionId = await stopSandbox(state.sandboxSessionId);
+    // Use provider abstraction to stop sandbox
+    const provider = getProvider();
+    await provider.stop(state.sandboxSessionId);
+    newSandboxSessionId = state.sandboxSessionId;
   }
 
   if (

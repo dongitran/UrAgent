@@ -16,7 +16,7 @@ import {
   formatFollowupMessagePrompt,
   isFollowupRequest,
 } from "../../utils/followup.js";
-import { stopSandbox } from "../../../../utils/sandbox.js";
+import { getProvider } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getScratchpad } from "../../utils/scratchpad-notes.js";
@@ -165,7 +165,10 @@ export async function generatePlan(
   let newSessionId: string | undefined;
   if (state.sandboxSessionId && !isLocalMode(config)) {
     // Stop before returning, as the next step will be to interrupt the graph.
-    newSessionId = await stopSandbox(state.sandboxSessionId);
+    // Use provider abstraction to stop sandbox
+    const provider = getProvider();
+    await provider.stop(state.sandboxSessionId);
+    newSessionId = state.sandboxSessionId;
   }
 
   const proposedPlanArgs = toolCall.args as z.infer<
