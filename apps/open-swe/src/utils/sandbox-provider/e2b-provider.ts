@@ -743,6 +743,7 @@ export class E2BSandboxProvider implements ISandboxProvider {
     logger.debug("[E2B] Provider initialized", {
       defaultTemplate: this.defaultTemplate,
       hasApiKey: !!this.apiKey,
+      hasCustomApiKey: !!config?.apiKey,
     });
   }
   

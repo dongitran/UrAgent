@@ -274,11 +274,24 @@ export async function initializeSandbox(
   emitStepEvent(baseCreateSandboxAction, "pending");
   let sandboxInstance: ISandbox;
   try {
-    // Use provider abstraction to create sandbox - works with both Daytona and E2B
+    // Use provider abstraction to create sandbox - works with Daytona, E2B, and Multi
     const provider = getProvider();
-    const providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
-    const template = getDefaultTemplate(providerType);
-    const user = getDefaultUser(providerType);
+    
+    // For multi-provider, the provider itself handles template/user selection
+    // For single providers, we need to determine the correct template/user
+    let template: string;
+    let user: string;
+    
+    if (provider.name === 'multi') {
+      // Multi-provider handles this internally, but we still need defaults
+      // The actual template/user will be determined by the selected sub-provider
+      template = getDefaultTemplate(SandboxProviderType.E2B); // Default to E2B template
+      user = getDefaultUser(SandboxProviderType.E2B);
+    } else {
+      const providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
+      template = getDefaultTemplate(providerType);
+      user = getDefaultUser(providerType);
+    }
     
     logger.info(`Creating sandbox using provider: ${provider.name}`, { template, user });
     sandboxInstance = await provider.create({

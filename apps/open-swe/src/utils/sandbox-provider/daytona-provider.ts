@@ -360,6 +360,15 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
     defaultSnapshot?: string;
     defaultUser?: string;
   }) {
+    // If apiKey is provided, set it in environment for Daytona SDK
+    // Daytona SDK reads from DAYTONA_API_KEY env var
+    if (config?.apiKey) {
+      process.env.DAYTONA_API_KEY = config.apiKey;
+    }
+    if (config?.apiUrl) {
+      process.env.DAYTONA_API_URL = config.apiUrl;
+    }
+    
     this.client = new Daytona();
     this.defaultSnapshot = config?.defaultSnapshot || process.env.DAYTONA_SNAPSHOT_NAME || 'daytona-small';
     this.defaultUser = config?.defaultUser || 'daytona';
@@ -367,6 +376,7 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
     logger.debug("[DAYTONA] Provider initialized", {
       defaultSnapshot: this.defaultSnapshot,
       defaultUser: this.defaultUser,
+      hasCustomApiKey: !!config?.apiKey,
     });
   }
   

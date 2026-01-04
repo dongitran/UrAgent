@@ -231,6 +231,8 @@ export enum SandboxProviderType {
   DAYTONA = 'daytona',
   E2B = 'e2b',
   LOCAL = 'local',
+  /** Multi-provider mode: round-robin between Daytona and E2B */
+  MULTI = 'multi',
 }
 
 /**

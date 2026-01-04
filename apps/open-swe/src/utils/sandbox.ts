@@ -459,7 +459,13 @@ export async function getSandboxInstanceWithErrorHandling(
     let numSandboxCreateAttempts = 0;
     
     // Get the correct template based on provider type
-    const providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
+    // For multi-provider, use E2B defaults (the provider handles actual selection)
+    let providerType: SandboxProviderType;
+    if (provider.name === 'multi') {
+      providerType = SandboxProviderType.E2B; // Default for multi
+    } else {
+      providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
+    }
     const template = getDefaultTemplate(providerType);
     const user = getDefaultUser(providerType);
     
