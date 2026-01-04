@@ -4,7 +4,7 @@
  * Run with: npx vitest run src/utils/sandbox-provider/__tests__/key-manager.test.ts
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MultiProviderKeyManager, resetKeyManager } from '../key-manager.js';
 import { SandboxProviderType } from '../types.js';
 
