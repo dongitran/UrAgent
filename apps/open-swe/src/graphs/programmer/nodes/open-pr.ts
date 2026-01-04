@@ -8,9 +8,9 @@ import {
   TaskPlan,
 } from "@openswe/shared/open-swe/types";
 import {
-  checkoutBranchAndCommit,
-  getChangedFilesStatus,
-  pushEmptyCommit,
+  checkoutBranchAndCommitWithInstance,
+  getChangedFilesStatusWithInstance,
+  pushEmptyCommitWithInstance,
 } from "../../../utils/github/git.js";
 import {
   createPullRequest,
@@ -29,7 +29,7 @@ import { extractIssueTitleAndBodyFromContent } from "../../../utils/github/issue
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
 import {
   deleteSandbox,
-  getSandboxWithErrorHandling,
+  getSandboxInstanceWithErrorHandling,
 } from "../../../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import {
@@ -109,14 +109,14 @@ export async function openPullRequest(
 
   const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
 
-  const { sandbox, codebaseTree, dependenciesInstalled } =
-    await getSandboxWithErrorHandling(
+  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+    await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
       config,
     );
-  const sandboxSessionId = sandbox.id;
+  const sandboxSessionId = sandboxInstance.id;
 
   const { owner, repo } = state.targetRepository;
 
@@ -143,7 +143,7 @@ export async function openPullRequest(
     command: `git diff --name-only ${state.targetRepository.branch ?? ""}`,
     workdir: repoPath,
     timeout: TIMEOUT_SEC,
-    sandbox,
+    sandboxInstance,
   });
 
   logger.info("Git diff result", {
@@ -172,7 +172,7 @@ export async function openPullRequest(
   let branchName = state.branchName;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+  const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
 
   logger.info("Changed files status", {
     changedFilesCount: changedFiles.length,
@@ -185,10 +185,10 @@ export async function openPullRequest(
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
-    const result = await checkoutBranchAndCommit(
+    const result = await checkoutBranchAndCommitWithInstance(
       config,
       state.targetRepository,
-      sandbox,
+      sandboxInstance,
       {
         branchName,
         githubInstallationToken,
@@ -242,7 +242,7 @@ export async function openPullRequest(
   }
 
   if (process.env.SKIP_CI_UNTIL_LAST_COMMIT === "true") {
-    await pushEmptyCommit(state.targetRepository, sandbox, config, {
+    await pushEmptyCommitWithInstance(state.targetRepository, sandboxInstance, config, {
       githubInstallationToken,
     });
   }

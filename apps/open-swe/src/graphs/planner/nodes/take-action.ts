@@ -26,13 +26,13 @@ import {
 
 import { createGrepTool } from "../../../tools/grep.js";
 import {
-  getChangedFilesStatus,
+  getChangedFilesStatusWithInstance,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
@@ -85,8 +85,8 @@ export async function takeActions(
     throw new Error("No tool calls found.");
   }
 
-  const { sandbox, codebaseTree, dependenciesInstalled } =
-    await getSandboxWithErrorHandling(
+  const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+    await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
@@ -120,7 +120,7 @@ export async function takeActions(
         (await tool.invoke({
           ...toolCall.args,
           // Only pass sandbox session ID in sandbox mode, not local mode
-          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
+          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         })) as {
           result: string;
           status: "success" | "error";
@@ -205,7 +205,7 @@ export async function takeActions(
     const repoPath = isLocalMode(config)
       ? getLocalWorkingDirectory()
       : getRepoAbsolutePath(state.targetRepository);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+    const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
     if (changedFiles?.length > 0) {
       logger.warn(
         "Changes found in the codebase after taking action. Reverting.",
@@ -213,7 +213,7 @@ export async function takeActions(
           changedFiles,
         },
       );
-      await stashAndClearChanges(repoPath, sandbox);
+      await stashAndClearChanges(repoPath, null);
 
       // Rewrite the tool call contents to include a changed files warning.
       toolCallResults = toolCallResults.map(
@@ -241,7 +241,7 @@ export async function takeActions(
 
   const commandUpdate: PlannerGraphUpdate = {
     messages: toolCallResults,
-    sandboxSessionId: sandbox.id,
+    sandboxSessionId: sandboxInstance.id,
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     ...allStateUpdates,

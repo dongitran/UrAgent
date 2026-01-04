@@ -12,8 +12,8 @@ import {
   GITHUB_USER_LOGIN_HEADER,
 } from "@openswe/shared/constants";
 import {
-  getSandboxWithErrorHandling,
-  stopSandbox,
+  getSandboxInstanceWithErrorHandling,
+  getProvider,
 } from "../../../utils/sandbox.js";
 import { getOpenSweAppUrl } from "../../../utils/url-helpers.js";
 import {
@@ -52,7 +52,9 @@ export async function requestHelp(
   }
   const sandboxSessionId = state.sandboxSessionId;
   if (sandboxSessionId) {
-    await stopSandbox(sandboxSessionId);
+    // Use provider abstraction to stop sandbox
+    const provider = getProvider();
+    await provider.stop(sandboxSessionId);
   }
 
   const toolCall = lastMessage.tool_calls[0];
@@ -123,8 +125,8 @@ Please check the UrAgent interface to respond to this request.`;
       throw new Error("Interrupt response expected to be a string.");
     }
 
-    const { sandbox, codebaseTree, dependenciesInstalled } =
-      await getSandboxWithErrorHandling(
+    const { sandboxInstance, codebaseTree, dependenciesInstalled } =
+      await getSandboxInstanceWithErrorHandling(
         state.sandboxSessionId,
         state.targetRepository,
         state.branchName,
@@ -161,7 +163,7 @@ Please check the UrAgent interface to respond to this request.`;
     const commandUpdate: GraphUpdate = {
       messages: [toolMessage, humanResponseCustomEventMsg],
       internalMessages: [toolMessage],
-      sandboxSessionId: sandbox.id,
+      sandboxSessionId: sandboxInstance.id,
       ...(codebaseTree && { codebaseTree }),
       ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     };

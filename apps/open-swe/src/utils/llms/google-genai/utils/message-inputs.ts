@@ -16,6 +16,15 @@ import {
 import type { ToolCall } from "@langchain/core/messages/tool";
 import type { Content, PartWithThoughtSignature } from "../types.js";
 
+// Debug flag - controlled via GEMINI_DEBUG env var
+const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+
+function debugLog(message: string, data?: Record<string, unknown>) {
+  if (GEMINI_DEBUG) {
+    console.error(`[Gemini Debug] ${message}`, data ?? {});
+  }
+}
+
 /**
  * Validates that a thoughtSignature is a single valid Base64 string.
  * Detects concatenated signatures (which have '=' padding in the middle).
@@ -32,7 +41,7 @@ function validateAndFixThoughtSignature(signature: unknown): string | undefined 
   const concatenationPattern = /=+[A-Za-z0-9+/]/;
   
   if (concatenationPattern.test(signature)) {
-    console.error(`[Gemini Debug] message-inputs: DETECTED CONCATENATED SIGNATURES!`, {
+    debugLog(`message-inputs: DETECTED CONCATENATED SIGNATURES!`, {
       signatureLength: signature.length,
       signaturePreview: signature.slice(0, 100) + '...',
     });
@@ -42,7 +51,7 @@ function validateAndFixThoughtSignature(signature: unknown): string | undefined 
     const parts = signature.split(/(?<==)(?=[A-Z])/);
     if (parts.length > 1) {
       const lastSignature = parts[parts.length - 1];
-      console.error(`[Gemini Debug] message-inputs: Extracted last signature from ${parts.length} concatenated parts`, {
+      debugLog(`message-inputs: Extracted last signature from ${parts.length} concatenated parts`, {
         lastSignaturePreview: lastSignature.slice(0, 50) + '...',
       });
       return lastSignature;
@@ -184,7 +193,7 @@ function convertToolMessageToPart(
 
   // If still no name, use a fallback (this shouldn't happen in normal flow)
   if (!toolName) {
-    console.error(`[Gemini Debug] WARNING: ToolMessage has no name!`, {
+    debugLog(` WARNING: ToolMessage has no name!`, {
       tool_call_id: (message as any).tool_call_id,
       contentPreview: typeof message.content === 'string' 
         ? message.content.slice(0, 100) 
@@ -252,7 +261,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
     }
   }
 
-  console.error(`[Gemini Debug] convertMessagesToGooglePayload`, {
+  debugLog(` convertMessagesToGooglePayload`, {
     totalMessages: messages.length,
     systemMessagesCount: systemMessages.length,
     chatMessagesCount: chatMessages.length,
@@ -296,11 +305,11 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
       const thoughtSignature = validateAndFixThoughtSignature(rawSignature);
       
       if (rawSignature && !thoughtSignature) {
-        console.error(`[Gemini Debug] WARNING: Invalid thoughtSignature detected and removed`, {
+        debugLog(` WARNING: Invalid thoughtSignature detected and removed`, {
           rawSignatureType: typeof rawSignature,
         });
       } else if (thoughtSignature && rawSignature !== thoughtSignature) {
-        console.error(`[Gemini Debug] Fixed concatenated signature in message-inputs`, {
+        debugLog(` Fixed concatenated signature in message-inputs`, {
           originalLength: (rawSignature as string).length,
           fixedLength: thoughtSignature.length,
         });
@@ -330,7 +339,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
           if (tcIndex === 0) {
             if (thoughtSignature) {
               fcPart.thoughtSignature = thoughtSignature;
-              console.error(`[Gemini Debug] Attached real thoughtSignature to first functionCall`, {
+              debugLog(` Attached real thoughtSignature to first functionCall`, {
                 messageIndex: i,
                 toolCallIndex: tcIndex,
                 toolName: toolCall.name,
@@ -339,7 +348,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
             } else {
               // No signature - attach dummy signature to FIRST functionCall only
               fcPart.thoughtSignature = "skip_thought_signature_validator";
-              console.error(`[Gemini Debug] Attached dummy signature to first functionCall`, {
+              debugLog(` Attached dummy signature to first functionCall`, {
                 messageIndex: i,
                 toolCallIndex: tcIndex,
                 toolName: toolCall.name,
@@ -348,7 +357,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
             }
           } else {
             // Subsequent parallel FCs should NOT have signature
-            console.error(`[Gemini Debug] No signature for parallel functionCall (index > 0)`, {
+            debugLog(` No signature for parallel functionCall (index > 0)`, {
               messageIndex: i,
               toolCallIndex: tcIndex,
               toolName: toolCall.name,
@@ -374,7 +383,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
     // Note: ToolMessages are mapped to 'user' role in Google GenAI
     if (isToolMessage(message)) {
       const toolPart = convertToolMessageToPart(message, toolCallIdToNameMap);
-      console.error(`[Gemini Debug] Converting ToolMessage ${i}`, {
+      debugLog(` Converting ToolMessage ${i}`, {
         name: (message as any).name,
         tool_call_id: (message as any).tool_call_id,
         resolvedName: (toolPart.functionResponse as any)?.name,
@@ -418,7 +427,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
         // Just verify and log
         const firstNewFC = parts.find(p => p.functionCall);
         if (firstNewFC && !firstNewFC.thoughtSignature) {
-          console.error(`[Gemini Debug] ⚠️ WARNING: Merging FCs but first new FC has no signature!`, {
+          debugLog(` ⚠️ WARNING: Merging FCs but first new FC has no signature!`, {
             contentIndex: contents.length - 1,
             existingPartsCount: lastContent.parts.length,
             newPartsCount: parts.length,
@@ -429,7 +438,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
         }
       }
       
-      console.error(`[Gemini Debug] MERGING parts into existing content`, {
+      debugLog(` MERGING parts into existing content`, {
         contentIndex: contents.length - 1,
         existingPartsCount: lastContent.parts.length,
         newPartsCount: parts.length,
@@ -481,7 +490,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
       if (part.functionCall && !part.thoughtSignature) {
         // This FC doesn't have signature - add dummy
         part.thoughtSignature = "skip_thought_signature_validator";
-        console.error(`[Gemini Debug] FINAL VALIDATION: Added dummy signature to FC without signature`, {
+        debugLog(` FINAL VALIDATION: Added dummy signature to FC without signature`, {
           contentIndex: cIdx,
           partIndex: pIdx,
           functionName: part.functionCall.name,
@@ -493,10 +502,10 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
   // =========================================================================
   // DETAILED DEBUG: Log the final contents structure to identify missing signatures
   // =========================================================================
-  console.error(`[Gemini Debug] convertMessagesToGooglePayload FINAL CONTENTS STRUCTURE:`);
+  debugLog(` convertMessagesToGooglePayload FINAL CONTENTS STRUCTURE:`);
   for (let cIdx = 0; cIdx < contents.length; cIdx++) {
     const content = contents[cIdx];
-    console.error(`[Gemini Debug] contents[${cIdx}] role=${content.role}, parts=${content.parts?.length ?? 0}`);
+    debugLog(` contents[${cIdx}] role=${content.role}, parts=${content.parts?.length ?? 0}`);
     
     if (content.parts) {
       for (let pIdx = 0; pIdx < content.parts.length; pIdx++) {
@@ -521,7 +530,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
           
           // CRITICAL: Check if this functionCall is missing signature
           if (!part.thoughtSignature) {
-            console.error(`[Gemini Debug] ⚠️ MISSING SIGNATURE at contents[${cIdx}].parts[${pIdx}]`, {
+            debugLog(` ⚠️ MISSING SIGNATURE at contents[${cIdx}].parts[${pIdx}]`, {
               functionName: part.functionCall.name,
               role: content.role,
             });
@@ -534,13 +543,13 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
         
         // Only log functionCall parts for brevity
         if (part.functionCall) {
-          console.error(`[Gemini Debug]   parts[${pIdx}]:`, partInfo);
+          debugLog(`   parts[${pIdx}]:`, partInfo);
         }
       }
     }
   }
 
-  console.error(`[Gemini Debug] convertMessagesToGooglePayload result`, {
+  debugLog(` convertMessagesToGooglePayload result`, {
     contentsCount: contents.length,
     contentsRoles: contents.map(c => c.role),
     contentsPartsCount: contents.map(c => c.parts?.length ?? 0),

@@ -8,8 +8,7 @@ import {
   TargetRepository,
 } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
-import { daytonaClient } from "../../utils/sandbox.js";
-import { cloneRepo, pullLatestChanges } from "../../utils/github/git.js";
+import { getProvider } from "../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
@@ -19,15 +18,15 @@ import {
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
 } from "@openswe/shared/open-swe/custom-node-events";
-import { Sandbox } from "@daytonaio/sdk";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
-import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../constants.js";
-import { getCustomRules } from "../../utils/custom-rules.js";
+import { getDefaultTemplate, getDefaultUser, DEFAULT_SANDBOX_CREATE_PARAMS } from "../../constants.js";
+import { getCustomRulesWithSandboxInstance } from "../../utils/custom-rules.js";
 import { withRetry } from "../../utils/retry.js";
 import {
   isLocalMode,
-  getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
+import { ISandbox, SandboxProviderType } from "../../utils/sandbox-provider/types.js";
+import { getBranch } from "../../utils/github/api.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -47,7 +46,12 @@ export async function initializeSandbox(
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
   const { sandboxSessionId, targetRepository, branchName } = state;
-  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+  
+  // Determine provider type for path resolution
+  const provider = getProvider();
+  const providerType = provider.name; // 'daytona' or 'e2b'
+  
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, providerType);
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
 
   const events: CustomNodeEvent[] = [];
@@ -127,6 +131,7 @@ export async function initializeSandbox(
     );
   }
 
+  // Resume existing sandbox flow
   if (sandboxSessionId) {
     const resumeSandboxActionId = uuidv4();
     const baseResumeSandboxAction: CustomNodeEvent = {
@@ -144,7 +149,10 @@ export async function initializeSandbox(
     emitStepEvent(baseResumeSandboxAction, "pending");
 
     try {
-      const existingSandbox = await daytonaClient().get(sandboxSessionId);
+      // Use provider abstraction to get sandbox - works with both Daytona and E2B
+      const provider = getProvider();
+      logger.info(`Resuming sandbox using provider: ${provider.name}`, { sandboxSessionId });
+      const existingSandboxInstance = await provider.get(sandboxSessionId);
       emitStepEvent(baseResumeSandboxAction, "success");
 
       const pullLatestChangesActionId = uuidv4();
@@ -162,18 +170,21 @@ export async function initializeSandbox(
       };
       emitStepEvent(basePullLatestChangesAction, "pending");
 
-      const pullChangesRes = await pullLatestChanges(
-        absoluteRepoDir,
-        existingSandbox,
-        {
-          githubInstallationToken,
-        },
-      );
-      if (!pullChangesRes) {
+      // Use ISandbox.git.pull() instead of pullLatestChanges() for provider abstraction
+      try {
+        await existingSandboxInstance.git.pull({
+          workdir: absoluteRepoDir,
+          username: "x-access-token",
+          token: githubInstallationToken,
+        });
+        emitStepEvent(basePullLatestChangesAction, "success");
+      } catch (pullError) {
+        logger.warn("Failed to pull latest changes", {
+          error: pullError instanceof Error ? pullError.message : String(pullError),
+        });
         emitStepEvent(basePullLatestChangesAction, "skipped");
         throw new Error("Failed to pull latest changes.");
       }
-      emitStepEvent(basePullLatestChangesAction, "success");
 
       const generateCodebaseTreeActionId = uuidv4();
       const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
@@ -190,7 +201,7 @@ export async function initializeSandbox(
       };
       emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
       try {
-        const codebaseTree = await getCodebaseTree(config, existingSandbox.id);
+        const codebaseTree = await getCodebaseTree(config, existingSandboxInstance.id);
         if (codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE) {
           emitStepEvent(
             baseGenerateCodebaseTreeAction,
@@ -205,12 +216,12 @@ export async function initializeSandbox(
         const userMessages = state.messages || [];
 
         return {
-          sandboxSessionId: existingSandbox.id,
+          sandboxSessionId: existingSandboxInstance.id,
           codebaseTree,
           messages: eventsMessages,
           internalMessages: [...userMessages, ...eventsMessages],
-          customRules: await getCustomRules(
-            existingSandbox,
+          customRules: await getCustomRulesWithSandboxInstance(
+            existingSandboxInstance,
             absoluteRepoDir,
             config,
           ),
@@ -225,12 +236,12 @@ export async function initializeSandbox(
         const userMessages = state.messages || [];
 
         return {
-          sandboxSessionId: existingSandbox.id,
+          sandboxSessionId: existingSandboxInstance.id,
           codebaseTree: FAILED_TO_GENERATE_TREE_MESSAGE,
           messages: eventsMessages,
           internalMessages: [...userMessages, ...eventsMessages],
-          customRules: await getCustomRules(
-            existingSandbox,
+          customRules: await getCustomRulesWithSandboxInstance(
+            existingSandboxInstance,
             absoluteRepoDir,
             config,
           ),
@@ -245,7 +256,7 @@ export async function initializeSandbox(
     }
   }
 
-  // Creating sandbox
+  // Creating new sandbox
   const createSandboxActionId = uuidv4();
   const baseCreateSandboxAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
@@ -261,9 +272,21 @@ export async function initializeSandbox(
   };
 
   emitStepEvent(baseCreateSandboxAction, "pending");
-  let sandbox: Sandbox;
+  let sandboxInstance: ISandbox;
   try {
-    sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS);
+    // Use provider abstraction to create sandbox - works with both Daytona and E2B
+    const provider = getProvider();
+    const providerType = provider.name === 'e2b' ? SandboxProviderType.E2B : SandboxProviderType.DAYTONA;
+    const template = getDefaultTemplate(providerType);
+    const user = getDefaultUser(providerType);
+    
+    logger.info(`Creating sandbox using provider: ${provider.name}`, { template, user });
+    sandboxInstance = await provider.create({
+      template,
+      user,
+      autoDeleteInterval: DEFAULT_SANDBOX_CREATE_PARAMS.autoDeleteInterval,
+    });
+    logger.info(`Sandbox created successfully via ${provider.name}`, { sandboxId: sandboxInstance.id });
     emitStepEvent(baseCreateSandboxAction, "success");
   } catch (e) {
     logger.error("Failed to create sandbox environment", { e });
@@ -275,7 +298,7 @@ export async function initializeSandbox(
     throw new Error("Failed to create sandbox environment.");
   }
 
-  // Cloning repository
+  // Cloning repository using ISandbox.git.clone()
   const cloneRepoActionId = uuidv4();
   const baseCloneRepoAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
@@ -284,20 +307,90 @@ export async function initializeSandbox(
     action: "Cloning repository",
     data: {
       status: "pending",
-      sandboxSessionId: sandbox.id,
+      sandboxSessionId: sandboxInstance.id,
       branch: branchName,
       repo: repoName,
     },
   };
   emitStepEvent(baseCloneRepoAction, "pending");
 
-  // Retry the clone command up to 3 times. Sometimes, it can timeout if the repo is large.
+  const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+  
+  // Check if branch exists on remote (same logic as original code)
+  const branchExists = branchName
+    ? !!(await getBranch({
+        owner: targetRepository.owner,
+        repo: targetRepository.repo,
+        branchName,
+        githubInstallationToken,
+      }))
+    : false;
+  
+  logger.info("Branch existence check", {
+    branchName,
+    branchExists,
+    baseBranch: targetRepository.branch,
+  });
+  
   const cloneRepoRes = await withRetry(
     async () => {
-      return await cloneRepo(sandbox, targetRepository, {
-        githubInstallationToken,
-        stateBranchName: branchName,
-      });
+      try {
+        // If branch exists on remote, clone it directly
+        // Otherwise, clone the base branch and create new branch locally
+        const branchToClone = branchExists ? branchName : targetRepository.branch;
+        
+        await sandboxInstance.git.clone({
+          url: cloneUrl,
+          targetDir: absoluteRepoDir,
+          branch: branchToClone,
+          commit: branchExists ? undefined : targetRepository.baseCommit,
+          username: "x-access-token", // GitHub requires x-access-token for installation tokens
+          token: githubInstallationToken,
+          // Pass base branch for reference (needed for git diff in E2B)
+          baseBranch: targetRepository.branch,
+        });
+        
+        // If branch didn't exist, create it locally and push
+        if (!branchExists && branchName && branchName !== targetRepository.branch) {
+          logger.info("Creating new branch from base", {
+            branchName,
+            baseBranch: targetRepository.branch,
+          });
+          
+          try {
+            await sandboxInstance.git.createBranch(absoluteRepoDir, branchName);
+            logger.info("Branch created locally", { branchName });
+          } catch (createError) {
+            logger.warn("Failed to create branch (may already exist locally)", {
+              branchName,
+              error: createError instanceof Error ? createError.message : String(createError),
+            });
+          }
+          
+          // Push to create branch on remote
+          try {
+            await sandboxInstance.git.push({
+              workdir: absoluteRepoDir,
+              username: "x-access-token",
+              token: githubInstallationToken,
+              branch: branchName,
+            });
+            logger.info("Pushed new branch to remote", { branchName });
+          } catch (pushError) {
+            logger.warn("Failed to push branch to remote", {
+              branchName,
+              error: pushError instanceof Error ? pushError.message : String(pushError),
+            });
+          }
+        }
+        
+        return branchName || targetRepository.branch;
+      } catch (error) {
+        logger.error("Clone repository failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     },
     { retries: 0, delay: 0 },
   );
@@ -336,7 +429,7 @@ export async function initializeSandbox(
     action: "Checking out branch",
     data: {
       status: "pending",
-      sandboxSessionId: sandbox.id,
+      sandboxSessionId: sandboxInstance.id,
       branch: newBranchName,
       repo: repoName,
     },
@@ -352,7 +445,7 @@ export async function initializeSandbox(
     action: "Generating codebase tree",
     data: {
       status: "pending",
-      sandboxSessionId: sandbox.id,
+      sandboxSessionId: sandboxInstance.id,
       branch: newBranchName,
       repo: repoName,
     },
@@ -360,7 +453,7 @@ export async function initializeSandbox(
   emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
   let codebaseTree: string | undefined;
   try {
-    codebaseTree = await getCodebaseTree(config, sandbox.id);
+    codebaseTree = await getCodebaseTree(config, sandboxInstance.id);
     emitStepEvent(baseGenerateCodebaseTreeAction, "success");
   } catch (_) {
     emitStepEvent(
@@ -374,13 +467,13 @@ export async function initializeSandbox(
   const userMessages = state.messages || [];
 
   return {
-    sandboxSessionId: sandbox.id,
+    sandboxSessionId: sandboxInstance.id,
     targetRepository,
     codebaseTree,
     messages: eventsMessages,
     internalMessages: [...userMessages, ...eventsMessages],
     dependenciesInstalled: false,
-    customRules: await getCustomRules(sandbox, absoluteRepoDir, config),
+    customRules: await getCustomRulesWithSandboxInstance(sandboxInstance, absoluteRepoDir, config),
     branchName: newBranchName,
   };
 }
@@ -400,7 +493,6 @@ async function initializeSandboxLocal(
   createEventsMessage: () => BaseMessage[],
 ): Promise<Partial<InitializeSandboxState>> {
   const { targetRepository, branchName } = state;
-  const absoluteRepoDir = getLocalWorkingDirectory(); // Use local working directory in local mode
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
 
   // Skip sandbox creation in local mode
@@ -495,7 +587,8 @@ async function initializeSandboxLocal(
     messages: eventsMessages,
     internalMessages: [...userMessages, ...eventsMessages],
     dependenciesInstalled: false,
-    customRules: await getCustomRules(null as any, absoluteRepoDir, config),
+    // In local mode, pass null for sandbox - getCustomRulesWithSandboxInstance handles this
+    customRules: undefined,
     branchName: branchName,
   };
 }

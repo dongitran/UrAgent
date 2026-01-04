@@ -11,6 +11,7 @@ import { join, isAbsolute } from "path";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
 import { v4 as uuidv4 } from "uuid";
+import { ISandbox } from "./sandbox-provider/types.js";
 
 const logger = createLogger(LogLevel.DEBUG, "ReadWriteUtil");
 
@@ -418,3 +419,224 @@ async function handleCreateFileLocal(
     };
   }
 }
+
+
+// ============================================================================
+// ISandbox-compatible functions (Provider-agnostic)
+// These functions work with both Daytona and E2B providers
+// ============================================================================
+
+/**
+ * Read file using ISandbox interface (provider-agnostic)
+ */
+async function readFileFuncWithInstance(inputs: {
+  sandboxInstance: ISandbox;
+  filePath: string;
+  workDir?: string;
+  config: GraphConfig;
+}): Promise<{
+  success: boolean;
+  output: string;
+}> {
+  const { sandboxInstance, filePath, workDir, config } = inputs;
+
+  logger.debug("[SANDBOX] readFileWithInstance called", {
+    sandboxId: sandboxInstance.id,
+    sandboxState: sandboxInstance.state,
+    filePath,
+    workDir,
+    isLocalMode: isLocalMode(config),
+  });
+
+  if (isLocalMode(config)) {
+    return readFileLocal(filePath, workDir);
+  }
+
+  const executor = createShellExecutor(config);
+
+  try {
+    const command = `cat "${filePath}"`;
+    logger.debug("[SANDBOX] Executing read file command", {
+      sandboxId: sandboxInstance.id,
+      command,
+      workDir,
+    });
+
+    const startTime = Date.now();
+    const readOutput = await executor.executeCommand({
+      command,
+      workdir: workDir,
+      sandboxInstance,
+    });
+    const duration = Date.now() - startTime;
+
+    logger.debug("[SANDBOX] Read file response", {
+      sandboxId: sandboxInstance.id,
+      filePath,
+      durationMs: duration,
+      exitCode: readOutput.exitCode,
+      resultLength: readOutput.result?.length ?? 0,
+    });
+
+    if (readOutput.exitCode !== 0) {
+      const errorResult = readOutput.result ?? readOutput.artifacts?.stdout;
+      const fullPath = workDir ? `${workDir}/${filePath}` : filePath;
+      logger.warn("[SANDBOX] Read file failed", {
+        sandboxId: sandboxInstance.id,
+        filePath,
+        workDir,
+        fullPath,
+        exitCode: readOutput.exitCode,
+      });
+      return {
+        success: false,
+        output: `FAILED TO READ FILE from sandbox '${filePath}' (full path: ${fullPath}). Exit code: ${readOutput.exitCode}.\nResult: ${errorResult}`,
+      };
+    }
+
+    return {
+      success: true,
+      output: readOutput.result,
+    };
+  } catch (e: any) {
+    logger.error(
+      `[SANDBOX] Exception while trying to read file '${filePath}':`,
+      {
+        sandboxId: sandboxInstance.id,
+        ...(e instanceof Error
+          ? { name: e.name, message: e.message }
+          : { error: e }),
+      },
+    );
+
+    let outputMessage = `FAILED TO EXECUTE READ COMMAND for sandbox '${filePath}'.`;
+    const errorFields = getSandboxErrorFields(e);
+    if (errorFields) {
+      const errorResult = errorFields.result ?? errorFields.artifacts?.stdout;
+      outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorResult}`;
+    } else {
+      outputMessage += ` Error: ${(e as Error).message || String(e)}`;
+    }
+
+    return {
+      success: false,
+      output: outputMessage,
+    };
+  }
+}
+
+export const readFileWithInstance = traceable(readFileFuncWithInstance, {
+  name: "read_file_with_instance",
+  processInputs: (inputs) => {
+    const { sandboxInstance: _sandboxInstance, config: _config, ...rest } = inputs;
+    return rest;
+  },
+});
+
+/**
+ * Write file using ISandbox interface (provider-agnostic)
+ */
+async function writeFileFuncWithInstance(inputs: {
+  sandboxInstance: ISandbox;
+  filePath: string;
+  content: string;
+  workDir?: string;
+  config?: GraphConfig;
+}): Promise<{
+  success: boolean;
+  output: string;
+}> {
+  const { sandboxInstance, filePath, content, workDir, config } = inputs;
+
+  logger.debug("[SANDBOX] writeFileWithInstance called", {
+    sandboxId: sandboxInstance.id,
+    sandboxState: sandboxInstance.state,
+    filePath,
+    contentLength: content?.length ?? 0,
+    workDir,
+    isLocalMode: config ? isLocalMode(config) : false,
+  });
+
+  if (config && isLocalMode(config)) {
+    return writeFileLocal(filePath, content, workDir);
+  }
+
+  try {
+    const delimiter = `EOF_${uuidv4()}`;
+    const writeCommand = `cat > "${filePath}" << '${delimiter}'
+${content}
+${delimiter}`;
+
+    logger.debug("[SANDBOX] Executing write file command", {
+      sandboxId: sandboxInstance.id,
+      filePath,
+      contentLength: content.length,
+      workDir,
+    });
+
+    const executor = createShellExecutor(config);
+    const startTime = Date.now();
+    const writeOutput = await executor.executeCommand({
+      command: writeCommand,
+      workdir: workDir,
+      sandboxInstance,
+    });
+    const duration = Date.now() - startTime;
+
+    logger.debug("[SANDBOX] Write file response", {
+      sandboxId: sandboxInstance.id,
+      filePath,
+      durationMs: duration,
+      exitCode: writeOutput.exitCode,
+    });
+
+    if (writeOutput.exitCode !== 0) {
+      const errorResult = writeOutput.result ?? writeOutput.artifacts?.stdout;
+      logger.error("[SANDBOX] Write file failed", {
+        sandboxId: sandboxInstance.id,
+        filePath,
+        exitCode: writeOutput.exitCode,
+      });
+      return {
+        success: false,
+        output: `FAILED TO WRITE FILE to sandbox '${filePath}'. Exit code: ${writeOutput.exitCode}\nResult: ${errorResult}`,
+      };
+    }
+    return {
+      success: true,
+      output: `Successfully wrote file '${filePath}' to sandbox.`,
+    };
+  } catch (e: any) {
+    logger.error(
+      `[SANDBOX] Exception while trying to write file '${filePath}':`,
+      {
+        sandboxId: sandboxInstance.id,
+        ...(e instanceof Error
+          ? { name: e.name, message: e.message }
+          : { error: e }),
+      },
+    );
+
+    let outputMessage = `FAILED TO EXECUTE WRITE COMMAND for sandbox '${filePath}'.`;
+    const errorFields = getSandboxErrorFields(e);
+    if (errorFields) {
+      const errorResult = errorFields.result ?? errorFields.artifacts?.stdout;
+      outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorResult}`;
+    } else {
+      outputMessage += ` Error: ${(e as Error).message || String(e)}`;
+    }
+
+    return {
+      success: false,
+      output: outputMessage,
+    };
+  }
+}
+
+export const writeFileWithInstance = traceable(writeFileFuncWithInstance, {
+  name: "write_file_with_instance",
+  processInputs: (inputs) => {
+    const { sandboxInstance: _sandboxInstance, config: _config, ...rest } = inputs;
+    return rest;
+  },
+});

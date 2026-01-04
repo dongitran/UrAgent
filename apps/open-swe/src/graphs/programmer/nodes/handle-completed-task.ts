@@ -27,10 +27,10 @@ import {
 } from "../../../utils/tokens.js";
 import { z } from "zod";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import {
-  checkoutBranchAndCommit,
-  getChangedFilesStatus,
+  checkoutBranchAndCommitWithInstance,
+  getChangedFilesStatusWithInstance,
 } from "../../../utils/github/git.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
@@ -95,7 +95,7 @@ export async function handleCompletedTask(
   let updatedTaskPlanFromCommit: TaskPlan | undefined;
 
   if (!isLocalMode(config)) {
-    const { sandbox } = await getSandboxWithErrorHandling(
+    const { sandboxInstance } = await getSandboxInstanceWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
@@ -103,7 +103,7 @@ export async function handleCompletedTask(
     );
 
     const repoPath = getRepoAbsolutePath(state.targetRepository);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+    const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
 
     logger.info("=== HANDLE COMPLETED TASK - CHECKING FOR COMMITS ===", {
       changedFilesCount: changedFiles.length,
@@ -124,10 +124,10 @@ export async function handleCompletedTask(
 
       const { githubInstallationToken } =
         await getGitHubTokensFromConfig(config);
-      const result = await checkoutBranchAndCommit(
+      const result = await checkoutBranchAndCommitWithInstance(
         config,
         state.targetRepository,
-        sandbox,
+        sandboxInstance,
         {
           branchName,
           githubInstallationToken,

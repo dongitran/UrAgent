@@ -1,6 +1,7 @@
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
+import { ISandbox } from "./sandbox-provider/types.js";
 
 const logger = createLogger(LogLevel.DEBUG, "EnvSetup");
 
@@ -266,3 +267,196 @@ export const ENV_CONSTANTS = {
   RUN_PYTHON_IN_VENV,
   RUN_PIP_IN_VENV,
 };
+
+
+// ============================================================================
+// ISandbox-compatible functions (Provider-agnostic)
+// These functions work with both Daytona and E2B providers
+// ============================================================================
+
+/**
+ * Execute command with retry logic using ISandbox interface
+ */
+async function executeWithRetryInstance(
+  sandboxInstance: ISandbox,
+  command: string,
+  workdir: string,
+  timeout: number,
+): Promise<{ exitCode: number; result: string }> {
+  // ISandbox.executeCommand already has retry logic built-in
+  const response = await sandboxInstance.executeCommand({
+    command,
+    workdir,
+    timeout,
+  });
+  return response;
+}
+
+/**
+ * Setup Python environment with requirements.txt + ruff + mypy
+ * Provider-agnostic version using ISandbox interface
+ */
+export async function setupEnvWithInstance(
+  sandboxInstance: ISandbox,
+  absoluteRepoDir: string,
+): Promise<boolean> {
+  logger.info("[SANDBOX] Setting up Python environment...", {
+    sandboxId: sandboxInstance.id,
+    sandboxState: sandboxInstance.state,
+    absoluteRepoDir,
+  });
+
+  const createVenvCommand = "python -m venv .venv";
+  logger.debug("[SANDBOX] Creating virtual environment", {
+    sandboxId: sandboxInstance.id,
+    command: createVenvCommand,
+    workdir: absoluteRepoDir,
+  });
+
+  const startTime = Date.now();
+  const createVenvRes = await executeWithRetryInstance(
+    sandboxInstance,
+    createVenvCommand,
+    absoluteRepoDir,
+    TIMEOUT_SEC,
+  );
+
+  logger.debug("[SANDBOX] Create venv response", {
+    sandboxId: sandboxInstance.id,
+    command: createVenvCommand,
+    durationMs: Date.now() - startTime,
+    exitCode: createVenvRes.exitCode,
+    result: createVenvRes.result?.substring(0, 500),
+  });
+
+  if (createVenvRes.exitCode !== 0) {
+    logger.error("[SANDBOX] Failed to create virtual environment", {
+      sandboxId: sandboxInstance.id,
+      createVenvCommand,
+      createVenvRes: JSON.stringify(createVenvRes),
+    });
+    return false;
+  }
+
+  const upgradePipCommand = `${RUN_PIP_IN_VENV} install --upgrade pip`;
+  logger.debug("[SANDBOX] Upgrading pip", {
+    sandboxId: sandboxInstance.id,
+    command: upgradePipCommand,
+  });
+
+  const upgradePipStartTime = Date.now();
+  const upgradePipRes = await executeWithRetryInstance(
+    sandboxInstance,
+    upgradePipCommand,
+    absoluteRepoDir,
+    TIMEOUT_SEC,
+  );
+
+  logger.debug("[SANDBOX] Upgrade pip response", {
+    sandboxId: sandboxInstance.id,
+    durationMs: Date.now() - upgradePipStartTime,
+    exitCode: upgradePipRes.exitCode,
+    result: upgradePipRes.result?.substring(0, 500),
+  });
+
+  if (upgradePipRes.exitCode !== 0) {
+    logger.warn("[SANDBOX] Failed to upgrade pip, continuing anyway", {
+      sandboxId: sandboxInstance.id,
+      upgradePipRes: JSON.stringify(upgradePipRes),
+    });
+  }
+
+  const checkRequirementsCommand = "test -f requirements.txt";
+  logger.debug("[SANDBOX] Checking for requirements.txt", {
+    sandboxId: sandboxInstance.id,
+    command: checkRequirementsCommand,
+  });
+
+  const requirementsExistRes = await executeWithRetryInstance(
+    sandboxInstance,
+    checkRequirementsCommand,
+    absoluteRepoDir,
+    TIMEOUT_SEC,
+  );
+
+  logger.debug("[SANDBOX] Requirements.txt check response", {
+    sandboxId: sandboxInstance.id,
+    exitCode: requirementsExistRes.exitCode,
+    exists: requirementsExistRes.exitCode === 0,
+  });
+
+  if (requirementsExistRes.exitCode === 0) {
+    logger.info("[SANDBOX] Found requirements.txt, installing...", {
+      sandboxId: sandboxInstance.id,
+    });
+
+    const installReqCommand = `${RUN_PIP_IN_VENV} install -r requirements.txt`;
+    const installReqStartTime = Date.now();
+    const installReqRes = await executeWithRetryInstance(
+      sandboxInstance,
+      installReqCommand,
+      absoluteRepoDir,
+      TIMEOUT_SEC * 3,
+    );
+
+    logger.debug("[SANDBOX] Install requirements response", {
+      sandboxId: sandboxInstance.id,
+      command: installReqCommand,
+      durationMs: Date.now() - installReqStartTime,
+      exitCode: installReqRes.exitCode,
+      resultLength: installReqRes.result?.length,
+      resultPreview: installReqRes.result?.substring(0, 500),
+    });
+
+    if (installReqRes.exitCode !== 0) {
+      logger.warn(
+        "[SANDBOX] Failed to install requirements.txt, continuing anyway",
+        {
+          sandboxId: sandboxInstance.id,
+          installReqRes: JSON.stringify(installReqRes).substring(0, 1000),
+        },
+      );
+    }
+  } else {
+    logger.info(
+      "[SANDBOX] No requirements.txt found, skipping repository dependencies",
+      {
+        sandboxId: sandboxInstance.id,
+      },
+    );
+  }
+
+  const installToolsCommand = `${RUN_PIP_IN_VENV} install ruff mypy`;
+  logger.debug("[SANDBOX] Installing analysis tools (ruff, mypy)", {
+    sandboxId: sandboxInstance.id,
+    command: installToolsCommand,
+  });
+
+  const installToolsStartTime = Date.now();
+  const installAnalysisToolsRes = await executeWithRetryInstance(
+    sandboxInstance,
+    installToolsCommand,
+    absoluteRepoDir,
+    TIMEOUT_SEC,
+  );
+
+  logger.debug("[SANDBOX] Install analysis tools response", {
+    sandboxId: sandboxInstance.id,
+    durationMs: Date.now() - installToolsStartTime,
+    exitCode: installAnalysisToolsRes.exitCode,
+    result: installAnalysisToolsRes.result?.substring(0, 500),
+  });
+
+  if (installAnalysisToolsRes.exitCode !== 0) {
+    logger.error("[SANDBOX] Failed to install ruff and mypy", {
+      sandboxId: sandboxInstance.id,
+      installAnalysisToolsRes: JSON.stringify(installAnalysisToolsRes),
+    });
+    return false;
+  }
+
+  logger.info("[SANDBOX] Environment setup completed successfully", {
+    sandboxId: sandboxInstance.id,
+  });
+  return true;
+}

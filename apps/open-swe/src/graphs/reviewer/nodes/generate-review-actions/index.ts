@@ -45,6 +45,15 @@ import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
+// Debug logging controlled by GEMINI_DEBUG env var
+const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+
+function debugLog(message: string, data?: Record<string, unknown>): void {
+  if (GEMINI_DEBUG) {
+    logger.debug(message, data);
+  }
+}
+
 function formatSystemPrompt(
   state: ReviewerGraphState,
   config: GraphConfig,
@@ -203,7 +212,7 @@ function createToolsAndPrompt(
     ...state.reviewerMessages,
   ];
 
-  logger.error("[Gemini Debug] Reviewer message structure prepared", {
+  debugLog("[Gemini Debug] Reviewer message structure prepared", {
     totalReviewerMessages: state.reviewerMessages.length,
     reviewerMessageTypes: state.reviewerMessages.map((m: any) => ({
       type: m.constructor.name,
@@ -240,7 +249,7 @@ export async function generateReviewActions(
   const isAnthropicModel = modelName.includes("claude-");
   const isGeminiModel = modelName.includes("gemini");
 
-  logger.error("[Gemini Debug] Reviewer model detection", {
+  debugLog("[Gemini Debug] Reviewer model detection", {
     modelName,
     isAnthropicModel,
     isGeminiModel,
@@ -282,7 +291,7 @@ export async function generateReviewActions(
   // FallbackRunnable will use providerMessages to select the correct messages for each provider
   const baseMessagesForFallback = providerMessages.anthropic;
 
-  logger.error("[Gemini Debug] Reviewer final messages", {
+  debugLog("[Gemini Debug] Reviewer final messages", {
     messageCount: messagesToUse.length,
     baseMessagesCount: baseMessagesForFallback.length,
     willUseProviderMessages: true,

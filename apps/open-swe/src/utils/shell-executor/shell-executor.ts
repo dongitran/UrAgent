@@ -8,7 +8,8 @@ import {
 import { getLocalShellExecutor } from "./local-shell-executor.js";
 import { createLogger, LogLevel } from "../logger.js";
 import { ExecuteCommandOptions, LocalExecuteResponse } from "./types.js";
-import { getSandboxSessionOrThrow } from "../../tools/utils/get-sandbox-id.js";
+import { getSandboxInstanceOrThrow } from "../../tools/utils/get-sandbox-id.js";
+import { ISandbox } from "../sandbox-provider/types.js";
 
 const logger = createLogger(LogLevel.DEBUG, "ShellExecutor");
 
@@ -89,6 +90,7 @@ export class ShellExecutor {
       env = {},
       timeout = TIMEOUT_SEC,
       sandbox,
+      sandboxInstance,
       sandboxSessionId,
     } = options;
 
@@ -104,12 +106,14 @@ export class ShellExecutor {
     if (isLocalMode(this.config)) {
       return this.executeLocal(commandString, workdir, environment, timeout);
     } else {
+      // Prefer sandboxInstance (new provider abstraction) over sandbox (legacy Daytona)
       return this.executeSandbox(
         commandString,
         workdir,
         environment,
         timeout,
         sandbox,
+        sandboxInstance,
         sandboxSessionId,
       );
     }
@@ -137,6 +141,7 @@ export class ShellExecutor {
 
   /**
    * Execute command in sandbox with retry logic for transient errors
+   * Supports both legacy Daytona Sandbox and new ISandbox provider abstraction
    */
   private async executeSandbox(
     command: string,
@@ -144,20 +149,62 @@ export class ShellExecutor {
     env?: Record<string, string>,
     timeout?: number,
     sandbox?: Sandbox,
+    sandboxInstance?: ISandbox,
     sandboxSessionId?: string,
   ): Promise<LocalExecuteResponse> {
-    const sandbox_ =
-      sandbox ??
-      (await getSandboxSessionOrThrow({
-        xSandboxSessionId: sandboxSessionId,
-      }));
+    // If sandboxInstance (new provider abstraction) is provided, use it
+    if (sandboxInstance) {
+      return this.executeSandboxWithProvider(
+        sandboxInstance,
+        command,
+        workdir,
+        env,
+        timeout,
+      );
+    }
 
+    // If legacy Daytona sandbox is provided, use it
+    if (sandbox) {
+      return this.executeLegacyDaytonaSandbox(
+        sandbox,
+        command,
+        workdir,
+        env,
+        timeout,
+      );
+    }
+
+    // Otherwise, use provider abstraction to get sandbox
+    const sandboxInstance_ = await getSandboxInstanceOrThrow({
+      xSandboxSessionId: sandboxSessionId,
+    });
+
+    return this.executeSandboxWithProvider(
+      sandboxInstance_,
+      command,
+      workdir,
+      env,
+      timeout,
+    );
+  }
+
+  /**
+   * Execute command using legacy Daytona Sandbox (for backward compatibility)
+   * @deprecated Use executeSandboxWithProvider instead
+   */
+  private async executeLegacyDaytonaSandbox(
+    sandbox: Sandbox,
+    command: string,
+    workdir?: string,
+    env?: Record<string, string>,
+    timeout?: number,
+  ): Promise<LocalExecuteResponse> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < SANDBOX_MAX_RETRIES; attempt++) {
       logger.debug("[DAYTONA] Executing command in sandbox", {
-        sandboxId: sandbox_.id,
-        sandboxState: sandbox_.state,
+        sandboxId: sandbox.id,
+        sandboxState: sandbox.state,
         command:
           command.length > 500 ? command.substring(0, 500) + "..." : command,
         workdir,
@@ -170,7 +217,7 @@ export class ShellExecutor {
 
       const startTime = Date.now();
       try {
-        const response = await sandbox_.process.executeCommand(
+        const response = await sandbox.process.executeCommand(
           command,
           workdir,
           env,
@@ -179,7 +226,7 @@ export class ShellExecutor {
         const duration = Date.now() - startTime;
 
         logger.debug("[DAYTONA] Command execution completed", {
-          sandboxId: sandbox_.id,
+          sandboxId: sandbox.id,
           command:
             command.length > 200 ? command.substring(0, 200) + "..." : command,
           workdir,
@@ -209,8 +256,8 @@ export class ShellExecutor {
           logger.error(
             "[DAYTONA] Command returned exit code -1 (sandbox issue)",
             {
-              sandboxId: sandbox_.id,
-              sandboxState: sandbox_.state,
+              sandboxId: sandbox.id,
+              sandboxState: sandbox.state,
               command:
                 command.length > 500
                   ? command.substring(0, 500) + "..."
@@ -234,8 +281,8 @@ export class ShellExecutor {
         if (shouldRetry) {
           const delay = SANDBOX_RETRY_DELAY_MS * Math.pow(2, attempt); // Exponential backoff: 10s, 20s, 40s, 80s, 160s
           logger.warn("[DAYTONA] Command execution failed, will retry", {
-            sandboxId: sandbox_.id,
-            sandboxState: sandbox_.state,
+            sandboxId: sandbox.id,
+            sandboxState: sandbox.state,
             command:
               command.length > 500 ? command.substring(0, 500) + "..." : command,
             workdir,
@@ -254,8 +301,8 @@ export class ShellExecutor {
         }
 
         logger.error("[DAYTONA] Command execution threw exception", {
-          sandboxId: sandbox_.id,
-          sandboxState: sandbox_.state,
+          sandboxId: sandbox.id,
+          sandboxState: sandbox.state,
           command:
             command.length > 500 ? command.substring(0, 500) + "..." : command,
           workdir,
@@ -278,7 +325,64 @@ export class ShellExecutor {
     }
 
     // Should not reach here, but just in case
-    throw lastError ?? new Error("Unknown error in executeSandbox");
+    throw lastError ?? new Error("Unknown error in executeLegacyDaytonaSandbox");
+  }
+
+  /**
+   * Execute command using the new provider abstraction (ISandbox)
+   * This method has built-in retry logic in the provider
+   */
+  private async executeSandboxWithProvider(
+    sandboxInstance: ISandbox,
+    command: string,
+    workdir?: string,
+    env?: Record<string, string>,
+    timeout?: number,
+  ): Promise<LocalExecuteResponse> {
+    logger.debug("[SANDBOX] Executing command via provider", {
+      sandboxId: sandboxInstance.id,
+      sandboxState: sandboxInstance.state,
+      command: command.length > 500 ? command.substring(0, 500) + "..." : command,
+      workdir,
+      timeout,
+      envKeys: env ? Object.keys(env) : [],
+    });
+
+    const startTime = Date.now();
+    try {
+      const result = await sandboxInstance.executeCommand({
+        command,
+        workdir,
+        env,
+        timeout,
+      });
+
+      const duration = Date.now() - startTime;
+      logger.debug("[SANDBOX] Command execution completed via provider", {
+        sandboxId: sandboxInstance.id,
+        command: command.length > 200 ? command.substring(0, 200) + "..." : command,
+        durationMs: duration,
+        exitCode: result.exitCode,
+        resultLength: result.result?.length ?? 0,
+      });
+
+      return {
+        exitCode: result.exitCode,
+        result: result.result,
+        artifacts: result.artifacts,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      logger.error("[SANDBOX] Command execution failed via provider", {
+        sandboxId: sandboxInstance.id,
+        command: command.length > 500 ? command.substring(0, 500) + "..." : command,
+        durationMs: duration,
+        error: error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack }
+          : error,
+      });
+      throw error;
+    }
   }
 
   /**

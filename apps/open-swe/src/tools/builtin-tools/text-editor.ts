@@ -3,13 +3,13 @@ import { tool } from "@langchain/core/tools";
 import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
-import { getSandboxSessionOrThrow } from "../utils/get-sandbox-id.js";
+import { getSandboxInstanceOrThrow } from "../utils/get-sandbox-id.js";
 import { createTextEditorToolFields } from "@openswe/shared/open-swe/tools";
 import {
-  handleViewCommand,
-  handleStrReplaceCommand,
-  handleCreateCommand,
-  handleInsertCommand,
+  handleViewCommandWithInstance,
+  handleStrReplaceCommandWithInstance,
+  handleCreateCommandWithInstance,
+  handleInsertCommandWithInstance,
 } from "./handlers.js";
 import {
   isLocalMode,
@@ -47,14 +47,20 @@ export function createTextEditorTool(
           // Local mode: use LocalShellExecutor for file operations
           const executor = getLocalShellExecutor(localAbsolutePath);
 
-          // Convert sandbox path to local path
+          // Convert sandbox path to local path - handle both Daytona and E2B paths
           let localPath = path;
           if (path.startsWith("/home/daytona/project/")) {
-            // Remove the sandbox prefix to get the relative path
+            // Remove the Daytona sandbox prefix to get the relative path
             localPath = path.replace("/home/daytona/project/", "");
           } else if (path.startsWith("/home/daytona/local/")) {
-            // Remove the local sandbox prefix to get the relative path
+            // Remove the Daytona local sandbox prefix to get the relative path
             localPath = path.replace("/home/daytona/local/", "");
+          } else if (path.startsWith("/home/daytona/")) {
+            // Remove generic Daytona prefix
+            localPath = path.replace("/home/daytona/", "");
+          } else if (path.startsWith("/home/user/")) {
+            // Remove E2B sandbox prefix to get the relative path
+            localPath = path.replace("/home/user/", "");
           }
           const filePath = join(workDir, localPath);
 
@@ -164,12 +170,12 @@ export function createTextEditorTool(
               throw new Error(`Unknown command: ${command}`);
           }
         } else {
-          // Sandbox mode: use existing handler
-          const sandbox = await getSandboxSessionOrThrow(input);
+          // Sandbox mode: use provider-agnostic handler with ISandbox
+          const sandboxInstance = await getSandboxInstanceOrThrow(input);
 
           switch (command) {
             case "view":
-              result = await handleViewCommand(sandbox, config, {
+              result = await handleViewCommandWithInstance(sandboxInstance, config, {
                 path,
                 workDir,
                 viewRange: view_range,
@@ -181,7 +187,7 @@ export function createTextEditorTool(
                   "str_replace command requires both old_str and new_str parameters",
                 );
               }
-              result = await handleStrReplaceCommand(sandbox, config, {
+              result = await handleStrReplaceCommandWithInstance(sandboxInstance, config, {
                 path,
                 workDir,
                 oldStr: old_str,
@@ -192,7 +198,7 @@ export function createTextEditorTool(
               if (!file_text) {
                 throw new Error("create command requires file_text parameter");
               }
-              result = await handleCreateCommand(sandbox, config, {
+              result = await handleCreateCommandWithInstance(sandboxInstance, config, {
                 path,
                 workDir,
                 fileText: file_text,
@@ -204,7 +210,7 @@ export function createTextEditorTool(
                   "insert command requires both insert_line and new_str parameters",
                 );
               }
-              result = await handleInsertCommand(sandbox, config, {
+              result = await handleInsertCommandWithInstance(sandboxInstance, config, {
                 path,
                 workDir,
                 insertLine: insert_line,

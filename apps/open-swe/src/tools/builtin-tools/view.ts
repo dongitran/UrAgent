@@ -3,9 +3,9 @@ import { tool } from "@langchain/core/tools";
 import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
-import { getSandboxSessionOrThrow } from "../utils/get-sandbox-id.js";
+import { getSandboxInstanceOrThrow } from "../utils/get-sandbox-id.js";
 import { createViewToolFields } from "@openswe/shared/open-swe/tools";
-import { handleViewCommand } from "./handlers.js";
+import { handleViewCommandWithInstance } from "./handlers.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
@@ -72,9 +72,14 @@ export function createViewTool(
         if (isLocalMode(config)) {
           const executor = createShellExecutor(config);
 
+          // Convert sandbox path to local path - handle both Daytona and E2B paths
           let localPath = normalizedPath;
           if (normalizedPath.startsWith("/home/daytona/project/")) {
             localPath = normalizedPath.replace("/home/daytona/project/", "");
+          } else if (normalizedPath.startsWith("/home/daytona/")) {
+            localPath = normalizedPath.replace("/home/daytona/", "");
+          } else if (normalizedPath.startsWith("/home/user/")) {
+            localPath = normalizedPath.replace("/home/user/", "");
           }
           const filePath = join(workDir, localPath);
 
@@ -90,8 +95,8 @@ export function createViewTool(
 
           result = response.result;
         } else {
-          const sandbox = await getSandboxSessionOrThrow(input);
-          result = await handleViewCommand(sandbox, config, {
+          const sandboxInstance = await getSandboxInstanceOrThrow(input);
+          result = await handleViewCommandWithInstance(sandboxInstance, config, {
             path: normalizedPath,
             workDir,
             viewRange: view_range as [number, number] | undefined,
