@@ -4,8 +4,6 @@
  */
 
 export async function register() {
-  console.log(`[Instrumentation] register() called, runtime: ${process.env.NEXT_RUNTIME}`);
-  
   // Only run on server side
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // Start token pre-warming and refresh scheduler
