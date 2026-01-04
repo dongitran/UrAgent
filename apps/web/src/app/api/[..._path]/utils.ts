@@ -10,11 +10,103 @@ import {
   decodeKeycloakToken,
   refreshAccessToken,
 } from "@/lib/keycloak";
-import { verifyGithubUser } from "@openswe/shared/github/verify-user";
+import { verifyGithubUser, GithubUser } from "@openswe/shared/github/verify-user";
 import { fetchWithRetry } from "@openswe/shared/utils/fetch-with-retry";
 
 // Header name for refreshed token from middleware
 const REFRESHED_TOKEN_HEADER = "x-keycloak-refreshed-token";
+
+// ============================================
+// CACHING FOR PERFORMANCE OPTIMIZATION
+// ============================================
+
+// Cache for installation names (refresh every 25 minutes)
+const installationNameCache = new Map<string, { name: string; expiresAt: number }>();
+const INSTALLATION_NAME_CACHE_TTL_MS = 25 * 60 * 1000; // 25 minutes
+
+// Cache for GitHub user verification (cache for 5 minutes)
+const githubUserCache = new Map<string, { user: GithubUser | null; expiresAt: number }>();
+const GITHUB_USER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Track in-flight requests to prevent duplicate API calls
+const pendingInstallationNameRequests = new Map<string, Promise<string>>();
+const pendingGithubUserRequests = new Map<string, Promise<GithubUser | undefined>>();
+
+// Background refresh scheduler for installation name
+let installationNameRefreshInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Get cached installation name or fetch from API
+ */
+async function getCachedInstallationName(installationId: string): Promise<string> {
+  // Check cache first
+  const cached = installationNameCache.get(installationId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.name;
+  }
+
+  // Check if there's already a pending request
+  const pendingRequest = pendingInstallationNameRequests.get(installationId);
+  if (pendingRequest) {
+    return pendingRequest;
+  }
+
+  // Create new request
+  const requestPromise = getInstallationName(installationId);
+  pendingInstallationNameRequests.set(installationId, requestPromise);
+
+  try {
+    const name = await requestPromise;
+    
+    // Cache the result
+    installationNameCache.set(installationId, {
+      name,
+      expiresAt: Date.now() + INSTALLATION_NAME_CACHE_TTL_MS,
+    });
+
+    return name;
+  } finally {
+    pendingInstallationNameRequests.delete(installationId);
+  }
+}
+
+/**
+ * Get cached GitHub user or verify from API
+ */
+async function getCachedGithubUser(accessToken: string): Promise<GithubUser | undefined> {
+  // Use first 32 chars of token as cache key (safe enough for deduplication)
+  const cacheKey = accessToken.substring(0, 32);
+
+  // Check cache first
+  const cached = githubUserCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.user || undefined;
+  }
+
+  // Check if there's already a pending request
+  const pendingRequest = pendingGithubUserRequests.get(cacheKey);
+  if (pendingRequest) {
+    return pendingRequest;
+  }
+
+  // Create new request
+  const requestPromise = verifyGithubUser(accessToken);
+  pendingGithubUserRequests.set(cacheKey, requestPromise);
+
+  try {
+    const user = await requestPromise;
+    
+    // Cache the result
+    githubUserCache.set(cacheKey, {
+      user: user || null,
+      expiresAt: Date.now() + GITHUB_USER_CACHE_TTL_MS,
+    });
+
+    return user;
+  } finally {
+    pendingGithubUserRequests.delete(cacheKey);
+  }
+}
 
 /**
  * Get Keycloak access token from request
@@ -206,7 +298,7 @@ export async function verifyRequestAuth(req: NextRequest): Promise<AuthResult> {
   const githubToken = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
   if (githubToken) {
     try {
-      const user = await verifyGithubUser(githubToken);
+      const user = await getCachedGithubUser(githubToken);
       if (user) {
         return {
           authenticated: true,
@@ -323,6 +415,7 @@ export async function getInstallationNameFromReq(
   req: Request,
   installationId: string,
 ): Promise<string> {
+  // First, try to get from request body (fastest)
   try {
     const reqCopy = req.clone();
     const requestJson = await reqCopy.json();
@@ -334,10 +427,72 @@ export async function getInstallationNameFromReq(
     // no-op
   }
 
+  // Check if we have default installation name in env (avoid API call)
+  const defaultInstallationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
+  const defaultInstallationName = process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
+  if (defaultInstallationId === installationId && defaultInstallationName) {
+    return defaultInstallationName;
+  }
+
+  // Fall back to cached API call
   try {
-    return await getInstallationName(installationId);
+    return await getCachedInstallationName(installationId);
   } catch (error) {
     console.error("Failed to get installation name:", error);
     return "";
+  }
+}
+
+// ============================================
+// WARMUP AND BACKGROUND REFRESH
+// ============================================
+
+/**
+ * Pre-warm installation name cache for known installation ID from environment
+ */
+export async function warmupInstallationNameCache(): Promise<boolean> {
+  const installationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
+  
+  if (!installationId) {
+    return false;
+  }
+
+  try {
+    const name = await getCachedInstallationName(installationId);
+    console.log(`[Warmup] Installation name: ${name}`);
+    return true;
+  } catch (error) {
+    console.error("[Warmup] Installation name failed:", error);
+    return false;
+  }
+}
+
+/**
+ * Start background refresh scheduler for installation name
+ * Refreshes every 25 minutes
+ */
+export function startInstallationNameRefreshScheduler(): void {
+  if (installationNameRefreshInterval) {
+    return; // Already running
+  }
+
+  const REFRESH_INTERVAL_MS = 25 * 60 * 1000; // 25 minutes
+
+  // Warm up immediately on start
+  warmupInstallationNameCache();
+
+  // Schedule periodic refresh
+  installationNameRefreshInterval = setInterval(() => {
+    warmupInstallationNameCache();
+  }, REFRESH_INTERVAL_MS);
+
+  console.log("[Scheduler] Installation name refresh started (25min interval)");
+}
+
+export function stopInstallationNameRefreshScheduler(): void {
+  if (installationNameRefreshInterval) {
+    clearInterval(installationNameRefreshInterval);
+    installationNameRefreshInterval = null;
+    console.log("[Scheduler] Installation name refresh stopped");
   }
 }

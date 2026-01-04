@@ -145,16 +145,15 @@ export async function warmupTokenCache(): Promise<boolean> {
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
   if (!installationId || !appId || !privateKey) {
-    console.log("[Token Warmup] Skipped - missing env vars");
     return false;
   }
 
   try {
-    await getInstallationToken(installationId, appId, privateKey);
-    console.log(`[Token Warmup] Success - installation ${installationId}`);
+    const token = await getInstallationToken(installationId, appId, privateKey);
+    console.log(`[Warmup] Token: ${token.substring(0, 8)}...`);
     return true;
   } catch (error) {
-    console.error("[Token Warmup] Failed:", error);
+    console.error("[Warmup] Token failed:", error);
     return false;
   }
 }
@@ -180,13 +179,13 @@ export function startTokenRefreshScheduler(): void {
     warmupTokenCache();
   }, REFRESH_INTERVAL_MS);
 
-  console.log("[Token Scheduler] Started - refresh every 25 minutes");
+  console.log("[Scheduler] Token refresh started (25min interval)");
 }
 
 export function stopTokenRefreshScheduler(): void {
   if (refreshInterval) {
     clearInterval(refreshInterval);
     refreshInterval = null;
-    console.log("[Token Scheduler] Stopped");
+    console.log("[Scheduler] Token refresh stopped");
   }
 }
