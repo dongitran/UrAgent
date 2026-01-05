@@ -150,13 +150,33 @@ export async function handleCompletedTask(
   // Use the task plan from commit if available, otherwise use state's task plan
   const taskPlanToUpdate = updatedTaskPlanFromCommit ?? state.taskPlan;
 
-  // LLM marked as completed, so we need to update the plan to reflect that.
-  const updatedPlanTasks = completePlanItem(
-    taskPlanToUpdate,
-    getActiveTask(taskPlanToUpdate).id,
-    currentTask.index,
-    summary,
-  );
+  // Re-calculate currentTask from taskPlanToUpdate to ensure consistency
+  // This handles the case where updatedTaskPlanFromCommit has different completion status
+  const activePlanItemsToUpdate = getActivePlanItems(taskPlanToUpdate);
+  const currentTaskToUpdate = getCurrentPlanItem(activePlanItemsToUpdate);
+
+  // Check if currentTask is valid (index !== -1 means there's an actual uncompleted task)
+  // If index === -1, it means all tasks are already completed (fallback from getCurrentPlanItem)
+  let updatedPlanTasks: TaskPlan;
+  if (currentTaskToUpdate.index === -1) {
+    logger.warn("All plan items are already completed, skipping completePlanItem call", {
+      currentTaskIndex: currentTaskToUpdate.index,
+      currentTaskPlan: currentTaskToUpdate.plan,
+      activePlanItemsCount: activePlanItemsToUpdate.length,
+      completedCount: activePlanItemsToUpdate.filter(p => p.completed).length,
+      originalCurrentTaskIndex: currentTask.index,
+    });
+    // Use the task plan as-is since there's nothing to mark as completed
+    updatedPlanTasks = taskPlanToUpdate;
+  } else {
+    // LLM marked as completed, so we need to update the plan to reflect that.
+    updatedPlanTasks = completePlanItem(
+      taskPlanToUpdate,
+      getActiveTask(taskPlanToUpdate).id,
+      currentTaskToUpdate.index,
+      summary,
+    );
+  }
   // Update the github issue to reflect this task as completed.
   if (
     !isLocalMode(config) &&
