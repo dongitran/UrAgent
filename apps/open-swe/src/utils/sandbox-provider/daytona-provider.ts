@@ -258,7 +258,8 @@ ${delimiter}`;
           });
           
           // Clone the base branch (or default branch) instead
-          const branchToClone = options.baseBranch || 'main';
+          // Use DEFAULT_BRANCH from env if baseBranch is not provided
+          const branchToClone = options.baseBranch || process.env.DEFAULT_BRANCH || 'main';
           await this.sandbox.git.clone(
             options.url,
             options.targetDir,

@@ -17,6 +17,7 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
    * The target repository the request should be executed in.
    * When DEFAULT_REPOSITORY_* env vars are set, they take precedence over client input.
+   * DEFAULT_BRANCH env var ALWAYS overrides client branch selection when set.
    */
   targetRepository: withLangGraph(z.custom<TargetRepository>(), {
     reducer: {
@@ -25,14 +26,20 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
         // If default repository is configured in env, always use it (ignore client input)
         const defaultOwner = process.env.DEFAULT_REPOSITORY_OWNER;
         const defaultRepo = process.env.DEFAULT_REPOSITORY_NAME;
-        const defaultBranch = process.env.DEFAULT_BRANCH || "main";
+        const defaultBranch = process.env.DEFAULT_BRANCH;
 
         if (defaultOwner && defaultRepo) {
+          // When DEFAULT_BRANCH is set, ALWAYS use it (ignore client branch)
+          // This ensures the agent always works on the configured base branch
+          // When DEFAULT_BRANCH is NOT set, use client's branch or fallback to "main"
+          const branch = defaultBranch 
+            ? defaultBranch 
+            : (update?.branch || "main");
+          
           return {
             owner: defaultOwner,
             repo: defaultRepo,
-            // Allow branch to be overridden from client, but default to env
-            branch: update?.branch || defaultBranch,
+            branch,
           };
         }
         // No default configured, use client input
