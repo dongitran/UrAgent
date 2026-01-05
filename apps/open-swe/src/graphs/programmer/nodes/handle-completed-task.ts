@@ -207,8 +207,10 @@ export async function handleCompletedTask(
     ...(branchName && { branchName }),
   };
 
-  // This should in theory never happen, but ensure we route properly if it does.
-  const remainingTask = getRemainingPlanItems(activePlanItems)?.[0];
+  // Calculate remaining tasks from updatedPlanTasks (AFTER marking current task as completed)
+  // This ensures we check remaining tasks based on the final task plan state
+  const finalActivePlanItems = getActivePlanItems(updatedPlanTasks);
+  const remainingTask = getRemainingPlanItems(finalActivePlanItems)?.[0];
   if (!remainingTask) {
     logger.info(
       "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
