@@ -59,14 +59,14 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
   plannerSession: z.custom<AgentSession>().optional(),
   /**
    * The branch name to checkout and make changes on.
-   * Can be user specified, or defaults to `open-swe/<manager-thread-id>
+   * Can be user specified, or defaults to empty string to force creation of a new feature branch.
    */
   branchName: withLangGraph(z.string(), {
     reducer: {
       schema: z.string(),
       fn: (_state, update) => update,
     },
-    default: () => process.env.DEFAULT_BRANCH || "main",
+    default: () => "",
   }),
   /**
    * Whether or not to auto accept the generated plan.

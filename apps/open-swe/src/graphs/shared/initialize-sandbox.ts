@@ -46,7 +46,20 @@ export async function initializeSandbox(
   state: InitializeSandboxState,
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
-  const { sandboxSessionId, targetRepository, branchName } = state;
+  const { sandboxSessionId, targetRepository } = state;
+  let { branchName } = state;
+
+  const baseBranch = targetRepository.branch || "main";
+  if (!branchName || branchName === baseBranch) {
+    const { getBranchName } = await import("../../utils/github/git.js");
+    const newBranchName = getBranchName(config);
+    logger.warn("branchName is empty or same as base branch, creating new feature branch", {
+      oldBranchName: branchName,
+      newBranchName,
+      baseBranch,
+    });
+    branchName = newBranchName;
+  }
   
   // Note: We'll determine the actual provider type AFTER sandbox is created/resumed
   // because in multi-provider mode, we don't know which provider will be selected
@@ -89,7 +102,7 @@ export async function initializeSandbox(
   // Check if we're in local mode before trying to get GitHub tokens
   if (isLocalMode(config)) {
     return initializeSandboxLocal(
-      state,
+      { ...state, branchName },
       config,
       emitStepEvent,
       createEventsMessage,
@@ -234,6 +247,7 @@ export async function initializeSandbox(
             absoluteRepoDir,
             config,
           ),
+          branchName,
         };
       } catch {
         emitStepEvent(
@@ -255,6 +269,7 @@ export async function initializeSandbox(
             absoluteRepoDir,
             config,
           ),
+          branchName,
         };
       }
     } catch {
