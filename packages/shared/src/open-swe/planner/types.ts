@@ -77,11 +77,16 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
     },
     default: () => "",
   }),
+  /**
+   * The branch name to checkout and make changes on.
+   * Defaults to empty string to force creation of a new feature branch.
+   */
   branchName: withLangGraph(z.string(), {
     reducer: {
       schema: z.string(),
       fn: (_state, update) => update,
     },
+    default: () => "",
   }),
   planChangeRequest: withLangGraph(z.string(), {
     reducer: {

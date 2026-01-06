@@ -28,8 +28,9 @@ const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
 /**
  * Determines the branch name to use for the planner run.
- * If the current branchName is the same as the base branch (targetRepository.branch),
- * we need to create a new feature branch to avoid committing directly to the base branch.
+ * If the current branchName is not set, empty, or is the same as the base branch 
+ * (targetRepository.branch), we need to create a new feature branch to avoid 
+ * committing directly to the base branch.
  */
 function determineBranchName(
   state: ManagerGraphState,
@@ -38,12 +39,12 @@ function determineBranchName(
   const baseBranch = state.targetRepository?.branch || "main";
   const currentBranchName = state.branchName;
 
-  // If branchName is not set, or is the same as base branch, create a new feature branch
-  if (!currentBranchName || currentBranchName === baseBranch) {
+  // If branchName is not set, empty, or is the same as base branch, create a new feature branch
+  if (!currentBranchName || currentBranchName === "" || currentBranchName === baseBranch) {
     const newBranchName = getBranchName(config);
-    logger.info("Creating new feature branch (current branch is base branch)", {
+    logger.info("Creating new feature branch (current branch is empty or same as base branch)", {
       baseBranch,
-      currentBranchName,
+      currentBranchName: currentBranchName || "(empty)",
       newBranchName,
     });
     return newBranchName;

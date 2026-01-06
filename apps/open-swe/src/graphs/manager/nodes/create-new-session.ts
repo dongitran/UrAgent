@@ -107,11 +107,23 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
   });
 
   const newManagerThreadId = uuidv4();
+
+  const baseBranch = state.targetRepository?.branch || "main";
+  const shouldCreateNewBranch = !state.branchName || state.branchName === baseBranch;
+  const branchNameForSession = shouldCreateNewBranch ? getBranchName(config) : state.branchName;
+  
+  logger.info("Creating new session with branch", {
+    stateBranchName: state.branchName,
+    baseBranch,
+    shouldCreateNewBranch,
+    branchNameForSession,
+  });
+  
   const commandUpdate: ManagerGraphUpdate = {
     githubIssueId: newIssueNumber,
     targetRepository: state.targetRepository,
     messages: inputMessages,
-    branchName: state.branchName ?? getBranchName(config),
+    branchName: branchNameForSession,
   };
   await langGraphClient.runs.create(newManagerThreadId, MANAGER_GRAPH_ID, {
     input: {},
