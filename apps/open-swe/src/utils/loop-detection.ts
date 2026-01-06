@@ -1293,6 +1293,34 @@ function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
   }
 
   // Check for similar calls (same file accessed multiple times consecutively)
+  // IMPORTANT: Only trigger for WRITE operations or if count is very high
+  // Reading the same file multiple times is often legitimate (understanding code)
+  // But editing the same file 6+ times consecutively is suspicious
+  
+  // For READ operations: require higher threshold (10+) to trigger
+  // For WRITE operations: use normal threshold (6)
+  
+  // Check if the consecutive calls are all READ operations
+  // We need to check the calls that were counted, not just the last call
+  // If consecutiveEditCount == 0, it means all consecutive calls were read-only
+  const isAllReadOnly = consecutiveEditCount === 0;
+  
+  // If the consecutive calls are all READ operations, be more lenient
+  // Agent might be reading the same file to understand different parts
+  if (isAllReadOnly) {
+    // For read-only operations, require 10+ consecutive calls to trigger
+    // This is higher than SIMILAR_TOOL_THRESHOLD (6) to avoid false positives
+    const READ_ONLY_SIMILAR_THRESHOLD = 10;
+    return {
+      isSimilar: consecutiveFileCount >= READ_ONLY_SIMILAR_THRESHOLD,
+      count: consecutiveFileCount,
+      targetFile: currentFile,
+      isEditLoop: false,
+      editCount: consecutiveEditCount,
+    };
+  }
+
+  // For write operations, use normal threshold
   return {
     isSimilar: consecutiveFileCount >= LOOP_DETECTION_CONFIG.SIMILAR_TOOL_THRESHOLD,
     count: consecutiveFileCount,
