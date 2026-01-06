@@ -1200,13 +1200,11 @@ function detectDelayedLoop(toolCalls: ToolCallSignature[]): {
  * Detects similar tool calls (same tool, different args but same target)
  * 
  * IMPORTANT LOGIC:
- * - Loop detection should only count CONSECUTIVE calls to the SAME file
- * - If agent calls a DIFFERENT command (like yarn build), the count should RESET
- * - View 5 different files = NOT a loop (exploration)
- * - View same file 9 times consecutively = IS a loop
- * 
- * This function now counts CONSECUTIVE accesses to the same file,
- * and resets when a different operation is performed.
+ * - Loop = calling the SAME file CONSECUTIVELY multiple times
+ * - ANY different command/file should RESET the count
+ * - View fileA → view fileB → view fileA = count resets at fileB, so fileA count = 1
+ * - View fileA → yarn build → view fileA = count resets at yarn build, so fileA count = 1
+ * - View fileA 9 times consecutively = IS a loop (count = 9)
  */
 function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
   isSimilar: boolean;
@@ -1228,51 +1226,57 @@ function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
   const recentCalls = toolCalls.slice(-LOOP_DETECTION_CONFIG.FREQUENCY_WINDOW);
 
   // Count CONSECUTIVE accesses to the same file (from the end)
-  // Reset count when a different file is accessed or a different command type is used
+  // RESET when ANY different operation is performed (different file OR different command)
   let consecutiveFileCount = 0;
   let currentFile: string | null = null;
   let consecutiveEditCount = 0;
   let editFile: string | null = null;
+  let isFirstIteration = true;
 
   // Scan from the end to find consecutive same-file accesses
   for (let i = recentCalls.length - 1; i >= 0; i--) {
     const tc = recentCalls[i];
     const targetFile = extractTargetFile(tc.name, tc.fullArgs);
-    
-    // If this is a shell command that's NOT a file operation (like yarn build, npm test),
-    // it breaks the consecutive file access pattern
-    if (tc.name === "shell" && typeof tc.fullArgs.command === "string") {
-      const cmd = tc.fullArgs.command.trim();
-      const baseCmd = cmd.split(" ")[0];
-      // Commands like yarn, npm, pnpm, git are NOT file-specific operations
-      // They should break the consecutive file access count
-      if (["yarn", "npm", "pnpm", "npx", "git", "docker"].includes(baseCmd)) {
-        break; // Different command type, stop counting
-      }
-    }
 
-    if (!targetFile) {
-      // No target file means different operation, break the chain
-      break;
-    }
-
-    if (currentFile === null) {
-      currentFile = targetFile;
-      consecutiveFileCount = 1;
+    // First iteration - initialize with the last call
+    if (isFirstIteration) {
+      isFirstIteration = false;
       
-      // Track edit operations separately
-      if (isWriteToolCall(tc.name, tc.fullArgs) || tc.name === "str_replace_based_edit_tool") {
-        editFile = targetFile;
-        consecutiveEditCount = 1;
+      if (targetFile) {
+        // Last call has a target file - start counting
+        currentFile = targetFile;
+        consecutiveFileCount = 1;
+        
+        // Track edit operations separately
+        if (isWriteToolCall(tc.name, tc.fullArgs) || tc.name === "str_replace_based_edit_tool") {
+          editFile = targetFile;
+          consecutiveEditCount = 1;
+        }
+      } else {
+        // Last call has no target file (like yarn build)
+        // This means the most recent operation is NOT a file-based operation
+        // So there's no file-based loop happening right now
+        // Return count = 0 (no similar file calls)
+        break;
       }
-    } else if (targetFile === currentFile) {
+      continue;
+    }
+
+    // For subsequent iterations, check if this is the SAME file as we're tracking
+    if (targetFile && targetFile === currentFile) {
+      // SAME file - increment count
       consecutiveFileCount++;
       
       if ((isWriteToolCall(tc.name, tc.fullArgs) || tc.name === "str_replace_based_edit_tool") && targetFile === editFile) {
         consecutiveEditCount++;
       }
     } else {
-      // Different file, stop counting
+      // DIFFERENT file OR DIFFERENT command type (no target file like yarn build)
+      // This is the key fix: ANY different operation breaks the chain
+      // Examples:
+      // - view fileA → view fileB → view fileA: breaks at fileB
+      // - view fileA → yarn build → view fileA: breaks at yarn build
+      // - view fileA → grep something → view fileA: breaks at grep (if grep has different target)
       break;
     }
   }
@@ -1289,7 +1293,6 @@ function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
   }
 
   // Check for similar calls (same file accessed multiple times consecutively)
-  // This includes both read and write operations on the SAME file
   return {
     isSimilar: consecutiveFileCount >= LOOP_DETECTION_CONFIG.SIMILAR_TOOL_THRESHOLD,
     count: consecutiveFileCount,
