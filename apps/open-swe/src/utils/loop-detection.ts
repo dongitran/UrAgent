@@ -993,8 +993,12 @@ function detectAlternatingPattern(toolCalls: ToolCallSignature[]): {
  * Improved: Check if there are write operations interspersed
  * Also check if agent is exploring many different files (legitimate)
  *
- * Added: Detect "semantic loop" - reading same file with different commands
- * (cat file.ts → head file.ts → tail file.ts → grep pattern file.ts)
+ * IMPORTANT: This function is now more lenient to avoid false positives.
+ * Reading the same file multiple times is NORMAL behavior during development.
+ * Only trigger if agent is ONLY reading (no writes at all) for extended period.
+ * 
+ * Removed: "semantic loop" detection for reading same file with different commands
+ * because this is normal behavior (view file, then grep, then view again after edit)
  */
 function detectReadOnlyLoop(toolCalls: ToolCallSignature[]): boolean {
   if (toolCalls.length < LOOP_DETECTION_CONFIG.MIN_CALLS_FOR_PATTERN) {
@@ -1017,13 +1021,11 @@ function detectReadOnlyLoop(toolCalls: ToolCallSignature[]): boolean {
 
   // Check if agent is exploring many different files (legitimate exploration)
   const uniqueFiles = new Set<string>();
-  const fileAccessCount = new Map<string, number>();
 
   for (const tc of recentCalls) {
     const target = extractTargetFile(tc.name, tc.fullArgs);
     if (target) {
       uniqueFiles.add(target);
-      fileAccessCount.set(target, (fileAccessCount.get(target) || 0) + 1);
     }
   }
 
@@ -1034,20 +1036,9 @@ function detectReadOnlyLoop(toolCalls: ToolCallSignature[]): boolean {
     return false;
   }
 
-  // Check for "semantic loop" - same file accessed many times with different commands
-  // This catches patterns like: cat file.ts → head file.ts → tail file.ts → grep file.ts
-  for (const [file, count] of fileAccessCount) {
-    if (count >= 4 && uniqueFiles.size <= 2) {
-      // Same file accessed 4+ times and only 1-2 unique files total
-      // This is likely a semantic loop
-      logger.info("Detected semantic read loop on file", {
-        file,
-        accessCount: count,
-      });
-      return true;
-    }
-  }
-
+  // Only trigger read-only loop if 85%+ of recent calls are read-only
+  // AND there are no write operations at all
+  // This is a very high threshold to avoid false positives
   return (
     readOnlyCount / recentCalls.length >=
     LOOP_DETECTION_CONFIG.READ_ONLY_THRESHOLD
@@ -1165,13 +1156,16 @@ function detectDelayedLoop(toolCalls: ToolCallSignature[]): {
 
   // If same call appears 5+ times in last 20 calls (even non-consecutively), it's suspicious
   // But only if it's not a legitimate exploration (reading many different files)
+  // IMPORTANT: Do NOT trigger delayed loop for read operations (view tool)
+  // Reading the same file multiple times is normal behavior during development
   if (maxCount >= 5 && maxSignature) {
-    // Check if it's a read operation on same file (suspicious)
     const isReadOp = isReadOnlyToolCall(
       maxSignature.name,
       maxSignature.fullArgs,
     );
-    if (isReadOp) {
+    // Only trigger for WRITE operations, not read operations
+    // Read operations are normal and should not be considered as loops
+    if (!isReadOp && isWriteToolCall(maxSignature.name, maxSignature.fullArgs)) {
       return {
         isDelayedLoop: true,
         repeatedSignature: maxSignature,
@@ -1189,6 +1183,11 @@ function detectDelayedLoop(toolCalls: ToolCallSignature[]): {
  * Also handles repeated edit attempts on the same file
  *
  * Returns separate counts for read and write operations to better detect edit loops
+ * 
+ * IMPORTANT: Read operations (view tool) are NOT counted as similar_calls loops
+ * because reading the same file multiple times is normal behavior during development.
+ * Only WRITE/EDIT operations on the same file are considered for similar_calls detection.
+ * This prevents false positives where agent reads a file many times while working on it.
  */
 function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
   isSimilar: boolean;
@@ -1209,16 +1208,15 @@ function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
 
   const recentCalls = toolCalls.slice(-LOOP_DETECTION_CONFIG.FREQUENCY_WINDOW);
 
-  // Group by target file - track both read and write operations
-  const fileReadCount = new Map<string, number>();
+  // Group by target file - ONLY track write operations
+  // Read operations are NOT counted because reading files multiple times is normal
   const fileWriteCount = new Map<string, number>();
 
   for (const tc of recentCalls) {
     const targetFile = extractTargetFile(tc.name, tc.fullArgs);
     if (targetFile) {
-      if (isReadOnlyToolCall(tc.name, tc.fullArgs)) {
-        fileReadCount.set(targetFile, (fileReadCount.get(targetFile) || 0) + 1);
-      } else if (
+      // Only count write/edit operations, NOT read operations
+      if (
         isWriteToolCall(tc.name, tc.fullArgs) ||
         tc.name === "str_replace_based_edit_tool"
       ) {
@@ -1227,17 +1225,6 @@ function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
           (fileWriteCount.get(targetFile) || 0) + 1,
         );
       }
-    }
-  }
-
-  // Find the most accessed file (read operations)
-  let maxReadFile: string | null = null;
-  let maxReadCount = 0;
-
-  for (const [file, count] of fileReadCount) {
-    if (count > maxReadCount) {
-      maxReadCount = count;
-      maxReadFile = file;
     }
   }
 
@@ -1265,10 +1252,12 @@ function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
     };
   }
 
+  // similar_calls is now ONLY triggered by write operations, not read operations
+  // This prevents false positives when agent reads the same file many times
   return {
-    isSimilar: maxReadCount >= LOOP_DETECTION_CONFIG.SIMILAR_TOOL_THRESHOLD,
-    count: maxReadCount,
-    targetFile: maxReadFile,
+    isSimilar: maxWriteCount >= LOOP_DETECTION_CONFIG.SIMILAR_TOOL_THRESHOLD,
+    count: maxWriteCount,
+    targetFile: maxWriteFile,
     isEditLoop: false,
     editCount: maxWriteCount,
   };
