@@ -307,8 +307,8 @@ export type GraphUpdate = Partial<GraphState>;
 export const GraphConfigurationMetadata: {
   [key: string]: {
     x_open_swe_ui_config:
-      | Omit<ConfigurableFieldUIMetadata, "label">
-      | { type: "hidden" };
+    | Omit<ConfigurableFieldUIMetadata, "label">
+    | { type: "hidden" };
   };
 } = {
   maxContextActions: {
@@ -623,7 +623,7 @@ export const GraphConfiguration = z.object({
    * @default 0
    */
   summarizerTemperature: withLangGraph(z.number().optional(), {
-    metadata: GraphConfigurationMetadata.actionGeneratorTemperature,
+    metadata: GraphConfigurationMetadata.summarizerTemperature,
   }),
   /**
    * The maximum number of tokens to generate in an individual generation.

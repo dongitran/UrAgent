@@ -135,18 +135,6 @@ export async function getGitHubTokensFromConfig(config: GraphConfig): Promise<{
     }
   }
 
-  // Check if installationId was corrupted by a token (common bug in previous versions)
-  if (installationId && (installationId.startsWith("ghs_") || (installationId.length > 20 && !installationId.match(/^\d+$/)))) {
-    console.warn(`[getGitHubTokensFromConfig] Detected corrupted installationId: ${installationId.substring(0, 10)}...`);
-    // Try to fall back to environment default if possible
-    if (process.env.DEFAULT_GITHUB_INSTALLATION_ID) {
-      console.info(`[getGitHubTokensFromConfig] Recovering: Falling back to DEFAULT_GITHUB_INSTALLATION_ID: ${process.env.DEFAULT_GITHUB_INSTALLATION_ID}`);
-      installationId = process.env.DEFAULT_GITHUB_INSTALLATION_ID;
-    } else {
-      throw new Error(`Corrupted ${GITHUB_INSTALLATION_ID} found in configuration and no recovery possible.`);
-    }
-  }
-
   const encryptedGitHubToken = config.configurable[GITHUB_TOKEN_COOKIE];
   const encryptedInstallationToken =
     config.configurable[GITHUB_INSTALLATION_TOKEN_COOKIE];
