@@ -138,7 +138,7 @@ By reviewing these actions, and comparing them to the plan and original user req
         Parameters:
             - \`command\`: Must be “view”
             - \`path\`: The path to the file or directory to view
-            - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
+            - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Limit to 500 lines per request. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
 
     ### Install dependencies tool
         The \`install_dependencies\` tool allows Claude to install dependencies for a project. This should only be called if dependencies have not been installed yet.

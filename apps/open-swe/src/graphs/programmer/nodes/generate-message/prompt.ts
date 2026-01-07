@@ -136,7 +136,7 @@ ${CORE_BEHAVIOR_PROMPT}
             Parameters:
                 - \`command\`: Must be “view”
                 - \`path\`: The path to the file or directory to view
-                - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
+                - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Limit to 500 lines per request. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
         
         ### Str replace command
             The \`str_replace\` command allows Claude to replace a specific string in a file with a new string. This is used for making precise edits.
