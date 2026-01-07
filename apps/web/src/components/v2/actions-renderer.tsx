@@ -137,8 +137,23 @@ export function ActionsRenderer<
     initStatus = "done";
   }
 
+  // Merge stream.messages with stream.values.messages to ensure all ToolMessages are available
+  // During streaming, stream.messages may not contain all ToolMessages yet
+  const streamValueMessages = (stream.values as Record<string, unknown>)?.messages as Message[] ?? [];
+  const allMessages: Message[] = (() => {
+    if (!stream.messages?.length) return streamValueMessages;
+    if (!streamValueMessages?.length) return stream.messages;
+
+    // Merge by ID to avoid duplicates, prefer stream.messages (more recent)
+    const messageMap = new Map<string, Message>();
+    [...streamValueMessages, ...stream.messages].forEach((m: Message) => {
+      if (m.id) messageMap.set(m.id, m);
+    });
+    return Array.from(messageMap.values());
+  })();
+
   // Filter out human & do not render messages
-  const filteredMessages = stream.messages?.filter(
+  const filteredMessages = allMessages?.filter(
     (m) =>
       !isHumanMessageSDK(m) &&
       !(m.id && m.id.startsWith(DO_NOT_RENDER_ID_PREFIX)),
@@ -227,7 +242,7 @@ export function ActionsRenderer<
         <AssistantMessage
           key={m.id}
           thread={stream as UseStream<Record<string, unknown>>}
-          threadMessages={stream.messages}
+          threadMessages={allMessages}
           message={m}
           modifyRunId={modifyRunId}
           threadId={threadId}
