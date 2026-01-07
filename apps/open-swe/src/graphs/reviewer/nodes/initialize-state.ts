@@ -75,6 +75,52 @@ async function getChangedFiles(
         timeout: 30,
         sandboxInstance,
       });
+      
+      // If origin/{branch} also doesn't exist, try to fetch it first
+      if (changedFilesRes.exitCode !== 0) {
+        logger.info("origin/{branch} not found, fetching base branch reference", {
+          baseBranchName,
+          originalError: changedFilesRes.result,
+        });
+        
+        // Fetch the base branch reference
+        const fetchResult = await executor.executeCommand({
+          command: `git fetch origin ${baseBranchName}:refs/remotes/origin/${baseBranchName} --depth=1`,
+          workdir: repoRoot,
+          timeout: 120,
+          sandboxInstance,
+          env: {
+            GIT_TERMINAL_PROMPT: '0',
+          },
+        });
+        
+        if (fetchResult.exitCode === 0) {
+          // Create local tracking branch
+          await executor.executeCommand({
+            command: `git branch ${baseBranchName} refs/remotes/origin/${baseBranchName} 2>/dev/null || true`,
+            workdir: repoRoot,
+            timeout: 30,
+            sandboxInstance,
+          });
+          
+          logger.info("Fetched base branch reference, retrying git diff", {
+            baseBranchName,
+          });
+          
+          // Retry git diff with origin/{branch}
+          changedFilesRes = await executor.executeCommand({
+            command: `git diff origin/${baseBranchName} --name-only`,
+            workdir: repoRoot,
+            timeout: 30,
+            sandboxInstance,
+          });
+        } else {
+          logger.warn("Failed to fetch base branch reference", {
+            baseBranchName,
+            fetchError: fetchResult.result,
+          });
+        }
+      }
     }
 
     if (changedFilesRes.exitCode !== 0) {
