@@ -8,6 +8,9 @@ import {
   decodeKeycloakToken,
   isKeycloakEnabled,
   refreshAccessToken,
+  KEYCLOAK_ACCESS_TOKEN_COOKIE,
+  KEYCLOAK_REFRESH_TOKEN_COOKIE,
+  KEYCLOAK_ID_TOKEN_COOKIE,
 } from "@/lib/keycloak";
 
 // Header name for refreshed token from middleware
@@ -107,10 +110,15 @@ export async function GET(request: NextRequest) {
       }
 
       if (!keycloakToken) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           { error: "Not authenticated" },
           { status: 401 },
         );
+        // Clear expired cookies to prevent redirect loop
+        response.cookies.delete(KEYCLOAK_ACCESS_TOKEN_COOKIE);
+        response.cookies.delete(KEYCLOAK_REFRESH_TOKEN_COOKIE);
+        response.cookies.delete(KEYCLOAK_ID_TOKEN_COOKIE);
+        return response;
       }
 
       // Try to get user info from Keycloak
@@ -144,7 +152,12 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+      const invalidTokenResponse = NextResponse.json({ error: "Invalid token" }, { status: 401 });
+      // Clear invalid cookies to prevent redirect loop
+      invalidTokenResponse.cookies.delete(KEYCLOAK_ACCESS_TOKEN_COOKIE);
+      invalidTokenResponse.cookies.delete(KEYCLOAK_REFRESH_TOKEN_COOKIE);
+      invalidTokenResponse.cookies.delete(KEYCLOAK_ID_TOKEN_COOKIE);
+      return invalidTokenResponse;
     }
 
     // Keycloak NOT enabled - check GitHub OAuth

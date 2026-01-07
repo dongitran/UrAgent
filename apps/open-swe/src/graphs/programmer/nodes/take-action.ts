@@ -59,19 +59,19 @@ const logger = createLogger(LogLevel.INFO, "TakeAction");
 async function isRunCancelled(config: GraphConfig): Promise<boolean> {
   const threadId = config.configurable?.thread_id;
   const runId = config.configurable?.run_id;
-  
+
   if (!threadId || !runId) {
     return false;
   }
-  
+
   try {
     const client = createLangGraphClient();
     const run = await client.runs.get(threadId, runId);
-    
+
     // Check if run status indicates cancellation
     const cancelledStatuses = ["cancelled", "interrupted", "error"];
     const isCancelled = cancelledStatuses.includes(run.status);
-    
+
     if (isCancelled) {
       logger.info("Run has been cancelled by user", {
         threadId,
@@ -79,7 +79,7 @@ async function isRunCancelled(config: GraphConfig): Promise<boolean> {
         status: run.status,
       });
     }
-    
+
     return isCancelled;
   } catch (error) {
     // If we can't check the run status, assume it's not cancelled
@@ -134,10 +134,10 @@ export async function takeAction(
     writeDefaultTsConfigTool,
     ...(shouldIncludeReviewCommentTool(state, config)
       ? [
-          createReplyToReviewCommentTool(state, config),
-          createReplyToCommentTool(state, config),
-          createReplyToReviewTool(state, config),
-        ]
+        createReplyToReviewCommentTool(state, config),
+        createReplyToCommentTool(state, config),
+        createReplyToReviewTool(state, config),
+      ]
       : []),
     ...mcpTools,
   ];
@@ -173,7 +173,8 @@ export async function takeAction(
     config,
   );
 
-  const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
+  // Helper function to execute a single tool call
+  const executeToolCall = async (toolCall: typeof toolCalls[0]) => {
     const tool = toolsMap[toolCall.name];
 
     if (!tool) {
@@ -253,9 +254,44 @@ export async function takeAction(
     });
 
     return { toolMessage, stateUpdates };
+  };
+
+  // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
+  // Shell commands like yarn build, yarn lint, yarn test consume significant memory
+  // Running them in parallel can cause OOM (exit code 137) in sandboxes with limited resources
+  const SEQUENTIAL_TOOLS = ["shell", "install_dependencies"];
+  const sequentialCalls = toolCalls.filter(tc => SEQUENTIAL_TOOLS.includes(tc.name));
+  const parallelCalls = toolCalls.filter(tc => !SEQUENTIAL_TOOLS.includes(tc.name));
+
+  logger.info("Executing tool calls", {
+    sequentialCount: sequentialCalls.length,
+    parallelCount: parallelCalls.length,
+    sequentialTools: sequentialCalls.map(tc => tc.name),
+    parallelTools: parallelCalls.map(tc => tc.name),
   });
 
-  const toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
+  // Execute sequential tools one at a time (shell commands that may consume lots of memory)
+  const sequentialResults: { toolMessage: ToolMessage; stateUpdates: any }[] = [];
+  for (const toolCall of sequentialCalls) {
+    const result = await executeToolCall(toolCall);
+    sequentialResults.push(result);
+  }
+
+  // Execute parallel tools concurrently (view, grep, textEditor - lightweight operations)
+  const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
+
+  // Combine results in original order
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; stateUpdates: any }[] = [];
+  let seqIndex = 0;
+  let parIndex = 0;
+  for (const toolCall of toolCalls) {
+    if (SEQUENTIAL_TOOLS.includes(toolCall.name)) {
+      toolCallResultsWithUpdates.push(sequentialResults[seqIndex++]);
+    } else {
+      toolCallResultsWithUpdates.push(parallelResults[parIndex++]);
+    }
+  }
+
   const toolCallResults = toolCallResultsWithUpdates.map(
     (item) => item.toolMessage,
   );
@@ -372,10 +408,10 @@ export async function takeAction(
     ...toolCallResults,
     ...(updatedTaskPlan && pullRequestNumber
       ? createPullRequestToolCallMessage(
-          state.targetRepository,
-          pullRequestNumber,
-          true,
-        )
+        state.targetRepository,
+        pullRequestNumber,
+        true,
+      )
       : []),
   ];
 
