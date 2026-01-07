@@ -18,7 +18,13 @@ import {
 } from "./nodes/index.js";
 import { BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
-import { graph as reviewerGraph } from "../reviewer/index.js";
+import {
+  generateReviewActions,
+  takeReviewerActions,
+  initializeState as initializeReview,
+  finalReview,
+} from "../reviewer/nodes/index.js";
+import { diagnoseError as diagnoseReviewerError } from "../shared/diagnose-error.js";
 import { getRemainingPlanItems } from "../../utils/current-task.js";
 import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
@@ -118,6 +124,25 @@ function routeGenerateActionsOrEnd(
   return "generate-action";
 }
 
+/**
+ * Conditional edge called after generating review actions.
+ * If there are tool calls, route to take review actions.
+ * Otherwise, route to final review.
+ */
+function takeReviewActionsOrFinalReview(
+  state: GraphState,
+): "take-review-actions" | "final-review" {
+  const { reviewerMessages } = state;
+  const lastMessage = reviewerMessages[reviewerMessages.length - 1];
+
+  if (isAIMessage(lastMessage) && lastMessage.tool_calls?.length) {
+    return "take-review-actions";
+  }
+
+  // If the last message does not have tool calls, continue to generate the final review.
+  return "final-review";
+}
+
 function routeToReviewOrConclusion(
   state: GraphState,
   config: GraphConfig,
@@ -130,7 +155,7 @@ function routeToReviewOrConclusion(
   }
 
   return new Command({
-    goto: "reviewer-subgraph",
+    goto: "initialize-review",
   });
 }
 
@@ -155,9 +180,15 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     ends: ["generate-action", END],
   })
   .addNode("route-to-review-or-conclusion", routeToReviewOrConclusion, {
-    ends: ["generate-conclusion", "reviewer-subgraph"],
+    ends: ["generate-conclusion", "initialize-review"],
   })
-  .addNode("reviewer-subgraph", reviewerGraph)
+  .addNode("initialize-review", initializeReview)
+  .addNode("generate-review-actions", generateReviewActions)
+  .addNode("take-review-actions", takeReviewerActions, {
+    ends: ["generate-review-actions", "diagnose-reviewer-error"],
+  })
+  .addNode("final-review", finalReview)
+  .addNode("diagnose-reviewer-error", diagnoseReviewerError)
   .addNode("open-pr", openPullRequest)
   .addNode("diagnose-error", diagnoseError)
   .addNode("summarize-history", summarizeHistory)
@@ -173,7 +204,14 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   ])
   .addEdge("update-plan", "generate-action")
   .addEdge("diagnose-error", "generate-action")
-  .addConditionalEdges("reviewer-subgraph", routeGenerateActionsOrEnd, [
+  .addEdge("initialize-review", "generate-review-actions")
+  .addConditionalEdges(
+    "generate-review-actions",
+    takeReviewActionsOrFinalReview,
+    ["take-review-actions", "final-review"],
+  )
+  .addEdge("diagnose-reviewer-error", "generate-review-actions")
+  .addConditionalEdges("final-review", routeGenerateActionsOrEnd, [
     "generate-conclusion",
     "generate-action",
   ])
