@@ -1,8 +1,7 @@
 "use client";
 
-import { FileSearch } from "lucide-react";
+import { FileSearch, CheckCircle, Loader2 } from "lucide-react";
 import { Badge } from "../ui/badge";
-import { Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type CodeReviewStartedProps = {
@@ -10,21 +9,32 @@ type CodeReviewStartedProps = {
 };
 
 export function CodeReviewStarted({ status = "done" }: CodeReviewStartedProps) {
+  const isGenerating = status === "generating";
+
   return (
     <div
       className={cn(
-        "dark:border-muted-foreground/20 dark:bg-muted/30 rounded-lg border border-blue-200/60 bg-blue-50/30 shadow-sm transition-shadow",
+        "dark:border-muted-foreground/20 dark:bg-muted/30 rounded-lg border shadow-sm transition-shadow",
         "shadow-sm hover:shadow-md",
+        isGenerating
+          ? "border-blue-200/60 bg-blue-50/30"
+          : "border-green-200/60 bg-green-50/30",
       )}
     >
       {/* Header */}
       <div
         className={cn(
-          "dark:bg-muted/40 relative flex items-center bg-blue-50/50 p-3",
+          "dark:bg-muted/40 relative flex items-center p-3",
           "rounded-lg",
+          isGenerating ? "bg-blue-50/50" : "bg-green-50/50",
         )}
       >
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500/90 dark:bg-blue-600">
+        <div className={cn(
+          "flex h-7 w-7 items-center justify-center rounded-full",
+          isGenerating
+            ? "bg-blue-500/90 dark:bg-blue-600"
+            : "bg-green-500/90 dark:bg-green-600"
+        )}>
           <FileSearch className="h-3.5 w-3.5 text-white" />
         </div>
 
@@ -33,14 +43,27 @@ export function CodeReviewStarted({ status = "done" }: CodeReviewStartedProps) {
             <h3 className="text-foreground text-sm font-medium">Code review</h3>
             <Badge
               variant="secondary"
-              className="border-blue-200/60 bg-blue-100/80 text-blue-700 dark:border-blue-700/40 dark:bg-blue-900/50 dark:text-blue-300"
+              className={cn(
+                isGenerating
+                  ? "border-blue-200/60 bg-blue-100/80 text-blue-700 dark:border-blue-700/40 dark:bg-blue-900/50 dark:text-blue-300"
+                  : "border-green-200/60 bg-green-100/80 text-green-700 dark:border-green-700/40 dark:bg-green-900/50 dark:text-green-300"
+              )}
             >
-              <Clock className="h-3 w-3" />
-              In progress
+              {isGenerating ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  In progress
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-3 w-3" />
+                  Completed
+                </>
+              )}
             </Badge>
           </div>
           <p className="text-muted-foreground/80 mt-1 text-xs">
-            Analyzing code quality
+            {isGenerating ? "Analyzing code quality" : "Code review completed"}
           </p>
         </div>
       </div>
