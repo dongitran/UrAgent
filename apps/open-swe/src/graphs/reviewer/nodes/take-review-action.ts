@@ -19,6 +19,29 @@ import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createGrepTool } from "../../../tools/grep.js";
+
+// Tools that read file content and need higher context limits
+const FILE_READ_TOOL_NAMES = ["view", "str_replace_based_edit_tool"];
+
+/**
+ * Get appropriate truncation options based on tool type
+ */
+function getTruncationOptions(toolName: string, toolArgs?: Record<string, any>): { numStartCharacters: number; numEndCharacters: number } | undefined {
+  // File read tools need higher limits to allow AI to read full file content
+  if (FILE_READ_TOOL_NAMES.includes(toolName)) {
+    const isViewCommand = toolName === "view" || 
+      (toolName === "str_replace_based_edit_tool" && toolArgs?.command === "view");
+    
+    if (isViewCommand) {
+      return {
+        numStartCharacters: 20000,
+        numEndCharacters: 20000,
+      };
+    }
+  }
+  // Return undefined to use default truncation
+  return undefined;
+}
 import {
   checkoutBranchAndCommitWithInstance,
   getChangedFilesStatusWithInstance,
@@ -161,7 +184,7 @@ export async function takeReviewerActions(
     const toolMessage = new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
-      content: truncateOutput(result),
+      content: truncateOutput(result, getTruncationOptions(toolCall.name, toolCall.args)),
       name: toolCall.name,
       status: toolCallStatus,
     });

@@ -8,9 +8,12 @@ interface ToolCall {
   args?: Record<string, any>;
 }
 
+// Tools that read file content and need higher context limits
+const FILE_READ_TOOL_NAMES = ["view", "str_replace_based_edit_tool"];
+
 /**
  * Processes tool call results with appropriate content handling based on tool type.
- * Handles search_document_for, MCP tools, and regular tools with different truncation strategies.
+ * Handles search_document_for, MCP tools, file read tools, and regular tools with different truncation strategies.
  * Returns a new state object with the updated document cache if the tool is a higher context limit tool.
  */
 export async function processToolCallContent(
@@ -33,6 +36,24 @@ export async function processToolCallContent(
         numStartCharacters: 20000,
         numEndCharacters: 20000,
       }),
+    };
+  } else if (FILE_READ_TOOL_NAMES.includes(toolCall.name)) {
+    // File read tools (view, str_replace_based_edit_tool with view command) need higher limits
+    // to allow AI to read full file content without truncation in the middle
+    const isViewCommand = toolCall.name === "view" || 
+      (toolCall.name === "str_replace_based_edit_tool" && toolCall.args?.command === "view");
+    
+    if (isViewCommand) {
+      return {
+        content: truncateOutput(result, {
+          numStartCharacters: 20000,
+          numEndCharacters: 20000,
+        }),
+      };
+    }
+    // For non-view commands (str_replace, create, insert), use default truncation
+    return {
+      content: truncateOutput(result),
     };
   } else if (higherContextLimitToolNames.includes(toolCall.name)) {
     const url = toolCall.args?.url || toolCall.args?.uri || toolCall.args?.path;
