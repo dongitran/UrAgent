@@ -61,7 +61,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
         Parameters:
             - \`command\`: Must be “view”
             - \`path\`: The path to the file or directory to view
-            - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
+            - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Limit to 500 lines per request. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
 
     ### Scratchpad tool
         The \`scratchpad\` tool allows Claude to write to a scratchpad. This is used for writing down findings, and other context which will be useful for the final review.

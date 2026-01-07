@@ -247,10 +247,32 @@ export async function middleware(request: NextRequest) {
     }
 
     if (request.nextUrl.pathname.startsWith("/chat")) {
+      // If no tokens at all, redirect to login
       if (!hasValidAuth) {
         const url = request.nextUrl.clone();
         url.pathname = "/api/auth/keycloak/login";
         return NextResponse.redirect(url);
+      }
+
+      // Check if access token is missing or expired - try to refresh
+      const accessToken = request.cookies.get(
+        KEYCLOAK_ACCESS_TOKEN_COOKIE,
+      )?.value;
+
+      if (!accessToken || isTokenExpiredOrExpiring(accessToken)) {
+        const refreshedResponse = await tryRefreshAndSetCookies(request);
+        if (refreshedResponse) {
+          // Token refreshed successfully, continue to chat with new cookies
+          return refreshedResponse;
+        }
+        // Refresh failed - clear all cookies and redirect to login to break the loop
+        const url = request.nextUrl.clone();
+        url.pathname = "/api/auth/keycloak/login";
+        const response = NextResponse.redirect(url);
+        response.cookies.delete(KEYCLOAK_ACCESS_TOKEN_COOKIE);
+        response.cookies.delete(KEYCLOAK_REFRESH_TOKEN_COOKIE);
+        response.cookies.delete(KEYCLOAK_ID_TOKEN_COOKIE);
+        return response;
       }
     }
 
@@ -270,7 +292,15 @@ export async function middleware(request: NextRequest) {
         if (refreshedResponse) {
           return refreshedResponse;
         }
-        // If refresh failed and no valid token, the API route will handle the error
+        // If refresh failed, clear cookies and redirect to login to break the auth loop
+        const url = request.nextUrl.clone();
+        url.pathname = "/api/auth/keycloak/login";
+        const response = NextResponse.redirect(url);
+        // Clear all Keycloak cookies to prevent loop
+        response.cookies.delete(KEYCLOAK_ACCESS_TOKEN_COOKIE);
+        response.cookies.delete(KEYCLOAK_REFRESH_TOKEN_COOKIE);
+        response.cookies.delete(KEYCLOAK_ID_TOKEN_COOKIE);
+        return response;
       }
     }
 

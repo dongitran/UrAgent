@@ -16,7 +16,7 @@ export function truncateOutput(
     numEndCharacters?: number;
   },
 ) {
-  const { numStartCharacters = 2500, numEndCharacters = 2500 } = options ?? {};
+  const { numStartCharacters = 5000, numEndCharacters = 5000 } = options ?? {};
 
   if (numStartCharacters < 0 || numEndCharacters < 0) {
     throw new Error("numStartCharacters and numEndCharacters must be >= 0");

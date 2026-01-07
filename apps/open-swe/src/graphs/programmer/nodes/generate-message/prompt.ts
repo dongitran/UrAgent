@@ -44,6 +44,13 @@ const TOOL_USE_BEST_PRACTICES_PROMPT = `<tool_usage_best_practices>
     - Pre-commit: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists
     - History: Use \`git log\` and \`git blame\` for additional context when needed
     - Parallel Tool Calling: You're allowed, and encouraged to call multiple tools at once, as long as they do not conflict, or depend on each other.
+        - CRITICAL: Shell commands that have dependencies MUST be called SEQUENTIALLY, NOT in parallel:
+            - yarn/pnpm install MUST complete before yarn/pnpm build
+            - yarn/pnpm build MUST complete before yarn/pnpm lint or yarn/pnpm test
+            - Any command that depends on installed dependencies MUST wait for install to complete
+            - Example of WRONG parallel calls: [yarn install, yarn build, yarn lint] - these will fail!
+            - Example of CORRECT sequential calls: First call yarn install, wait for result, then call yarn build, wait for result, then call yarn lint
+        - Safe parallel calls: Reading multiple files, searching in different directories, independent file operations
     - URL Content: Use the \`get_url_content\` tool to fetch the contents of a URL. You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
     - Scripts may require dependencies to be installed: Remember that sometimes scripts may require dependencies to be installed before they can be run.
         - Always ensure you've installed dependencies before running a script which might require them.
@@ -66,7 +73,7 @@ const CODING_STANDARDS_PROMPT = `<coding_standards>
     - Only install trusted, well-maintained packages. If installing a new dependency which is not explicitly requested by the user, ensure it is a well-maintained, and widely used package.
         - Ensure package manager files are updated to include the new dependency.
     - If a command you run fails (e.g. a test, build, lint, etc.), and you make changes to fix the issue, ensure you always re-run the command after making the changes to ensure the fix was successful.
-    - IMPORTANT: You are NEVER allowed to create backup files. All changes in the codebase are tracked by git, so never create file copies, or backups.
+    - **FORMATTING ISSUES**: Do NOT manually fix formatting issues like trailing newlines, indentation, whitespace, etc. Run \`yarn lint --fix\` or the project's formatter instead - it will auto-fix these issues.
     - ${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
 </coding_standards>`;
 
@@ -129,7 +136,7 @@ ${CORE_BEHAVIOR_PROMPT}
             Parameters:
                 - \`command\`: Must be “view”
                 - \`path\`: The path to the file or directory to view
-                - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
+                - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Limit to 500 lines per request. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
         
         ### Str replace command
             The \`str_replace\` command allows Claude to replace a specific string in a file with a new string. This is used for making precise edits.

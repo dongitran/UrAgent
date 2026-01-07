@@ -63,6 +63,9 @@ class IssueWebhookHandler extends WebhookHandlerBase {
         issueBody: payload.issue.body || "",
       };
 
+      // Use DEFAULT_BRANCH from env if set, otherwise fallback to GitHub's default_branch
+      const baseBranch = process.env.DEFAULT_BRANCH || payload.repository?.default_branch || "main";
+      
       const runInput = {
         messages: [
           this.createHumanMessage(
@@ -78,7 +81,7 @@ class IssueWebhookHandler extends WebhookHandlerBase {
         targetRepository: {
           owner: context.owner,
           repo: context.repo,
-          branch: payload.repository?.default_branch || "main",
+          branch: baseBranch,
         },
         autoAcceptPlan: isAutoAcceptLabel,
       };

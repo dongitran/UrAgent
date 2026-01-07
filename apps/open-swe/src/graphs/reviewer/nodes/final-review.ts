@@ -152,7 +152,26 @@ export async function finalReview(
   }
 
   if (toolCall.name === completedTool.name) {
-    // Marked as completed. No further actions necessary.
+    // Marked as completed. Mark all remaining plan items as completed.
+    const activeTask = getActiveTask(state.taskPlan);
+    const activePlanItems = getActivePlanItems(state.taskPlan);
+    const allCompletedPlanItems: PlanItem[] = activePlanItems.map((p) => ({
+      ...p,
+      completed: true,
+      summary: p.summary || "Completed (verified by reviewer)",
+    }));
+    const updatedTaskPlan = updateTaskPlanItems(
+      state.taskPlan,
+      activeTask.id,
+      allCompletedPlanItems,
+      "agent",
+    );
+
+    logger.info("Reviewer marked task as completed, updating all plan items", {
+      totalPlanItems: activePlanItems.length,
+      previouslyCompleted: activePlanItems.filter((p) => p.completed).length,
+    });
+
     const toolMessage = new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
@@ -163,6 +182,8 @@ export async function finalReview(
       messages: messagesUpdate,
       internalMessages: messagesUpdate,
       reviewerMessages: messagesUpdate,
+      taskPlan: updatedTaskPlan,
+      tokenData: trackCachePerformance(response, modelName),
     };
   }
 

@@ -139,31 +139,37 @@ export async function getGitHubTokensFromConfig(config: GraphConfig): Promise<{
   const encryptedInstallationToken =
     config.configurable[GITHUB_INSTALLATION_TOKEN_COOKIE];
 
-  // If no encrypted tokens provided, try to generate using GitHub App credentials
-  if (!encryptedInstallationToken) {
-    // Check if we have GitHub App credentials to generate token
-    if (process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY) {
-      const generatedToken =
-        await generateGitHubInstallationToken(installationId);
-      return {
-        githubAccessToken: generatedToken,
-        githubInstallationToken: generatedToken,
-        installationId,
-      };
-    }
-    throw new Error(
-      `Missing required ${GITHUB_INSTALLATION_TOKEN_COOKIE} in configuration and no GitHub App credentials for auto-generation.`,
-    );
+  // Logic: Always prioritize fresh token generation if App credentials exist in the environment.
+  // This prevents authentication failures when a session lasts longer than 1 hour (GITHUB IAT expiry).
+  if (process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY) {
+    const generatedToken =
+      await generateGitHubInstallationToken(installationId);
+    return {
+      githubAccessToken: generatedToken,
+      githubInstallationToken: generatedToken,
+      installationId,
+    };
   }
 
-  // Decrypt the GitHub token
-  const githubAccessToken = encryptedGitHubToken
-    ? decryptSecret(encryptedGitHubToken, encryptionKey)
-    : "";
-  const githubInstallationToken = decryptSecret(
-    encryptedInstallationToken,
-    encryptionKey,
-  );
+  // Fallback to encrypted tokens from configuration if local App credentials are not available
+  if (encryptedInstallationToken) {
+    // Decrypt the GitHub token
+    const githubAccessToken = encryptedGitHubToken
+      ? decryptSecret(encryptedGitHubToken, encryptionKey)
+      : "";
+    const githubInstallationToken = decryptSecret(
+      encryptedInstallationToken,
+      encryptionKey,
+    );
 
-  return { githubAccessToken, githubInstallationToken, installationId };
+    return {
+      githubAccessToken,
+      githubInstallationToken,
+      installationId,
+    };
+  }
+
+  throw new Error(
+    `Missing required ${GITHUB_INSTALLATION_TOKEN_COOKIE} in configuration and no GitHub App credentials for auto-generation.`,
+  );
 }

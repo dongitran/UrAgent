@@ -139,8 +139,11 @@ export async function openPullRequest(
 
   // Use ShellExecutor for retry support on transient errors
   const executor = createShellExecutor(config);
+  const baseBranch = state.targetRepository.branch ?? "";
+  
+  // Git diff with local base branch (always exists because providers clone base branch first)
   const gitDiffRes = await executor.executeCommand({
-    command: `git diff --name-only ${state.targetRepository.branch ?? ""}`,
+    command: `git diff --name-only ${baseBranch}`,
     workdir: repoPath,
     timeout: TIMEOUT_SEC,
     sandboxInstance,

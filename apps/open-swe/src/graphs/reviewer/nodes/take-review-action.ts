@@ -19,6 +19,29 @@ import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createGrepTool } from "../../../tools/grep.js";
+
+// Tools that read file content and need higher context limits
+const FILE_READ_TOOL_NAMES = ["view", "str_replace_based_edit_tool"];
+
+/**
+ * Get appropriate truncation options based on tool type
+ */
+function getTruncationOptions(toolName: string, toolArgs?: Record<string, any>): { numStartCharacters: number; numEndCharacters: number } | undefined {
+  // File read tools need higher limits to allow AI to read full file content
+  if (FILE_READ_TOOL_NAMES.includes(toolName)) {
+    const isViewCommand = toolName === "view" ||
+      (toolName === "str_replace_based_edit_tool" && toolArgs?.command === "view");
+
+    if (isViewCommand) {
+      return {
+        numStartCharacters: 20000,
+        numEndCharacters: 20000,
+      };
+    }
+  }
+  // Return undefined to use default truncation
+  return undefined;
+}
 import {
   checkoutBranchAndCommitWithInstance,
   getChangedFilesStatusWithInstance,
@@ -94,19 +117,18 @@ export async function takeReviewerActions(
       config,
     );
 
-  const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
+  // Helper function to execute a single tool call
+  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<ToolMessage> => {
     const tool = toolsMap[toolCall.name];
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
-      const toolMessage = new ToolMessage({
+      return new ToolMessage({
         id: uuidv4(),
         tool_call_id: toolCall.id ?? "",
         content: `Unknown tool: ${toolCall.name}`,
         name: toolCall.name,
         status: "error",
       });
-
-      return toolMessage;
     }
 
     logger.info("Executing review action", {
@@ -158,17 +180,50 @@ export async function takeReviewerActions(
       }
     }
 
-    const toolMessage = new ToolMessage({
+    return new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
-      content: truncateOutput(result),
+      content: truncateOutput(result, getTruncationOptions(toolCall.name, toolCall.args)),
       name: toolCall.name,
       status: toolCallStatus,
     });
-    return toolMessage;
+  };
+
+  // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
+  // Shell commands like yarn build, yarn lint, yarn test consume significant memory
+  // Running them in parallel can cause OOM (exit code 137) in sandboxes with limited resources
+  const SEQUENTIAL_TOOLS = ["shell", "install_dependencies"];
+  const sequentialCalls = toolCalls.filter(tc => SEQUENTIAL_TOOLS.includes(tc.name));
+  const parallelCalls = toolCalls.filter(tc => !SEQUENTIAL_TOOLS.includes(tc.name));
+
+  logger.info("Executing tool calls", {
+    sequentialCount: sequentialCalls.length,
+    parallelCount: parallelCalls.length,
+    sequentialTools: sequentialCalls.map(tc => tc.name),
+    parallelTools: parallelCalls.map(tc => tc.name),
   });
 
-  const toolCallResults = await Promise.all(toolCallResultsPromise);
+  // Execute sequential tools one at a time (shell commands that may consume lots of memory)
+  const sequentialResults: ToolMessage[] = [];
+  for (const toolCall of sequentialCalls) {
+    const result = await executeToolCall(toolCall);
+    sequentialResults.push(result);
+  }
+
+  // Execute parallel tools concurrently (view, grep, scratchpad - lightweight operations)
+  const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
+
+  // Combine results in original order
+  const toolCallResults: ToolMessage[] = [];
+  let seqIndex = 0;
+  let parIndex = 0;
+  for (const toolCall of toolCalls) {
+    if (SEQUENTIAL_TOOLS.includes(toolCall.name)) {
+      toolCallResults.push(sequentialResults[seqIndex++]);
+    } else {
+      toolCallResults.push(parallelResults[parIndex++]);
+    }
+  }
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
@@ -230,10 +285,10 @@ export async function takeReviewerActions(
     ...toolCallResults,
     ...(updatedTaskPlan && pullRequestNumber
       ? createPullRequestToolCallMessage(
-          state.targetRepository,
-          pullRequestNumber,
-          true,
-        )
+        state.targetRepository,
+        pullRequestNumber,
+        true,
+      )
       : []),
   ];
 

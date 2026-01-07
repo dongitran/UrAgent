@@ -54,6 +54,8 @@ async function getChangedFiles(
 ): Promise<string> {
   try {
     const executor = createShellExecutor(config);
+    
+    // Git diff with local base branch (always exists because providers clone base branch first)
     const changedFilesRes = await executor.executeCommand({
       command: `git diff ${baseBranchName} --name-only`,
       workdir: repoRoot,
@@ -110,6 +112,7 @@ export async function initializeState(
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   logger.info("Initializing state for reviewer");
+  
   // get the base branch name, then get the changed files
   const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
     await getSandboxInstanceWithErrorHandling(
