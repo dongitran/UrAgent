@@ -12,7 +12,10 @@ import {
 import { getOpenSWELabel } from "./label.js";
 import { getInstallationToken } from "@openswe/shared/github/auth";
 import { getConfig } from "@langchain/langgraph";
-import { GITHUB_INSTALLATION_ID } from "@openswe/shared/constants";
+import {
+  GITHUB_INSTALLATION_ID,
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+} from "@openswe/shared/constants";
 import { updateConfig } from "../update-config.js";
 import { encryptSecret } from "@openswe/shared/crypto";
 
@@ -38,7 +41,7 @@ async function getInstallationTokenAndUpdateConfig() {
 
     const token = await getInstallationToken(installationId, appId, privateKey);
     const encryptedToken = encryptSecret(token, encryptionSecret);
-    updateConfig(GITHUB_INSTALLATION_ID, encryptedToken);
+    updateConfig(GITHUB_INSTALLATION_TOKEN_COOKIE, encryptedToken);
     logger.info("Successfully fetched a new GitHub installation token.");
     return token;
   } catch (e) {
@@ -164,10 +167,10 @@ async function withGitHubRetry<T>(
     const errorFields =
       error instanceof Error
         ? {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-          }
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        }
         : {};
 
     // Retry on 401 (authentication error) - refresh token
