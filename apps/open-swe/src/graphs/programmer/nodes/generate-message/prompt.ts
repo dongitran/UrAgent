@@ -44,6 +44,13 @@ const TOOL_USE_BEST_PRACTICES_PROMPT = `<tool_usage_best_practices>
     - Pre-commit: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists
     - History: Use \`git log\` and \`git blame\` for additional context when needed
     - Parallel Tool Calling: You're allowed, and encouraged to call multiple tools at once, as long as they do not conflict, or depend on each other.
+        - CRITICAL: Shell commands that have dependencies MUST be called SEQUENTIALLY, NOT in parallel:
+            - yarn/pnpm install MUST complete before yarn/pnpm build
+            - yarn/pnpm build MUST complete before yarn/pnpm lint or yarn/pnpm test
+            - Any command that depends on installed dependencies MUST wait for install to complete
+            - Example of WRONG parallel calls: [yarn install, yarn build, yarn lint] - these will fail!
+            - Example of CORRECT sequential calls: First call yarn install, wait for result, then call yarn build, wait for result, then call yarn lint
+        - Safe parallel calls: Reading multiple files, searching in different directories, independent file operations
     - URL Content: Use the \`get_url_content\` tool to fetch the contents of a URL. You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
     - Scripts may require dependencies to be installed: Remember that sometimes scripts may require dependencies to be installed before they can be run.
         - Always ensure you've installed dependencies before running a script which might require them.

@@ -139,12 +139,29 @@ export async function openPullRequest(
 
   // Use ShellExecutor for retry support on transient errors
   const executor = createShellExecutor(config);
-  const gitDiffRes = await executor.executeCommand({
-    command: `git diff --name-only ${state.targetRepository.branch ?? ""}`,
+  const baseBranch = state.targetRepository.branch ?? "";
+  
+  // Try git diff with local branch first, then fallback to origin/{branch}
+  let gitDiffRes = await executor.executeCommand({
+    command: `git diff --name-only ${baseBranch}`,
     workdir: repoPath,
     timeout: TIMEOUT_SEC,
     sandboxInstance,
   });
+
+  // If local branch doesn't exist, try with origin/{branch}
+  if (gitDiffRes.exitCode !== 0 && baseBranch) {
+    logger.info("Local branch not found, trying origin/{branch}", {
+      baseBranch,
+      originalError: gitDiffRes.result,
+    });
+    gitDiffRes = await executor.executeCommand({
+      command: `git diff --name-only origin/${baseBranch}`,
+      workdir: repoPath,
+      timeout: TIMEOUT_SEC,
+      sandboxInstance,
+    });
+  }
 
   logger.info("Git diff result", {
     exitCode: gitDiffRes.exitCode,

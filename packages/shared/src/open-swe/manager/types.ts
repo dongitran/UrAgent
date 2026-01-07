@@ -28,6 +28,16 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
         const defaultRepo = process.env.DEFAULT_REPOSITORY_NAME;
         const defaultBranch = process.env.DEFAULT_BRANCH;
 
+        // Debug logging
+        console.log("[ManagerGraphState] targetRepository reducer called", {
+          defaultOwner,
+          defaultRepo,
+          defaultBranch,
+          updateBranch: update?.branch,
+          updateOwner: update?.owner,
+          updateRepo: update?.repo,
+        });
+
         if (defaultOwner && defaultRepo) {
           // When DEFAULT_BRANCH is set, ALWAYS use it (ignore client branch)
           // This ensures the agent always works on the configured base branch
@@ -36,13 +46,16 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
             ? defaultBranch 
             : (update?.branch || "main");
           
-          return {
+          const result = {
             owner: defaultOwner,
             repo: defaultRepo,
             branch,
           };
+          console.log("[ManagerGraphState] Using default repository config", result);
+          return result;
         }
         // No default configured, use client input
+        console.log("[ManagerGraphState] Using client input", update);
         return update;
       },
     },

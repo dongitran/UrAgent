@@ -426,10 +426,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
                 hasAutoSelectedRef.current = true;
               } else {
                 const firstRepo = repositories[0];
+                // Prefer NEXT_PUBLIC_DEFAULT_BRANCH over GitHub's default_branch
+                const defaultBranchFromEnv = process.env.NEXT_PUBLIC_DEFAULT_BRANCH;
                 const targetRepo = {
                   owner: firstRepo.full_name.split("/")[0],
                   repo: firstRepo.full_name.split("/")[1],
-                  branch: firstRepo.default_branch || "main",
+                  branch: defaultBranchFromEnv || firstRepo.default_branch || "main",
                 };
                 setSelectedRepository(targetRepo);
                 saveRepositoryToLocalStorage(targetRepo);
@@ -438,10 +440,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
             } catch (error) {
               console.warn("Failed to fetch specific repository:", error);
               const firstRepo = repositories[0];
+              // Prefer NEXT_PUBLIC_DEFAULT_BRANCH over GitHub's default_branch
+              const defaultBranchFromEnv = process.env.NEXT_PUBLIC_DEFAULT_BRANCH;
               const targetRepo = {
                 owner: firstRepo.full_name.split("/")[0],
                 repo: firstRepo.full_name.split("/")[1],
-                branch: firstRepo.default_branch || "main",
+                branch: defaultBranchFromEnv || firstRepo.default_branch || "main",
               };
               setSelectedRepository(targetRepo);
               saveRepositoryToLocalStorage(targetRepo);
@@ -474,10 +478,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
       hasCheckedLocalStorageRef.current
     ) {
       const firstRepo = repositories[0];
+      // Prefer NEXT_PUBLIC_DEFAULT_BRANCH over GitHub's default_branch
+      const defaultBranchFromEnv = process.env.NEXT_PUBLIC_DEFAULT_BRANCH;
       const targetRepo = {
         owner: firstRepo.full_name.split("/")[0],
         repo: firstRepo.full_name.split("/")[1],
-        branch: firstRepo.default_branch || "main",
+        branch: defaultBranchFromEnv || firstRepo.default_branch || "main",
       };
       setSelectedRepository(targetRepo);
       saveRepositoryToLocalStorage(targetRepo);

@@ -54,12 +54,28 @@ async function getChangedFiles(
 ): Promise<string> {
   try {
     const executor = createShellExecutor(config);
-    const changedFilesRes = await executor.executeCommand({
+    
+    // Try git diff with local branch first
+    let changedFilesRes = await executor.executeCommand({
       command: `git diff ${baseBranchName} --name-only`,
       workdir: repoRoot,
       timeout: 30,
       sandboxInstance,
     });
+
+    // If local branch doesn't exist, try with origin/{branch}
+    if (changedFilesRes.exitCode !== 0 && baseBranchName) {
+      logger.info("Local branch not found, trying origin/{branch}", {
+        baseBranchName,
+        originalError: changedFilesRes.result,
+      });
+      changedFilesRes = await executor.executeCommand({
+        command: `git diff origin/${baseBranchName} --name-only`,
+        workdir: repoRoot,
+        timeout: 30,
+        sandboxInstance,
+      });
+    }
 
     if (changedFilesRes.exitCode !== 0) {
       logger.error(`Failed to get changed files: ${changedFilesRes.result}`);

@@ -73,37 +73,37 @@ export type LoopRecommendation =
  */
 export const LOOP_DETECTION_CONFIG = {
   /** Number of consecutive identical tool calls to consider as a loop (warn) */
-  LOOP_THRESHOLD: 5, // Increased from 4 to reduce false positives (build→fix→retry is legitimate)
+  LOOP_THRESHOLD: 20, // 5 * 4 = 20
   /** Number of consecutive identical tool calls to force task completion */
-  FORCE_COMPLETION_THRESHOLD: 8, // Increased from 6 for more tolerance
+  FORCE_COMPLETION_THRESHOLD: 32, // 8 * 4 = 32
   /** Number of recent messages to analyze for loop detection */
-  MESSAGES_TO_ANALYZE: 30,
+  MESSAGES_TO_ANALYZE: 120, // 30 * 4 = 120
   /** Threshold for read-only loop detection (% of read operations) */
-  READ_ONLY_THRESHOLD: 0.85, // Increased from 0.8 to be more lenient
+  READ_ONLY_THRESHOLD: 0.85, // Keep percentage threshold unchanged
   /** Minimum tool calls to analyze for patterns */
-  MIN_CALLS_FOR_PATTERN: 6,
+  MIN_CALLS_FOR_PATTERN: 24, // 6 * 4 = 24
   /** Threshold for similar tool detection (same tool, different args) */
-  SIMILAR_TOOL_THRESHOLD: 6, // Increased from 5
+  SIMILAR_TOOL_THRESHOLD: 24, // 6 * 4 = 24
   /** Window size for frequency-based detection */
-  FREQUENCY_WINDOW: 20, // Increased from 15 for larger window
+  FREQUENCY_WINDOW: 80, // 20 * 4 = 80
   /** Frequency threshold (same tool called X times in window) */
-  FREQUENCY_THRESHOLD: 12, // Increased from 10 - view/read operations are common during exploration
+  FREQUENCY_THRESHOLD: 48, // 12 * 4 = 48
   /** Edit loop threshold - more severe, request help earlier */
-  EDIT_LOOP_THRESHOLD: 5, // Increased from 4 - give more attempts before requesting help
+  EDIT_LOOP_THRESHOLD: 20, // 5 * 4 = 20
   /** Maximum warnings before escalating to force_complete */
-  MAX_WARNINGS_BEFORE_ESCALATE: 3, // Increased from 2 for more tolerance
+  MAX_WARNINGS_BEFORE_ESCALATE: 12, // 3 * 4 = 12
   /** Minimum unique files to consider as legitimate exploration (not a loop) */
-  MIN_UNIQUE_FILES_FOR_EXPLORATION: 8,
+  MIN_UNIQUE_FILES_FOR_EXPLORATION: 32, // 8 * 4 = 32
   /** Similarity threshold for chanting detection (Jaccard similarity) */
-  CHANTING_SIMILARITY_THRESHOLD: 0.9,
+  CHANTING_SIMILARITY_THRESHOLD: 0.9, // Keep percentage threshold unchanged
   /** Minimum consecutive chanting messages to trigger detection */
-  CHANTING_MIN_COUNT: 3,
+  CHANTING_MIN_COUNT: 12, // 3 * 4 = 12
   /** Error rate threshold for error retry loop detection (60%) */
-  ERROR_RATE_THRESHOLD: 0.6,
+  ERROR_RATE_THRESHOLD: 0.6, // Keep percentage threshold unchanged
   /** Minimum tool calls to check for error rate */
-  MIN_CALLS_FOR_ERROR_RATE: 5,
+  MIN_CALLS_FOR_ERROR_RATE: 20, // 5 * 4 = 20
   /** Minimum unique shell commands to consider as legitimate work (not a loop) */
-  MIN_UNIQUE_SHELL_COMMANDS: 4,
+  MIN_UNIQUE_SHELL_COMMANDS: 16, // 4 * 4 = 16
 };
 
 /** Tools that are considered "read-only" operations */
@@ -1308,9 +1308,9 @@ function detectSimilarToolCalls(toolCalls: ToolCallSignature[]): {
   // If the consecutive calls are all READ operations, be more lenient
   // Agent might be reading the same file to understand different parts
   if (isAllReadOnly) {
-    // For read-only operations, require 10+ consecutive calls to trigger
-    // This is higher than SIMILAR_TOOL_THRESHOLD (6) to avoid false positives
-    const READ_ONLY_SIMILAR_THRESHOLD = 10;
+    // For read-only operations, require 40+ consecutive calls to trigger (10 * 4 = 40)
+    // This is higher than SIMILAR_TOOL_THRESHOLD (24) to avoid false positives
+    const READ_ONLY_SIMILAR_THRESHOLD = 40;
     return {
       isSimilar: consecutiveFileCount >= READ_ONLY_SIMILAR_THRESHOLD,
       count: consecutiveFileCount,
