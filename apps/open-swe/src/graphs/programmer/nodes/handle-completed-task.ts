@@ -15,7 +15,6 @@ import {
 } from "@openswe/shared/open-swe/tasks";
 import {
   getCurrentPlanItem,
-  getRemainingPlanItems,
 } from "../../../utils/current-task.js";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
@@ -207,13 +206,15 @@ export async function handleCompletedTask(
     ...(branchName && { branchName }),
   };
 
-  // Calculate remaining tasks from updatedPlanTasks (AFTER marking current task as completed)
-  // This ensures we check remaining tasks based on the final task plan state
+  // Calculate if there are any uncompleted tasks left in the plan
+  // We use getCurrentPlanItem which finds the first task with completed: false
+  // If it returns an item with index -1, it means ALL tasks are completed
   const finalActivePlanItems = getActivePlanItems(updatedPlanTasks);
-  const remainingTask = getRemainingPlanItems(finalActivePlanItems)?.[0];
-  if (!remainingTask) {
+  const currentTaskAfterUpdate = getCurrentPlanItem(finalActivePlanItems);
+
+  if (currentTaskAfterUpdate.index === -1) {
     logger.info(
-      "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
+      "All tasks in the plan are completed. Continuing to the conclusion generation step.",
     );
 
     return new Command({
