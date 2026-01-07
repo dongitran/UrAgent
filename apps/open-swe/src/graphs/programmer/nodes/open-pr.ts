@@ -141,73 +141,13 @@ export async function openPullRequest(
   const executor = createShellExecutor(config);
   const baseBranch = state.targetRepository.branch ?? "";
   
-  // Try git diff with local branch first, then fallback to origin/{branch}
-  let gitDiffRes = await executor.executeCommand({
+  // Git diff with local base branch (always exists because providers clone base branch first)
+  const gitDiffRes = await executor.executeCommand({
     command: `git diff --name-only ${baseBranch}`,
     workdir: repoPath,
     timeout: TIMEOUT_SEC,
     sandboxInstance,
   });
-
-  // If local branch doesn't exist, try with origin/{branch}
-  if (gitDiffRes.exitCode !== 0 && baseBranch) {
-    logger.info("Local branch not found, trying origin/{branch}", {
-      baseBranch,
-      originalError: gitDiffRes.result,
-    });
-    gitDiffRes = await executor.executeCommand({
-      command: `git diff --name-only origin/${baseBranch}`,
-      workdir: repoPath,
-      timeout: TIMEOUT_SEC,
-      sandboxInstance,
-    });
-    
-    // If origin/{branch} also doesn't exist, try to fetch it first
-    if (gitDiffRes.exitCode !== 0) {
-      logger.info("origin/{branch} not found, fetching base branch reference", {
-        baseBranch,
-        originalError: gitDiffRes.result,
-      });
-      
-      // Fetch the base branch reference
-      const fetchResult = await executor.executeCommand({
-        command: `git fetch origin ${baseBranch}:refs/remotes/origin/${baseBranch} --depth=1`,
-        workdir: repoPath,
-        timeout: 120,
-        sandboxInstance,
-        env: {
-          GIT_TERMINAL_PROMPT: '0',
-        },
-      });
-      
-      if (fetchResult.exitCode === 0) {
-        // Create local tracking branch
-        await executor.executeCommand({
-          command: `git branch ${baseBranch} refs/remotes/origin/${baseBranch} 2>/dev/null || true`,
-          workdir: repoPath,
-          timeout: 30,
-          sandboxInstance,
-        });
-        
-        logger.info("Fetched base branch reference, retrying git diff", {
-          baseBranch,
-        });
-        
-        // Retry git diff with origin/{branch}
-        gitDiffRes = await executor.executeCommand({
-          command: `git diff --name-only origin/${baseBranch}`,
-          workdir: repoPath,
-          timeout: TIMEOUT_SEC,
-          sandboxInstance,
-        });
-      } else {
-        logger.warn("Failed to fetch base branch reference", {
-          baseBranch,
-          fetchError: fetchResult.result,
-        });
-      }
-    }
-  }
 
   logger.info("Git diff result", {
     exitCode: gitDiffRes.exitCode,

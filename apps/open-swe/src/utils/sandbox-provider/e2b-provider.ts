@@ -330,6 +330,7 @@ export class E2BSandboxWrapper implements ISandbox {
         url: options.url.replace(/\/\/.*@/, '//***@'),
         targetDir: options.targetDir,
         branch: options.branch,
+        baseBranch: options.baseBranch,
         hasToken: !!options.token,
         hasCommit: !!options.commit,
       });
@@ -376,14 +377,11 @@ export class E2BSandboxWrapper implements ISandbox {
       // Step 3: Build clone URL with credentials if provided
       let cloneUrl = options.url;
       if (options.token) {
-        // Parse URL and add credentials
-        // Format: https://username:token@github.com/owner/repo.git
         const urlMatch = options.url.match(/^(https?:\/\/)(.+)$/);
         if (urlMatch) {
           const protocol = urlMatch[1];
           const rest = urlMatch[2];
           const username = options.username || 'x-access-token';
-          // URL encode the token to handle special characters
           const encodedToken = encodeURIComponent(options.token);
           cloneUrl = `${protocol}${username}:${encodedToken}@${rest}`;
           logger.debug("[E2B] Built authenticated clone URL", {
@@ -393,63 +391,29 @@ export class E2BSandboxWrapper implements ISandbox {
         }
       }
       
-      // Step 4: Clone the repository
-      // If branch is specified, try to clone that branch directly
-      // If it fails (branch doesn't exist), clone default branch
-      let command = `git clone --depth 1`;
-      if (options.branch && !options.commit) {
-        command += ` -b "${options.branch}"`;
-      }
-      command += ` "${cloneUrl}" "${options.targetDir}"`;
+      // Step 4: Always clone base branch first to ensure local base branch exists for git diff
+      // This matches the behavior of the old code that worked correctly
+      const baseBranch = options.baseBranch || 'main';
+      
+      logger.info("[E2B] Cloning base branch first", {
+        sandboxId: this.id,
+        baseBranch,
+      });
+      
+      let command = `git clone --depth 1 -b "${baseBranch}" "${cloneUrl}" "${options.targetDir}"`;
       
       logger.debug("[E2B] Executing git clone", {
         sandboxId: this.id,
-        command: command.replace(/\/\/[^@]+@/, '//***@'), // mask credentials
+        command: command.replace(/\/\/[^@]+@/, '//***@'),
       });
       
       let result = await this.executeCommand({
         command,
-        timeout: 300, // 5 minutes for large repos
+        timeout: 300,
         env: {
           GIT_TERMINAL_PROMPT: '0',
         },
       });
-      
-      // If branch clone failed, try cloning default branch then create the branch
-      let clonedDefaultBranch = false;
-      if (result.exitCode !== 0 && options.branch) {
-        logger.warn("[E2B] Branch clone failed, trying default branch", {
-          sandboxId: this.id,
-          branch: options.branch,
-          exitCode: result.exitCode,
-          stderr: result.artifacts?.stderr?.substring(0, 300),
-        });
-        
-        // Remove the failed clone directory first
-        await this.executeCommand({
-          command: `rm -rf "${options.targetDir}"`,
-          timeout: 60,
-        });
-        
-        // Clone without branch specification (uses default branch)
-        command = `git clone --depth 1 "${cloneUrl}" "${options.targetDir}"`;
-        logger.debug("[E2B] Retrying git clone without branch", {
-          sandboxId: this.id,
-          command: command.replace(/\/\/[^@]+@/, '//***@'),
-        });
-        
-        result = await this.executeCommand({
-          command,
-          timeout: 300,
-          env: {
-            GIT_TERMINAL_PROMPT: '0',
-          },
-        });
-        
-        if (result.exitCode === 0) {
-          clonedDefaultBranch = true;
-        }
-      }
       
       if (result.exitCode !== 0) {
         logger.error("[E2B] Git clone failed", {
@@ -462,41 +426,34 @@ export class E2BSandboxWrapper implements ISandbox {
         throw new Error(`Git clone failed (exit ${result.exitCode}): ${result.artifacts?.stderr || result.result}`);
       }
       
-      logger.info("[E2B] Git clone successful", {
+      logger.info("[E2B] Cloned base branch successfully", {
         sandboxId: this.id,
-        targetDir: options.targetDir,
-        clonedDefaultBranch,
+        baseBranch,
       });
       
-      // Step 5: If we cloned default branch but wanted a different branch, create it
-      if (clonedDefaultBranch && options.branch) {
-        logger.info("[E2B] Creating new branch from default", {
+      // Step 5: If a different branch is requested, create/checkout it
+      if (options.branch && options.branch !== baseBranch) {
+        logger.info("[E2B] Creating/checking out feature branch", {
           sandboxId: this.id,
-          branch: options.branch,
+          featureBranch: options.branch,
+          baseBranch,
         });
         
-        // Fetch full history first (needed for proper branch creation)
-        await this.executeCommand({
-          command: 'git fetch --unshallow 2>/dev/null || true',
-          workdir: options.targetDir,
-          timeout: 300,
-        });
-        
-        // Create and checkout the new branch
-        const createBranchResult = await this.executeCommand({
-          command: `git checkout -b "${options.branch}"`,
+        // Try to checkout existing branch first, if fails create new branch
+        const checkoutResult = await this.executeCommand({
+          command: `git checkout ${options.branch} 2>/dev/null || git checkout -b ${options.branch}`,
           workdir: options.targetDir,
           timeout: 60,
         });
         
-        if (createBranchResult.exitCode !== 0) {
-          logger.warn("[E2B] Failed to create branch, may already exist locally", {
+        if (checkoutResult.exitCode !== 0) {
+          logger.warn("[E2B] Failed to checkout/create branch", {
             sandboxId: this.id,
             branch: options.branch,
-            stderr: createBranchResult.artifacts?.stderr?.substring(0, 300),
+            stderr: checkoutResult.artifacts?.stderr?.substring(0, 300),
           });
         } else {
-          logger.info("[E2B] Created new branch", {
+          logger.info("[E2B] Feature branch ready", {
             sandboxId: this.id,
             branch: options.branch,
           });
@@ -529,43 +486,6 @@ export class E2BSandboxWrapper implements ISandbox {
         }
         
         logger.debug("[E2B] Checked out commit", { commit: options.commit });
-      }
-      
-      // Step 7: Fetch base branch reference for git diff to work
-      // This is needed because shallow clone doesn't have other branch references
-      if (options.baseBranch) {
-        logger.debug("[E2B] Fetching base branch reference for diff", {
-          baseBranch: options.baseBranch,
-        });
-        
-        // Fetch the base branch with minimal depth
-        const fetchBaseResult = await this.executeCommand({
-          command: `git fetch origin ${options.baseBranch}:refs/remotes/origin/${options.baseBranch} --depth=1`,
-          workdir: options.targetDir,
-          timeout: 120,
-          env: {
-            GIT_TERMINAL_PROMPT: '0',
-          },
-        });
-        
-        if (fetchBaseResult.exitCode !== 0) {
-          logger.warn("[E2B] Failed to fetch base branch, git diff may not work", {
-            baseBranch: options.baseBranch,
-            exitCode: fetchBaseResult.exitCode,
-            stderr: fetchBaseResult.artifacts?.stderr?.substring(0, 300),
-          });
-        } else {
-          // Create local tracking branch
-          await this.executeCommand({
-            command: `git branch ${options.baseBranch} refs/remotes/origin/${options.baseBranch} 2>/dev/null || true`,
-            workdir: options.targetDir,
-            timeout: 30,
-          });
-          
-          logger.info("[E2B] Fetched base branch reference", {
-            baseBranch: options.baseBranch,
-          });
-        }
       }
     },
     

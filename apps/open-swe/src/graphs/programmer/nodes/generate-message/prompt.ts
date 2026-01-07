@@ -73,7 +73,7 @@ const CODING_STANDARDS_PROMPT = `<coding_standards>
     - Only install trusted, well-maintained packages. If installing a new dependency which is not explicitly requested by the user, ensure it is a well-maintained, and widely used package.
         - Ensure package manager files are updated to include the new dependency.
     - If a command you run fails (e.g. a test, build, lint, etc.), and you make changes to fix the issue, ensure you always re-run the command after making the changes to ensure the fix was successful.
-    - IMPORTANT: You are NEVER allowed to create backup files. All changes in the codebase are tracked by git, so never create file copies, or backups.
+    - **FORMATTING ISSUES**: Do NOT manually fix formatting issues like trailing newlines, indentation, whitespace, etc. Run \`yarn lint --fix\` or the project's formatter instead - it will auto-fix these issues.
     - ${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
 </coding_standards>`;
 

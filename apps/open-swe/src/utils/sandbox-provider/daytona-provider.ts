@@ -229,110 +229,61 @@ ${delimiter}`;
         baseBranch: options.baseBranch,
       });
       
-      try {
-        // Try to clone the specified branch first
-        await this.sandbox.git.clone(
-          options.url,
-          options.targetDir,
-          options.branch,
-          options.commit,
-          options.username || 'x-access-token',
-          options.token,
-        );
-        logger.info("[DAYTONA] Git clone successful", {
+      // Always clone base branch first to ensure local base branch exists for git diff
+      // This matches the behavior of the old code that worked correctly
+      const baseBranch = options.baseBranch || process.env.DEFAULT_BRANCH || 'main';
+      
+      logger.info("[DAYTONA] Cloning base branch first", {
+        sandboxId: this.id,
+        baseBranch,
+      });
+      
+      await this.sandbox.git.clone(
+        options.url,
+        options.targetDir,
+        baseBranch,
+        options.commit,
+        options.username || 'x-access-token',
+        options.token,
+      );
+      
+      logger.info("[DAYTONA] Cloned base branch successfully", {
+        sandboxId: this.id,
+        branch: baseBranch,
+      });
+      
+      // If a different branch is requested, create/checkout it
+      if (options.branch && options.branch !== baseBranch) {
+        logger.info("[DAYTONA] Creating/checking out feature branch", {
+          sandboxId: this.id,
+          featureBranch: options.branch,
+          baseBranch,
+        });
+        
+        // Try to checkout existing branch first, if fails create new branch
+        const checkoutResult = await this.executeCommand({
+          command: `git checkout ${options.branch} 2>/dev/null || git checkout -b ${options.branch}`,
+          workdir: options.targetDir,
+          timeout: 60,
+        });
+        
+        if (checkoutResult.exitCode !== 0) {
+          // Fallback: use SDK to create branch
+          try {
+            await this.sandbox.git.createBranch(options.targetDir, options.branch);
+          } catch (createError) {
+            logger.warn("[DAYTONA] Failed to create branch, may already exist", {
+              sandboxId: this.id,
+              branch: options.branch,
+              error: createError instanceof Error ? createError.message : String(createError),
+            });
+          }
+        }
+        
+        logger.info("[DAYTONA] Feature branch ready", {
           sandboxId: this.id,
           branch: options.branch,
         });
-      } catch (cloneError) {
-        const errorMessage = cloneError instanceof Error ? cloneError.message : String(cloneError);
-        
-        // Check if error is because branch doesn't exist on remote
-        if (errorMessage.includes("couldn't find remote ref") || 
-            errorMessage.includes("Remote branch") ||
-            errorMessage.includes("not found")) {
-          logger.warn("[DAYTONA] Branch not found on remote, cloning base branch instead", {
-            sandboxId: this.id,
-            requestedBranch: options.branch,
-            baseBranch: options.baseBranch,
-            error: errorMessage,
-          });
-          
-          // Clone the base branch (or default branch) instead
-          // Use DEFAULT_BRANCH from env if baseBranch is not provided
-          const branchToClone = options.baseBranch || process.env.DEFAULT_BRANCH || 'main';
-          await this.sandbox.git.clone(
-            options.url,
-            options.targetDir,
-            branchToClone,
-            options.commit,
-            options.username || 'x-access-token',
-            options.token,
-          );
-          
-          logger.info("[DAYTONA] Cloned base branch successfully", {
-            sandboxId: this.id,
-            branch: branchToClone,
-          });
-          
-          // Create the new branch locally if it's different from base
-          if (options.branch && options.branch !== branchToClone) {
-            logger.info("[DAYTONA] Creating new branch from base", {
-              sandboxId: this.id,
-              newBranch: options.branch,
-              baseBranch: branchToClone,
-            });
-            
-            await this.sandbox.git.createBranch(options.targetDir, options.branch);
-            
-            logger.info("[DAYTONA] New branch created", {
-              sandboxId: this.id,
-              branch: options.branch,
-            });
-          }
-        } else {
-          // Re-throw other errors
-          throw cloneError;
-        }
-      }
-      
-      // Fetch base branch reference for git diff to work
-      // This is needed because shallow clone doesn't have other branch references
-      if (options.baseBranch) {
-        logger.debug("[DAYTONA] Fetching base branch reference for diff", {
-          sandboxId: this.id,
-          baseBranch: options.baseBranch,
-        });
-        
-        // Fetch the base branch with minimal depth
-        const fetchBaseResult = await this.executeCommand({
-          command: `git fetch origin ${options.baseBranch}:refs/remotes/origin/${options.baseBranch} --depth=1`,
-          workdir: options.targetDir,
-          timeout: 120,
-          env: {
-            GIT_TERMINAL_PROMPT: '0',
-          },
-        });
-        
-        if (fetchBaseResult.exitCode !== 0) {
-          logger.warn("[DAYTONA] Failed to fetch base branch, git diff may not work", {
-            sandboxId: this.id,
-            baseBranch: options.baseBranch,
-            exitCode: fetchBaseResult.exitCode,
-            stderr: fetchBaseResult.artifacts?.stderr?.substring(0, 300),
-          });
-        } else {
-          // Create local tracking branch
-          await this.executeCommand({
-            command: `git branch ${options.baseBranch} refs/remotes/origin/${options.baseBranch} 2>/dev/null || true`,
-            workdir: options.targetDir,
-            timeout: 30,
-          });
-          
-          logger.info("[DAYTONA] Fetched base branch reference", {
-            sandboxId: this.id,
-            baseBranch: options.baseBranch,
-          });
-        }
       }
     },
     

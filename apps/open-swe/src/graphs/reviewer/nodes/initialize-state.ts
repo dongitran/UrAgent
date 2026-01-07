@@ -55,73 +55,13 @@ async function getChangedFiles(
   try {
     const executor = createShellExecutor(config);
     
-    // Try git diff with local branch first
-    let changedFilesRes = await executor.executeCommand({
+    // Git diff with local base branch (always exists because providers clone base branch first)
+    const changedFilesRes = await executor.executeCommand({
       command: `git diff ${baseBranchName} --name-only`,
       workdir: repoRoot,
       timeout: 30,
       sandboxInstance,
     });
-
-    // If local branch doesn't exist, try with origin/{branch}
-    if (changedFilesRes.exitCode !== 0 && baseBranchName) {
-      logger.info("Local branch not found, trying origin/{branch}", {
-        baseBranchName,
-        originalError: changedFilesRes.result,
-      });
-      changedFilesRes = await executor.executeCommand({
-        command: `git diff origin/${baseBranchName} --name-only`,
-        workdir: repoRoot,
-        timeout: 30,
-        sandboxInstance,
-      });
-      
-      // If origin/{branch} also doesn't exist, try to fetch it first
-      if (changedFilesRes.exitCode !== 0) {
-        logger.info("origin/{branch} not found, fetching base branch reference", {
-          baseBranchName,
-          originalError: changedFilesRes.result,
-        });
-        
-        // Fetch the base branch reference
-        const fetchResult = await executor.executeCommand({
-          command: `git fetch origin ${baseBranchName}:refs/remotes/origin/${baseBranchName} --depth=1`,
-          workdir: repoRoot,
-          timeout: 120,
-          sandboxInstance,
-          env: {
-            GIT_TERMINAL_PROMPT: '0',
-          },
-        });
-        
-        if (fetchResult.exitCode === 0) {
-          // Create local tracking branch
-          await executor.executeCommand({
-            command: `git branch ${baseBranchName} refs/remotes/origin/${baseBranchName} 2>/dev/null || true`,
-            workdir: repoRoot,
-            timeout: 30,
-            sandboxInstance,
-          });
-          
-          logger.info("Fetched base branch reference, retrying git diff", {
-            baseBranchName,
-          });
-          
-          // Retry git diff with origin/{branch}
-          changedFilesRes = await executor.executeCommand({
-            command: `git diff origin/${baseBranchName} --name-only`,
-            workdir: repoRoot,
-            timeout: 30,
-            sandboxInstance,
-          });
-        } else {
-          logger.warn("Failed to fetch base branch reference", {
-            baseBranchName,
-            fetchError: fetchResult.result,
-          });
-        }
-      }
-    }
 
     if (changedFilesRes.exitCode !== 0) {
       logger.error(`Failed to get changed files: ${changedFilesRes.result}`);
@@ -172,6 +112,7 @@ export async function initializeState(
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   logger.info("Initializing state for reviewer");
+  
   // get the base branch name, then get the changed files
   const { sandboxInstance, codebaseTree, dependenciesInstalled, sandboxProviderType } =
     await getSandboxInstanceWithErrorHandling(
