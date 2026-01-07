@@ -294,6 +294,46 @@ ${delimiter}`;
           throw cloneError;
         }
       }
+      
+      // Fetch base branch reference for git diff to work
+      // This is needed because shallow clone doesn't have other branch references
+      if (options.baseBranch) {
+        logger.debug("[DAYTONA] Fetching base branch reference for diff", {
+          sandboxId: this.id,
+          baseBranch: options.baseBranch,
+        });
+        
+        // Fetch the base branch with minimal depth
+        const fetchBaseResult = await this.executeCommand({
+          command: `git fetch origin ${options.baseBranch}:refs/remotes/origin/${options.baseBranch} --depth=1`,
+          workdir: options.targetDir,
+          timeout: 120,
+          env: {
+            GIT_TERMINAL_PROMPT: '0',
+          },
+        });
+        
+        if (fetchBaseResult.exitCode !== 0) {
+          logger.warn("[DAYTONA] Failed to fetch base branch, git diff may not work", {
+            sandboxId: this.id,
+            baseBranch: options.baseBranch,
+            exitCode: fetchBaseResult.exitCode,
+            stderr: fetchBaseResult.artifacts?.stderr?.substring(0, 300),
+          });
+        } else {
+          // Create local tracking branch
+          await this.executeCommand({
+            command: `git branch ${options.baseBranch} refs/remotes/origin/${options.baseBranch} 2>/dev/null || true`,
+            workdir: options.targetDir,
+            timeout: 30,
+          });
+          
+          logger.info("[DAYTONA] Fetched base branch reference", {
+            sandboxId: this.id,
+            baseBranch: options.baseBranch,
+          });
+        }
+      }
     },
     
     add: async (workdir: string, files: string[]): Promise<void> => {
