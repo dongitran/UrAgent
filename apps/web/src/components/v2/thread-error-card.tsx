@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { AlertCircle, ArrowLeft, Lock, Search } from "lucide-react";
+import { redirectToKeycloakLogin } from "@/lib/auth-redirect";
 
 export interface ThreadStatusError {
   message: string;
@@ -15,6 +16,10 @@ interface ThreadErrorCardProps {
 }
 
 export function ThreadErrorCard({ error, onGoBack }: ThreadErrorCardProps) {
+  const handleLogin = () => {
+    redirectToKeycloakLogin();
+  };
+
   const getErrorIcon = () => {
     switch (error.type) {
       case "not_found":
@@ -84,7 +89,16 @@ export function ThreadErrorCard({ error, onGoBack }: ThreadErrorCardProps) {
             </div>
           </div>
 
-          <div className="pt-2">
+          <div className="space-y-2 pt-2">
+            {error.type === "unauthorized" && (
+              <Button
+                onClick={handleLogin}
+                className="flex w-full items-center gap-2"
+              >
+                <Lock className="h-4 w-4" />
+                Login Again
+              </Button>
+            )}
             <Button
               onClick={onGoBack}
               variant="outline"

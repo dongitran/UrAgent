@@ -12,6 +12,10 @@ import { useRouter } from "next/navigation";
 import * as React from "react";
 import { use, useEffect, useRef, useState } from "react";
 import { Client, Thread } from "@langchain/langgraph-sdk";
+import {
+  isAuthenticationError,
+  redirectToKeycloakLogin,
+} from "@/lib/auth-redirect";
 
 async function fetchInitialThread(
   client: Client<ManagerGraphState>,
@@ -65,12 +69,12 @@ export default function ThreadPage({
   // We need a thread object for the hook, so use a dummy if not found
   const dummyThread = thread ||
     initialFetchedThread || {
-      thread_id,
-      values: {},
-      status: "idle" as const,
-      updated_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-    };
+    thread_id,
+    values: {},
+    status: "idle" as const,
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
 
   const { metadata: currentDisplayThread, statusError } = useThreadMetadata(
     dummyThread as any,
@@ -92,6 +96,12 @@ export default function ThreadPage({
       setInitialFetchedThread(null);
     }
   }, [thread_id, thread]);
+
+  // If auth error (401/token expired), redirect to login instead of showing error page
+  if (statusError && isAuthenticationError(statusError)) {
+    redirectToKeycloakLogin();
+    return <ThreadViewLoading onBackToHome={handleBackToHome} />;
+  }
 
   if (statusError && "message" in statusError && "type" in statusError) {
     return (
