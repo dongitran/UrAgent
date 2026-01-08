@@ -25,7 +25,7 @@ import {
   finalReview,
 } from "../reviewer/nodes/index.js";
 import { diagnoseError as diagnoseReviewerError } from "../shared/diagnose-error.js";
-import { getRemainingPlanItems } from "../../utils/current-task.js";
+import { getCurrentPlanItem } from "../../utils/current-task.js";
 import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 
@@ -93,14 +93,18 @@ function routeGeneratedAction(
   const activePlanItems = state.taskPlan
     ? getActivePlanItems(state.taskPlan)
     : [];
-  const hasRemainingTasks = getRemainingPlanItems(activePlanItems).length > 0;
+
+  // Use getCurrentPlanItem to see if there's any uncompleted task left
+  const currentTask = getCurrentPlanItem(activePlanItems);
+  const hasRemainingTasks = currentTask.index !== -1;
+
   // If the model did not generate a tool call, but there are remaining tasks, we should route back to the generate action step.
-  // Also add a check ensuring that the last to messages generated have tool calls. Otherwise we can end.
+  // Also add a check ensuring that the last two messages generated have tool calls. Otherwise we can end.
   if (hasRemainingTasks && !lastMessagesMissingToolCalls(internalMessages, 2)) {
     return "generate-action";
   }
 
-  // No tool calls, route to reviewer subgraph
+  // No tool calls and either no remaining tasks or we've hit a loop of no tool calls, route to reviewer
   return "route-to-review-or-conclusion";
 }
 

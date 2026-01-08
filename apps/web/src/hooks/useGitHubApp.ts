@@ -194,17 +194,24 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   const setSelectedRepository = useCallback(
     (repo: TargetRepository | null) => {
+      // Check if the repository has actually changed
+      const hasChanged =
+        repo?.owner !== selectedRepositoryState?.owner ||
+        repo?.repo !== selectedRepositoryState?.repo;
+
       // Update state (not URL)
       setSelectedRepositoryState(repo);
       // Persist to localStorage whenever repository is selected
       saveRepositoryToLocalStorage(repo);
 
-      setSelectedBranchParam(null);
-      setBranches([]);
-      setBranchesPage(1);
-      setBranchesHasMore(false);
+      if (hasChanged) {
+        setSelectedBranchParam(null);
+        setBranches([]);
+        setBranchesPage(1);
+        setBranchesHasMore(false);
+      }
     },
-    [setSelectedBranchParam],
+    [selectedRepositoryState, setSelectedBranchParam],
   );
 
   const setSelectedBranch = (branch: string | null) => {
@@ -431,7 +438,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
                 const targetRepo = {
                   owner: firstRepo.full_name.split("/")[0],
                   repo: firstRepo.full_name.split("/")[1],
-                  branch: defaultBranchFromEnv || firstRepo.default_branch || "main",
+                  branch: defaultBranchFromEnv || firstRepo.default_branch || "develop",
                 };
                 setSelectedRepository(targetRepo);
                 saveRepositoryToLocalStorage(targetRepo);
@@ -483,7 +490,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
       const targetRepo = {
         owner: firstRepo.full_name.split("/")[0],
         repo: firstRepo.full_name.split("/")[1],
-        branch: defaultBranchFromEnv || firstRepo.default_branch || "main",
+        branch: defaultBranchFromEnv || firstRepo.default_branch || "develop",
       };
       setSelectedRepository(targetRepo);
       saveRepositoryToLocalStorage(targetRepo);
@@ -516,10 +523,10 @@ export function useGitHubApp(): UseGitHubAppReturn {
   // Get the default branch for the currently selected repository
   const defaultBranch = selectedRepository
     ? repositories.find(
-        (repo) =>
-          repo.full_name ===
-          `${selectedRepository.owner}/${selectedRepository.repo}`,
-      )?.default_branch || null
+      (repo) =>
+        repo.full_name ===
+        `${selectedRepository.owner}/${selectedRepository.repo}`,
+    )?.default_branch || null
     : null;
 
   return {
