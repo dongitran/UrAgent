@@ -39,7 +39,7 @@ Create your plan following these guidelines:
 
 3. **Optimize for efficiency by:**
    - Completing the request in the minimum number of steps. This is absolutely vital to the success of the plan. You should generate as few plan items as possible.
-   - Reusing existing code and patterns wherever possible
+   - Reusing existing code and patterns wherever possible. **Check the \`.skills/\` directory for project-specific implementation patterns and guidelines.**
    - Writing reusable components when code will be used multiple times
 
 4. **Include only what's requested:**

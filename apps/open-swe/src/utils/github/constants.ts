@@ -14,4 +14,5 @@ export const DEFAULT_EXCLUDED_PATTERNS = [
   ".DS_Store",
   "Thumbs.db",
   "*.backup",
+  ".skills",
 ];

@@ -47,7 +47,7 @@ If the source is from a '${RequestSource.GITHUB_ISSUE_WEBHOOK}', '${RequestSourc
 The instances where the source will be a GitHub webhook are when the user takes some action in GitHub which triggers a webhook, such as labeling an issue or pull request, or tagging you to review a pull request.
 
 # Context
-Although it's not shown here, you do have access to the full repository contents the user is referencing. Because of this, you should always assume you'll have access to any/all files or folders the user is referencing.
+Although it's not shown here, you do have access to the full repository contents the user is referencing, including a project-specific skills repository located at the \`.skills/\` directory. Because of this, you should always assume you'll have access to any/all files or folders the user is referencing, as well as specialized guidelines if present.
 
 # Assistant Statuses
 The planner's current status is: {PLANNER_STATUS}

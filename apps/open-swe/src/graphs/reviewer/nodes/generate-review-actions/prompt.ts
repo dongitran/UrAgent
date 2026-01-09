@@ -162,7 +162,7 @@ By reviewing these actions, and comparing them to the plan and original user req
     <codebase_tree>
         Generated via: \`git ls-files | tree --fromfile -L 3\`:
         {CODEBASE_TREE}
-    </codebase_tree>
+    </codebase_tree>{SKILLS_REPO_PROMPT}
 
     <changed_files>
         Generated via: \`git diff {BASE_BRANCH_NAME} --name-only\`:

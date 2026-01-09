@@ -50,6 +50,8 @@ import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-fr
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
+import { getSkillsRepoPrompt, getSkillsFirstStep } from "../../../../utils/skills-prompt.js";
+
 function formatSystemPrompt(
   state: PlannerGraphState,
   config: GraphConfig,
@@ -85,6 +87,8 @@ function formatSystemPrompt(
       "{CODEBASE_TREE}",
       state.codebaseTree || "No codebase tree generated yet.",
     )
+    .replaceAll("{SKILLS_REPO_PROMPT}", getSkillsRepoPrompt())
+    .replaceAll("{SKILLS_REPO_FIRST_STEP}", getSkillsFirstStep())
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
     .replace(

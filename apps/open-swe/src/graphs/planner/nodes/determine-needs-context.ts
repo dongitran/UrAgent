@@ -35,6 +35,7 @@ Your sole objective in this step is to determine whether or not the user's follo
 <instructions>
 You're provided with these main pieces of information:
 - **Conversation history**: This is the full conversation history between you, the user, and including any actions you took while gathering context.
+- **Skills repository**: A collection of project-specific documentation and guidelines in the \`.skills/\` directory. Check if you need to consult these for correct patterns.
 - **Context gathering notes**: This is the notes you took while gathering context. Includes the most relevant context you discovered while gathering context for the plan.
 - **Proposed plan**: This is the plan you generated for the user's request, which the user is likely trying to follow up on (e.g. modify it in some way, or add new step(s)).
 - **User followup request**: This is the specific followup request made by the user (the conversation history will also include this). This is the message you should look at when determining whether or not you need to gather more context before you can update the proposed plan.
@@ -103,8 +104,8 @@ const determineContextSchema = z.object({
     .enum(["have_context", "need_context"])
     .describe(
       "Whether or not you have enough context to update the proposed plan, or if you need to gather more context before you can accurately update the proposed plan. " +
-        "If you have enough context to update the plan, respond with 'have_context'. " +
-        "If you need to gather more context, respond with 'need_context'.",
+      "If you have enough context to update the plan, respond with 'have_context'. " +
+      "If you need to gather more context, respond with 'need_context'.",
     ),
 });
 const determineContextTool = {
@@ -137,8 +138,8 @@ export async function determineNeedsContext(
     tool_choice: determineContextTool.name,
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: false,
-        }
+        parallel_tool_calls: false,
+      }
       : {}),
   });
 
