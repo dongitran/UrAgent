@@ -252,6 +252,28 @@ export const GraphAnnotation = MessagesZodState.extend({
     }),
   }),
   /**
+   * The secondary skills repository information (optional)
+   */
+  skillsRepository: withLangGraph(z.custom<TargetRepository>().optional(), {
+    reducer: {
+      schema: z.custom<TargetRepository>().optional(),
+      fn: (_state, update) => update,
+    },
+    default: () => {
+      // Only return if env vars are set
+      const owner = process.env.SKILLS_REPOSITORY_OWNER;
+      const repo = process.env.SKILLS_REPOSITORY_NAME;
+      if (owner && repo) {
+        return {
+          owner,
+          repo,
+          branch: process.env.SKILLS_REPOSITORY_BRANCH || "main",
+        };
+      }
+      return undefined;
+    },
+  }),
+  /**
    * The current tree of the codebase the agent is working with.
    */
   codebaseTree: withLangGraph(z.custom<string>(), {
@@ -763,6 +785,16 @@ export const GraphConfiguration = z.object({
    */
   maxReviewCount: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.maxReviewCount,
+  }),
+  /**
+   * The secondary skills repository information (optional)
+   */
+  skillsRepository: withLangGraph(z.custom<TargetRepository>().optional(), {
+    metadata: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
+    },
   }),
 });
 

@@ -41,6 +41,7 @@ type InitializeSandboxState = {
   internalMessages?: BaseMessage[];
   dependenciesInstalled?: boolean;
   customRules?: CustomRules;
+  skillsRepository?: TargetRepository;
 };
 
 export async function initializeSandbox(
@@ -523,6 +524,68 @@ export async function initializeSandbox(
     typeof cloneRepoRes === "string" ? cloneRepoRes : branchName;
   emitStepEvent(baseCloneRepoAction, "success");
 
+  // --- SKILLS REPOSITORY CLONING LOGIC ---
+  const configurable = config.configurable as unknown as { skillsRepository?: TargetRepository };
+  const skillsRepo = state.skillsRepository || configurable?.skillsRepository;
+
+  if (skillsRepo) {
+    const skillsCloneActionId = uuidv4();
+    const skillsRepoName = `${skillsRepo.owner}/${skillsRepo.repo}`;
+    const baseSkillsCloneAction: CustomNodeEvent = {
+      nodeId: INITIALIZE_NODE_ID,
+      createdAt: new Date().toISOString(),
+      actionId: skillsCloneActionId,
+      action: "Cloning skills repository",
+      data: {
+        status: "pending",
+        sandboxSessionId: sandboxInstance.id,
+        branch: skillsRepo.branch,
+        repo: skillsRepoName,
+      },
+    };
+    emitStepEvent(baseSkillsCloneAction, "pending");
+
+    try {
+      // Determine separate directory for skills repo
+      // Main repo is at: absoluteRepoDir
+      // We want skills repo at: .../skills-repo/<owner>/<repo> or similar
+      // Simplest: use a dedicated "skills" folder in the workspace root
+      const workspaceRoot = isLocalMode(config)
+        ? "/tmp" // Should not happen in local mode for now
+        : actualProviderType === "daytona" || actualProviderType === "local"
+          ? "/home/daytona"
+          : "/home/user"; // E2B
+
+      const skillsRepoDir = `${workspaceRoot}/skills/${skillsRepo.repo}`;
+      const skillsCloneUrl = `https://github.com/${skillsRepo.owner}/${skillsRepo.repo}.git`;
+
+      logger.info("Cloning skills repository", {
+        url: skillsCloneUrl,
+        targetDir: skillsRepoDir,
+        branch: skillsRepo.branch,
+      });
+
+      await sandboxInstance.git.clone({
+        url: skillsCloneUrl,
+        targetDir: skillsRepoDir,
+        branch: skillsRepo.branch,
+        username: "x-access-token",
+        token: githubInstallationToken,
+      });
+
+      emitStepEvent(baseSkillsCloneAction, "success");
+      logger.info("Successfully cloned skills repository");
+
+    } catch (error) {
+      logger.warn("Failed to clone skills repository", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      emitStepEvent(baseSkillsCloneAction, "skipped", "Failed to clone skills repo, proceeding without it.");
+      // We do NOT throw here - failure to clone skills repo shouldn't block main workflow
+    }
+  }
+  // --- END SKILLS REPOSITORY CLONING LOGIC ---
+
   // Checking out branch
   const checkoutBranchActionId = uuidv4();
   const baseCheckoutBranchAction: CustomNodeEvent = {
@@ -579,6 +642,7 @@ export async function initializeSandbox(
     dependenciesInstalled: false,
     customRules: await getCustomRulesWithSandboxInstance(sandboxInstance, absoluteRepoDir, config),
     branchName: newBranchName,
+    skillsRepository: skillsRepo,
   };
 }
 

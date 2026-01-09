@@ -36,8 +36,10 @@ import {
   STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS,
   STATIC_SYSTEM_INSTRUCTIONS,
   CUSTOM_FRAMEWORK_PROMPT,
+  SKILLS_REPO_PROMPT_TEMPLATE,
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { getSandboxRootDir } from "@openswe/shared/constants";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
@@ -89,6 +91,52 @@ function debugLog(message: string, data?: Record<string, unknown>): void {
   }
 }
 
+
+
+/**
+ * Get the skills repository path, handling E2B vs Daytona differences.
+ * Falls back to env vars if state doesn't have skillsRepository.
+ * Returns both the path and whether it's configured.
+ * Path format: /home/[user]/skills/[repo-name]/[optional-subfolder]
+ */
+const getSkillsRepoInfo = (state: GraphState): { path: string; isConfigured: boolean } => {
+  // Try to get from state first (requires type assertion due to TypeScript lag)
+  const skillsRepo = (state as unknown as { skillsRepository?: { owner: string; repo: string; branch: string } }).skillsRepository;
+
+  // Get optional subfolder path from env var
+  const subfolderPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+
+  if (skillsRepo) {
+    const rootDir = getSandboxRootDir(state.sandboxProviderType);
+    const basePath = `${rootDir}/skills/${skillsRepo.repo}`;
+    const fullPath = subfolderPath ? `${basePath}/${subfolderPath}` : basePath;
+    return { path: fullPath, isConfigured: true };
+  }
+
+  // Fallback to env vars
+  const envOwner = process.env.SKILLS_REPOSITORY_OWNER;
+  const envRepo = process.env.SKILLS_REPOSITORY_NAME;
+  if (envOwner && envRepo) {
+    const rootDir = getSandboxRootDir(state.sandboxProviderType);
+    const basePath = `${rootDir}/skills/${envRepo}`;
+    const fullPath = subfolderPath ? `${basePath}/${subfolderPath}` : basePath;
+    return { path: fullPath, isConfigured: true };
+  }
+
+  return { path: "", isConfigured: false };
+};
+
+/**
+ * Get the skills repo prompt section - only returns content if configured
+ */
+const getSkillsRepoPromptSection = (state: GraphState): string => {
+  const { path, isConfigured } = getSkillsRepoInfo(state);
+  if (!isConfigured) {
+    return "";
+  }
+  return SKILLS_REPO_PROMPT_TEMPLATE.replaceAll("{SKILLS_REPO_DIRECTORY}", path);
+};
+
 const formatDynamicContextPrompt = (state: GraphState) => {
   const activePlanItems = state.taskPlan
     ? getActivePlanItems(state.taskPlan)
@@ -128,6 +176,7 @@ const formatStaticInstructionsPrompt = (
       : STATIC_SYSTEM_INSTRUCTIONS
   )
     .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType))
+    .replaceAll("{SKILLS_REPO_PROMPT}", getSkillsRepoPromptSection(state))
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replace(
       "{CUSTOM_FRAMEWORK_PROMPT}",

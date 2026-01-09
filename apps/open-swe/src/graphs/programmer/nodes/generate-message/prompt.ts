@@ -29,11 +29,16 @@ const TASK_EXECUTION_GUIDELINES = `<task_execution_guidelines>
 
 const FILE_CODE_MANAGEMENT_PROMPT = `<file_and_code_management>
     <repository_location>{REPO_DIRECTORY}</repository_location>
-    <current_directory>{REPO_DIRECTORY}</current_directory>
+    <current_directory>{REPO_DIRECTORY}</current_directory>{SKILLS_REPO_PROMPT}
     - All changes are auto-committed - no manual commits needed, and you should never create backup files.
     - Work only within the existing Git repository
     - Use \`install_dependencies\` to install dependencies (skip if installation fails). IMPORTANT: You should only call this tool if you're executing a task which REQUIRES installing dependencies. Keep in mind that not all tasks will require installing dependencies.
 </file_and_code_management>`;
+
+// Skills repo prompt - only injected if configured
+export const SKILLS_REPO_PROMPT_TEMPLATE = `
+    <skills_repository_location>{SKILLS_REPO_DIRECTORY}</skills_repository_location>
+    - You have access to a skills repository at {SKILLS_REPO_DIRECTORY}. You can read files from there to find reusable scripts and skills.`;
 
 const TOOL_USE_BEST_PRACTICES_PROMPT = `<tool_usage_best_practices>
     - Search: Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
