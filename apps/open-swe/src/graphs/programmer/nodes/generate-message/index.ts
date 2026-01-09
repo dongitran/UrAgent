@@ -20,6 +20,7 @@ import {
   createGetURLContentTool,
   createSearchDocumentForTool,
   createWriteDefaultTsConfigTool,
+  createReadImageTool,
 } from "../../../../tools/index.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { getProvider } from "../../../../utils/sandbox.js";
@@ -238,12 +239,13 @@ async function createToolsAndPrompt(
     createMarkTaskCompletedToolFields(),
     createSearchDocumentForTool(state, config),
     createWriteDefaultTsConfigTool(state, config),
+    createReadImageTool(state, config),
     ...(shouldIncludeReviewCommentTool(state, config)
       ? [
-          createReplyToReviewCommentTool(state, config),
-          createReplyToCommentTool(state, config),
-          createReplyToReviewTool(state, config),
-        ]
+        createReplyToReviewCommentTool(state, config),
+        createReplyToCommentTool(state, config),
+        createReplyToReviewTool(state, config),
+      ]
       : []),
     ...mcpTools,
   ];
@@ -312,7 +314,7 @@ async function createToolsAndPrompt(
         toolCallNames: aiMsg.tool_calls?.map((tc) => tc.name) || [],
         hasResponseMetadata: !!metadata,
         hasThoughtSignature: !!metadata?.thoughtSignature,
-        thoughtSignaturePreview: metadata?.thoughtSignature 
+        thoughtSignaturePreview: metadata?.thoughtSignature
           ? (metadata.thoughtSignature as string).slice(0, 30) + '...'
           : undefined,
       };
@@ -775,9 +777,9 @@ export async function generateAction(
     config,
   )
     ? await Promise.all([
-        getMissingMessages(state, config),
-        getPlansFromIssue(state, config),
-      ])
+      getMissingMessages(state, config),
+      getPlansFromIssue(state, config),
+    ])
     : [[], { taskPlan: null }];
 
   // Generate loop warning if loop is detected (but not severe enough to force action)
@@ -840,8 +842,8 @@ export async function generateAction(
       tool_choice: "auto",
       ...(modelSupportsParallelToolCallsParam
         ? {
-            parallel_tool_calls: true,
-          }
+          parallel_tool_calls: true,
+        }
         : {}),
     },
   );

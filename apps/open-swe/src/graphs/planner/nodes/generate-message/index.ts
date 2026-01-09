@@ -8,6 +8,7 @@ import {
   createGetURLContentTool,
   createShellTool,
   createSearchDocumentForTool,
+  createReadImageTool,
 } from "../../../../tools/index.js";
 import {
   PlannerGraphState,
@@ -62,10 +63,10 @@ function formatSystemPrompt(
     "{FOLLOWUP_MESSAGE_PROMPT}",
     isFollowup
       ? formatFollowupMessagePrompt(
-          state.taskPlan,
-          state.proposedPlan,
-          scratchpad,
-        )
+        state.taskPlan,
+        state.proposedPlan,
+        scratchpad,
+      )
       : "",
   )
     .replaceAll(
@@ -121,6 +122,7 @@ export async function generateAction(
     ),
     createGetURLContentTool(state),
     createSearchDocumentForTool(state, config),
+    createReadImageTool(state, config),
     ...mcpTools,
   ];
   logger.info(
@@ -136,8 +138,8 @@ export async function generateAction(
     tool_choice: "auto",
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: true,
-        }
+        parallel_tool_calls: true,
+      }
       : {}),
   });
 
@@ -145,9 +147,9 @@ export async function generateAction(
     config,
   )
     ? await Promise.all([
-        getMissingMessages(state, config),
-        getPlansFromIssue(state, config),
-      ])
+      getMissingMessages(state, config),
+      getPlansFromIssue(state, config),
+    ])
     : [[], { taskPlan: null }];
 
   const inputMessages = filterMessagesWithoutContent([
