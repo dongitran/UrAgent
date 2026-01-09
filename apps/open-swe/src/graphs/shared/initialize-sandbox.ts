@@ -259,6 +259,12 @@ export async function initializeSandbox(
         throw new Error("Failed to pull latest changes.");
       }
 
+      // Ensure skills repo is available BEFORE generating tree (so .skills appears in tree output)
+      const repoSkills = await ensureSkillsRepository(existingSandboxInstance, targetRepository, config, {
+        skillsRepoFromState: state.skillsRepository,
+        emitStepEvent,
+      });
+
       const generateCodebaseTreeActionId = uuidv4();
       const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
         nodeId: INITIALIZE_NODE_ID,
@@ -288,12 +294,6 @@ export async function initializeSandbox(
         const eventsMessages = createEventsMessage();
         const userMessages = state.messages || [];
 
-        // Ensure skills repo is available in resume path
-        const repoSkills = await ensureSkillsRepository(existingSandboxInstance, targetRepository, config, {
-          skillsRepoFromState: state.skillsRepository,
-          emitStepEvent,
-        });
-
         return {
           sandboxSessionId: existingSandboxInstance.id,
           sandboxProviderType: actualProviderType,
@@ -317,12 +317,7 @@ export async function initializeSandbox(
         const eventsMessages = createEventsMessage();
         const userMessages = state.messages || [];
 
-        // Ensure skills repo is available even on tree generation error
-        const repoSkills = await ensureSkillsRepository(existingSandboxInstance, targetRepository, config, {
-          skillsRepoFromState: state.skillsRepository,
-          emitStepEvent,
-        });
-
+        // Skills repo already cloned before try block, just use repoSkills from outer scope
         return {
           sandboxSessionId: existingSandboxInstance.id,
           sandboxProviderType: actualProviderType,
