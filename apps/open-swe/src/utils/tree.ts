@@ -22,7 +22,7 @@ export const FAILED_TO_GENERATE_TREE_MESSAGE =
  * Uses git ls-files + explicitly includes .skills folder if it exists
  * Shows directory structure with proper indentation
  */
-const FALLBACK_TREE_COMMAND = `{ git ls-files; [ -d .skills ] && find .skills -maxdepth 2 -not -path '*/.*' | sed 's|^\\./||'; } | sort | uniq | head -1000 | awk -F/ '
+const FALLBACK_TREE_COMMAND = `{ git ls-files; [ -d .skills ] && find .skills -maxdepth 6 -not -path '*/.*' | sed 's|^\\./||'; } | sort | uniq | head -1000 | awk -F/ '
 {
   # Track directories we have already printed
   path = ""

@@ -451,6 +451,79 @@ export async function getSandboxWithErrorHandling(
       sandboxId: sandbox.id,
       sandboxState: sandbox.state,
     });
+
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    await ensureSkillsRepository(
+      {
+        id: sandbox.id,
+        state: SandboxState.STARTED,
+        providerType: SandboxProviderType.DAYTONA,
+        executeCommand: async (opts) => {
+          const res = await sandbox.process.executeCommand(
+            opts.command,
+            opts.workdir,
+            opts.env,
+            opts.timeout,
+          );
+          return {
+            exitCode: res.exitCode,
+            result: res.result,
+            artifacts: res.artifacts ? {
+              stdout: res.artifacts.stdout || '',
+              stderr: (res.artifacts as any).stderr,
+            } : undefined,
+          };
+        },
+        readFile: async (p) => {
+          const res = await sandbox.process.executeCommand(`cat "${p}"`);
+          if (res.exitCode !== 0) throw new Error(`Read failed: ${res.result}`);
+          return res.result;
+        },
+        writeFile: async (p, c) => {
+          const delimiter = `EOF_${Date.now()}`;
+          const command = `cat > "${p}" << '${delimiter}'\n${c}\n${delimiter}`;
+          const res = await sandbox.process.executeCommand(command);
+          if (res.exitCode !== 0) throw new Error(`Write failed: ${res.result}`);
+        },
+        exists: async (p) => {
+          const res = await sandbox.process.executeCommand(`test -e "${p}" && echo "exists" || echo "not_exists"`);
+          return res.result.trim() === 'exists';
+        },
+        mkdir: async (p) => {
+          const res = await sandbox.process.executeCommand(`mkdir -p "${p}"`);
+          if (res.exitCode !== 0) throw new Error(`Mkdir failed: ${res.result}`);
+        },
+        remove: async (p) => {
+          const res = await sandbox.process.executeCommand(`rm -rf "${p}"`);
+          if (res.exitCode !== 0) throw new Error(`Remove failed: ${res.result}`);
+        },
+        git: {
+          clone: async (o) => {
+            const cloneUrl = o.token
+              ? o.url.replace("https://", `https://${o.username || "x-access-token"}:${o.token}@`)
+              : o.url;
+            await sandbox.git.clone(cloneUrl, o.targetDir, o.branch, o.commit);
+          },
+          add: async (dir, files) => await sandbox.git.add(dir, files),
+          commit: async (opts) => {
+            await sandbox.git.commit(opts.workdir, opts.message, opts.authorName, opts.authorEmail);
+          },
+          push: async (opts) => await sandbox.git.push(opts.workdir),
+          pull: async (opts) => await sandbox.git.pull(opts.workdir),
+          createBranch: async (dir, name) => await sandbox.git.createBranch(dir, name),
+          status: async (dir) => {
+            const status = await sandbox.git.status(dir);
+            return JSON.stringify(status);
+          },
+        },
+        start: async () => { },
+        stop: async () => { },
+        getNative: <T>() => sandbox as unknown as T,
+      },
+      targetRepository,
+      config,
+    );
+
     return {
       sandbox,
       codebaseTree: codebaseTreeToReturn,
