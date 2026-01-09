@@ -35,6 +35,7 @@ type InitializeSandboxState = {
   branchName: string;
   sandboxSessionId?: string;
   sandboxProviderType?: string;
+  sandboxValidated?: boolean;
   codebaseTree?: string;
   messages?: BaseMessage[];
   internalMessages?: BaseMessage[];
@@ -46,7 +47,7 @@ export async function initializeSandbox(
   state: InitializeSandboxState,
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
-  const { sandboxSessionId, targetRepository } = state;
+  const { sandboxSessionId, targetRepository, sandboxValidated } = state;
   let { branchName } = state;
 
   const baseBranch = targetRepository.branch || "main";
@@ -61,6 +62,38 @@ export async function initializeSandbox(
     branchName = newBranchName;
   }
 
+  // Fast-path: If sandbox was already validated by caller (e.g., startProgrammerRun),
+  // skip full initialization and just resume the existing sandbox.
+  // This prevents duplicate sandbox creation when transitioning from planner to programmer.
+  if (sandboxValidated && sandboxSessionId) {
+    logger.info("Sandbox already validated, using fast-path resume", {
+      sandboxSessionId,
+      sandboxValidated,
+    });
+
+    try {
+      const provider = getProvider();
+      const existingSandbox = await provider.get(sandboxSessionId);
+
+      logger.info("Fast-path resume successful", {
+        sandboxId: existingSandbox.id,
+        providerType: existingSandbox.providerType,
+      });
+
+      // Return minimal state update - sandbox is already set up
+      return {
+        sandboxSessionId: existingSandbox.id,
+        sandboxProviderType: existingSandbox.providerType,
+        branchName,
+      };
+    } catch (error) {
+      // If fast-path fails, fall through to normal initialization
+      logger.warn("Fast-path resume failed, falling back to normal initialization", {
+        sandboxSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   // Note: We'll determine the actual provider type AFTER sandbox is created/resumed
   // because in multi-provider mode, we don't know which provider will be selected
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;

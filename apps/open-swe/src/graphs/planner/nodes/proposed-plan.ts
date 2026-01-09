@@ -135,6 +135,8 @@ async function startProgrammerRun(input: {
   if (sandboxProviderType) {
     runInput.sandboxProviderType = sandboxProviderType;
   }
+  // Mark sandbox as validated to prevent duplicate creation in programmer's initializeSandbox
+  runInput.sandboxValidated = true;
 
   const run = await langGraphClient.runs.create(
     programmerThreadId,
@@ -235,7 +237,7 @@ export async function interruptProposedPlan(
         issueTitle,
         issueBody,
       });
-      
+
       await postGitHubIssueComment({
         githubIssueId: state.githubIssueId,
         targetRepository: state.targetRepository,
@@ -294,7 +296,7 @@ export async function interruptProposedPlan(
       issueTitle,
       issueBody,
     });
-    
+
     await postGitHubIssueComment({
       githubIssueId: state.githubIssueId,
       targetRepository: state.targetRepository,
@@ -368,7 +370,7 @@ export async function interruptProposedPlan(
         issueTitle: issueTitleForAccept,
         issueBody: issueBodyForAccept,
       });
-      
+
       await postGitHubIssueComment({
         githubIssueId: state.githubIssueId,
         targetRepository: state.targetRepository,
@@ -406,7 +408,7 @@ export async function interruptProposedPlan(
         issueTitle: issueTitleForEdit,
         issueBody: issueBodyForEdit,
       });
-      
+
       await postGitHubIssueComment({
         githubIssueId: state.githubIssueId,
         targetRepository: state.targetRepository,
