@@ -1111,7 +1111,7 @@ export async function checkoutBranchAndCommitWithInstance(
         throw error;
       }
     },
-    { retries: 3, delay: 0 },
+    { retries: 3, delay: 0, config },
   );
 
   if (pushRes instanceof Error) {
@@ -1141,7 +1141,7 @@ export async function checkoutBranchAndCommitWithInstance(
           throw error;
         }
       },
-      { retries: 1, delay: 0 },
+      { retries: 1, delay: 0, config },
     );
 
     if (pullRes instanceof Error) {
@@ -1173,7 +1173,7 @@ export async function checkoutBranchAndCommitWithInstance(
           throw error;
         }
       },
-      { retries: 3, delay: 0 },
+      { retries: 3, delay: 0, config },
     );
 
     if (pushRes2 instanceof Error) {
