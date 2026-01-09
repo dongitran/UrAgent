@@ -328,6 +328,18 @@ export const GraphAnnotation = MessagesZodState.extend({
     },
     default: () => 0,
   }),
+  /**
+   * Flag indicating sandbox has been validated and should not be recreated.
+   * When true, initializeSandbox will skip to resume-only mode, preventing
+   * duplicate sandbox creation when transitioning from planner to programmer.
+   */
+  sandboxValidated: withLangGraph(z.custom<boolean>(), {
+    reducer: {
+      schema: z.custom<boolean>(),
+      fn: (_state, update) => update,
+    },
+    default: () => false,
+  }),
 
   tokenData: withLangGraph(z.custom<ModelTokenData[]>().optional(), {
     reducer: {

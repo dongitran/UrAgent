@@ -35,6 +35,7 @@ type InitializeSandboxState = {
   branchName: string;
   sandboxSessionId?: string;
   sandboxProviderType?: string;
+  sandboxValidated?: boolean;
   codebaseTree?: string;
   messages?: BaseMessage[];
   internalMessages?: BaseMessage[];
@@ -46,7 +47,7 @@ export async function initializeSandbox(
   state: InitializeSandboxState,
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
-  const { sandboxSessionId, targetRepository } = state;
+  const { sandboxSessionId, targetRepository, sandboxValidated } = state;
   let { branchName } = state;
 
   const baseBranch = targetRepository.branch || "main";
@@ -60,7 +61,39 @@ export async function initializeSandbox(
     });
     branchName = newBranchName;
   }
-  
+
+  // Fast-path: If sandbox was already validated by caller (e.g., startProgrammerRun),
+  // skip full initialization and just resume the existing sandbox.
+  // This prevents duplicate sandbox creation when transitioning from planner to programmer.
+  if (sandboxValidated && sandboxSessionId) {
+    logger.info("Sandbox already validated, using fast-path resume", {
+      sandboxSessionId,
+      sandboxValidated,
+    });
+
+    try {
+      const provider = getProvider();
+      const existingSandbox = await provider.get(sandboxSessionId);
+
+      logger.info("Fast-path resume successful", {
+        sandboxId: existingSandbox.id,
+        providerType: existingSandbox.providerType,
+      });
+
+      // Return minimal state update - sandbox is already set up
+      return {
+        sandboxSessionId: existingSandbox.id,
+        sandboxProviderType: existingSandbox.providerType,
+        branchName,
+      };
+    } catch (error) {
+      // If fast-path fails, fall through to normal initialization
+      logger.warn("Fast-path resume failed, falling back to normal initialization", {
+        sandboxSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   // Note: We'll determine the actual provider type AFTER sandbox is created/resumed
   // because in multi-provider mode, we don't know which provider will be selected
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
@@ -165,11 +198,11 @@ export async function initializeSandbox(
       logger.info(`Resuming sandbox using provider: ${provider.name}`, { sandboxSessionId });
       const existingSandboxInstance = await provider.get(sandboxSessionId);
       emitStepEvent(baseResumeSandboxAction, "success");
-      
+
       // Get the actual provider type from the sandbox instance for correct path resolution
       const actualProviderType = existingSandboxInstance.providerType;
       const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, actualProviderType);
-      
+
       logger.info("Sandbox resumed with provider type", {
         sandboxId: existingSandboxInstance.id,
         providerType: actualProviderType,
@@ -272,7 +305,23 @@ export async function initializeSandbox(
           branchName,
         };
       }
-    } catch {
+    } catch (resumeError) {
+      // Delete old sandbox that failed to resume to prevent orphaned resources
+      if (sandboxSessionId) {
+        try {
+          const provider = getProvider();
+          await provider.delete(sandboxSessionId);
+          logger.info("Deleted old sandbox after resume failure", {
+            sandboxSessionId,
+            error: resumeError instanceof Error ? resumeError.message : String(resumeError),
+          });
+        } catch (deleteError) {
+          logger.warn("Failed to delete old sandbox", {
+            sandboxSessionId,
+            error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+          });
+        }
+      }
       emitStepEvent(
         baseResumeSandboxAction,
         "skipped",
@@ -301,11 +350,11 @@ export async function initializeSandbox(
   try {
     // Use provider abstraction to create sandbox - works with Daytona, E2B, and Multi
     const provider = getProvider();
-    
+
     // For multi-provider, it handles template/user selection internally based on selected sub-provider
     // For single providers, we determine the correct template/user based on provider type
     let createOptions: { template?: string; user?: string; autoDeleteInterval?: number };
-    
+
     if (provider.name === 'multi') {
       // Multi-provider will determine correct template/user based on which provider it selects
       // We only pass autoDeleteInterval, let multi-provider handle the rest
@@ -325,9 +374,9 @@ export async function initializeSandbox(
       };
       logger.info(`Creating sandbox using provider: ${provider.name}`, { template, user });
     }
-    
+
     sandboxInstance = await provider.create(createOptions);
-    logger.info(`Sandbox created successfully via ${provider.name}`, { 
+    logger.info(`Sandbox created successfully via ${provider.name}`, {
       sandboxId: sandboxInstance.id,
       providerType: sandboxInstance.providerType,
     });
@@ -345,7 +394,7 @@ export async function initializeSandbox(
   // Get the actual provider type from the sandbox instance for correct path resolution
   const actualProviderType = sandboxInstance.providerType;
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, actualProviderType);
-  
+
   logger.info("Sandbox created with provider type", {
     sandboxId: sandboxInstance.id,
     providerType: actualProviderType,
@@ -369,30 +418,30 @@ export async function initializeSandbox(
   emitStepEvent(baseCloneRepoAction, "pending");
 
   const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
-  
+
   // Check if branch exists on remote (same logic as original code)
   const branchExists = branchName
     ? !!(await getBranch({
-        owner: targetRepository.owner,
-        repo: targetRepository.repo,
-        branchName,
-        githubInstallationToken,
-      }))
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+      branchName,
+      githubInstallationToken,
+    }))
     : false;
-  
+
   logger.info("Branch existence check", {
     branchName,
     branchExists,
     baseBranch: targetRepository.branch,
   });
-  
+
   const cloneRepoRes = await withRetry(
     async () => {
       try {
         // If branch exists on remote, clone it directly
         // Otherwise, clone the base branch and create new branch locally
         const branchToClone = branchExists ? branchName : targetRepository.branch;
-        
+
         await sandboxInstance.git.clone({
           url: cloneUrl,
           targetDir: absoluteRepoDir,
@@ -403,14 +452,14 @@ export async function initializeSandbox(
           // Pass base branch for reference (needed for git diff in E2B)
           baseBranch: targetRepository.branch,
         });
-        
+
         // If branch didn't exist, create it locally and push
         if (!branchExists && branchName && branchName !== targetRepository.branch) {
           logger.info("Creating new branch from base", {
             branchName,
             baseBranch: targetRepository.branch,
           });
-          
+
           try {
             await sandboxInstance.git.createBranch(absoluteRepoDir, branchName);
             logger.info("Branch created locally", { branchName });
@@ -420,7 +469,7 @@ export async function initializeSandbox(
               error: createError instanceof Error ? createError.message : String(createError),
             });
           }
-          
+
           // Push to create branch on remote
           try {
             await sandboxInstance.git.push({
@@ -437,7 +486,7 @@ export async function initializeSandbox(
             });
           }
         }
-        
+
         return branchName || targetRepository.branch;
       } catch (error) {
         logger.error("Clone repository failed", {
@@ -461,10 +510,10 @@ export async function initializeSandbox(
     const errorFields = {
       ...(cloneRepoRes instanceof Error
         ? {
-            name: cloneRepoRes.name,
-            message: cloneRepoRes.message,
-            stack: cloneRepoRes.stack,
-          }
+          name: cloneRepoRes.name,
+          message: cloneRepoRes.message,
+          stack: cloneRepoRes.stack,
+        }
         : cloneRepoRes),
     };
     logger.error("Cloning repository failed", errorFields);
