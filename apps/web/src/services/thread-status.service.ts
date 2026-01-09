@@ -8,7 +8,7 @@ import {
 import { GraphState, TaskPlan } from "@openswe/shared/open-swe/types";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
-import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
+import { getActivePlanItems, getActiveTask } from "@openswe/shared/open-swe/tasks";
 import { SessionCache, SessionCacheData } from "@/hooks/useThreadsStatus";
 import {
   isAuthenticationError,
@@ -61,11 +61,19 @@ interface StatusResult {
 
 /**
  * Determines if all tasks in a task plan are completed
+ * Checks both task-level completion and individual plan item completion
  */
 function areAllPlanItemsCompleted(taskPlan: TaskPlan): boolean {
-  if (!taskPlan?.tasks || !Array.isArray(taskPlan.tasks)) {
+  if (!taskPlan?.tasks || !Array.isArray(taskPlan.tasks) || taskPlan.tasks.length === 0) {
     return false;
   }
+
+  // If the active task itself is marked as completed, we can trust that
+  const activeTask = getActiveTask(taskPlan);
+  if (activeTask && activeTask.completed) {
+    return true;
+  }
+
   const activePlanItems = getActivePlanItems(taskPlan);
   return activePlanItems.every((planItem) => planItem.completed);
 }
@@ -100,7 +108,7 @@ export class StatusResolver {
   }
 }
 
-const CACHE_TTL = 30 * 1000;
+const CACHE_TTL = 2 * 1000;
 
 function getCachedSessionData(
   sessionCache: SessionCache | undefined,

@@ -3,6 +3,7 @@ import {
   isAIMessage,
   isToolMessage,
   ToolMessage,
+  HumanMessage,
 } from "@langchain/core/messages";
 import {
   isLocalMode,
@@ -12,6 +13,7 @@ import {
   createGetURLContentTool,
   createShellTool,
   createSearchDocumentForTool,
+  createReadImageTool,
 } from "../../../tools/index.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
@@ -74,6 +76,7 @@ export async function takeActions(
     scratchpadTool,
     getURLContentTool,
     searchDocumentForTool,
+    createReadImageTool(state, config),
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(
@@ -179,13 +182,44 @@ export async function takeActions(
       status: toolCallStatus,
     });
 
-    return { toolMessage, stateUpdates };
+    // If this is read_image tool with successful image result, create HumanMessage with image content
+    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
+    // The image must be re-introduced as new input in a HumanMessage
+    let imageMessage: HumanMessage | undefined;
+    if (
+      toolCall.name === "read_image" &&
+      toolCallStatus === "success" &&
+      result.startsWith("data:image/")
+    ) {
+      logger.info("Creating HumanMessage with image content for read_image result in planner", {
+        imageDataUrlLength: result.length,
+      });
+      imageMessage = new HumanMessage({
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: result },
+          },
+          {
+            type: "text",
+            text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning.",
+          },
+        ],
+      });
+    }
+
+    return { toolMessage, imageMessage, stateUpdates };
   });
 
   const toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
   let toolCallResults = toolCallResultsWithUpdates.map(
     (item) => item.toolMessage,
   );
+
+  // Collect image messages from read_image tool calls
+  const imageMessages = toolCallResultsWithUpdates
+    .map((item) => item.imageMessage)
+    .filter((msg): msg is HumanMessage => msg !== undefined);
 
   // merging document cache updates from tool calls
   const allStateUpdates = toolCallResultsWithUpdates
@@ -240,7 +274,7 @@ export async function takeActions(
   });
 
   const commandUpdate: PlannerGraphUpdate = {
-    messages: toolCallResults,
+    messages: [...toolCallResults, ...imageMessages],
     sandboxSessionId: sandboxInstance.id,
     ...(sandboxProviderType && { sandboxProviderType }),
     ...(codebaseTree && { codebaseTree }),

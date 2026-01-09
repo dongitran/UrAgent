@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { isAIMessage, ToolMessage, AIMessage } from "@langchain/core/messages";
+import { isAIMessage, ToolMessage, AIMessage, HumanMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   createApplyPatchTool,
@@ -8,6 +8,7 @@ import {
   createShellTool,
   createSearchDocumentForTool,
   createWriteDefaultTsConfigTool,
+  createReadImageTool,
 } from "../../../tools/index.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import {
@@ -114,6 +115,7 @@ export async function takeAction(
     state,
     config,
   );
+  const readImageTool = createReadImageTool(state, config);
 
   const higherContextLimitToolNames = [
     ...mcpTools.map((t) => t.name),
@@ -132,6 +134,7 @@ export async function takeAction(
     getURLContentTool,
     searchDocumentForTool,
     writeDefaultTsConfigTool,
+    readImageTool,
     ...(shouldIncludeReviewCommentTool(state, config)
       ? [
         createReplyToReviewCommentTool(state, config),
@@ -253,7 +256,33 @@ export async function takeAction(
       status: toolCallStatus,
     });
 
-    return { toolMessage, stateUpdates };
+    // If this is read_image tool with successful image result, create HumanMessage with image content
+    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
+    // The image must be re-introduced as new input in a HumanMessage
+    let imageMessage: HumanMessage | undefined;
+    if (
+      toolCall.name === "read_image" &&
+      toolCallStatus === "success" &&
+      result.startsWith("data:image/")
+    ) {
+      logger.info("Creating HumanMessage with image content for read_image result", {
+        imageDataUrlLength: result.length,
+      });
+      imageMessage = new HumanMessage({
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: result },
+          },
+          {
+            type: "text",
+            text: "Above is the image you requested via read_image tool. Use it as visual reference for your task.",
+          },
+        ],
+      });
+    }
+
+    return { toolMessage, imageMessage, stateUpdates };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -281,7 +310,7 @@ export async function takeAction(
   const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
 
   // Combine results in original order
-  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; stateUpdates: any }[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; stateUpdates: any }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
@@ -295,6 +324,11 @@ export async function takeAction(
   const toolCallResults = toolCallResultsWithUpdates.map(
     (item) => item.toolMessage,
   );
+
+  // Collect image messages from read_image tool calls
+  const imageMessages = toolCallResultsWithUpdates
+    .map((item) => item.imageMessage)
+    .filter((msg): msg is HumanMessage => msg !== undefined);
 
   // merging document cache updates from tool calls
   const allStateUpdates = toolCallResultsWithUpdates
@@ -416,10 +450,11 @@ export async function takeAction(
   ];
 
   // Include the modified message if it was filtered
+  // Also include image messages for multimodal processing
   const internalMessagesUpdate =
     wasFiltered && modifiedMessage
-      ? [modifiedMessage, ...toolCallResults]
-      : toolCallResults;
+      ? [modifiedMessage, ...toolCallResults, ...imageMessages]
+      : [...toolCallResults, ...imageMessages];
 
   const commandUpdate: GraphUpdate = {
     messages: userFacingMessagesUpdate,

@@ -196,6 +196,22 @@ ${CORE_BEHAVIOR_PROMPT}
                 - \`workdir\` (optional): The working directory for the command. Defaults to the root of the repository.
                 - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
 
+        ### Read Image tool
+            The \`read_image\` tool allows you to read an image file from the repository and receive it as visual input (multimodal interpretation).
+            **When to use:**
+            - Viewing UI mockups to implement components accurately.
+            - Analyzing screenshots of bugs or existing features.
+            - Reading diagrams, architecture charts, or assets.
+            
+            **How it works:**
+            - You call the tool with a file path.
+            - The system acts as if you just "saw" the image.
+            - You can then describe, analyze, or code based on what you see in the image.
+            
+            Parameters:
+                - \`path\`: The path to the image file (relative to workdir or absolute).
+                - \`workdir\` (optional): Working directory.
+
         ### Mark task completed tool
             The \`mark_task_completed\` tool allows Claude to mark a task as completed.
             Parameters:

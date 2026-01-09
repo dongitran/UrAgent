@@ -23,6 +23,7 @@ import {
   createGrepTool,
   createShellTool,
   createInstallDependenciesTool,
+  createReadImageTool,
 } from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
@@ -157,6 +158,7 @@ function createToolsAndPrompt(
     createScratchpadTool(
       "when generating a final review, after all context gathering and reviewing is complete",
     ),
+    createReadImageTool(state, config),
   ];
   const anthropicTools = tools;
   anthropicTools[anthropicTools.length - 1] = {
@@ -275,8 +277,8 @@ export async function generateReviewActions(
       tool_choice: "auto",
       ...(modelSupportsParallelToolCallsParam
         ? {
-            parallel_tool_calls: true,
-          }
+          parallel_tool_calls: true,
+        }
         : {}),
     },
   );

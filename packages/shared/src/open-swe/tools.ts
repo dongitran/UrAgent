@@ -30,8 +30,8 @@ export function createRequestHumanHelpToolFields() {
       .string()
       .describe(
         "The help request to send to the human. Should be concise, but descriptive.\n" +
-          "IMPORTANT: This should be a request which the user can help with, such as providing context into where a function lives/is used within a codebase, or answering questions about how to run scripts.\n" +
-          "IMPORTANT: The user does NOT have access to the filesystem you're running on, and thus can not make changes to the code for you.",
+        "IMPORTANT: This should be a request which the user can help with, such as providing context into where a function lives/is used within a codebase, or answering questions about how to run scripts.\n" +
+        "IMPORTANT: The user does NOT have access to the filesystem you're running on, and thus can not make changes to the code for you.",
       ),
   });
   return {
@@ -326,9 +326,9 @@ export function createMarkTaskCompletedToolFields() {
       .string()
       .describe(
         "A detailed summary of the actions you took to complete the current task. " +
-          "Include specifics into the actions you took, insights you learned about the codebase while completing the task, and any other context which would be useful to another developer reviewing the actions you took. " +
-          "You may include file paths and lists of the changes you made, but do not include full file contents or full code changes. " +
-          "Ensure your summary is concise, thoughtful and helpful.",
+        "Include specifics into the actions you took, insights you learned about the codebase while completing the task, and any other context which would be useful to another developer reviewing the actions you took. " +
+        "You may include file paths and lists of the changes you made, but do not include full file contents or full code changes. " +
+        "Ensure your summary is concise, thoughtful and helpful.",
       ),
   });
 
@@ -660,9 +660,10 @@ export function createViewToolFields(
   return {
     name: "view",
     description:
-      "A text editor tool that can view files. " +
+      "A text editor tool that can view TEXT files (e.g., code, config, markdown). " +
       `The default working directory is \`${repoRoot}\`, but you can specify a different directory using the 'workdir' parameter. ` +
-      "Supports commands: view (read file/directory).",
+      "Supports commands: view (read file/directory). " +
+      "WARNING: Do NOT use this for image files (PNG, JPG, GIF, etc.) as it will return binary garbage. Use the `read_image` tool instead for visual analysis of images.",
     schema: viewSchema,
   };
 }

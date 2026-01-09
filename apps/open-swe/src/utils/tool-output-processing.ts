@@ -37,12 +37,19 @@ export async function processToolCallContent(
         numEndCharacters: 20000,
       }),
     };
+  } else if (toolCall.name === "read_image") {
+    // CRITICAL: Never truncate read_image output!
+    // The base64 image data must be preserved intact for the HumanMessage injection.
+    // Truncating base64 data would corrupt the image completely.
+    return {
+      content: result,
+    };
   } else if (FILE_READ_TOOL_NAMES.includes(toolCall.name)) {
     // File read tools (view, str_replace_based_edit_tool with view command) need higher limits
     // to allow AI to read full file content without truncation in the middle
-    const isViewCommand = toolCall.name === "view" || 
+    const isViewCommand = toolCall.name === "view" ||
       (toolCall.name === "str_replace_based_edit_tool" && toolCall.args?.command === "view");
-    
+
     if (isViewCommand) {
       return {
         content: truncateOutput(result, {
@@ -77,11 +84,11 @@ export async function processToolCallContent(
 
     const stateUpdates = parsedUrl
       ? {
-          documentCache: {
-            ...state.documentCache,
-            [parsedUrl]: result,
-          },
-        }
+        documentCache: {
+          ...state.documentCache,
+          [parsedUrl]: result,
+        },
+      }
       : undefined;
 
     return {
