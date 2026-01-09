@@ -129,7 +129,7 @@ export function addPullRequestNumberToActiveTask(
     throw new Error(`Task with index ${activeTaskIndex} not found`);
   }
 
-  // Create an updated task marked as completed
+  // Create an updated task with the pull request number
   const updatedTask: Task = {
     ...activeTask,
     pullRequestNumber,
