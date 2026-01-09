@@ -22,6 +22,8 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
     ".svg": "image/svg+xml",
     ".bmp": "image/bmp",
     ".ico": "image/x-icon",
@@ -47,7 +49,8 @@ function isSupportedImage(filePath: string): boolean {
  * Creates a tool for reading images from the sandbox/local filesystem.
  * Returns image content as base64 data URL that can be used in multimodal prompts.
  * 
- * Supported formats: PNG, JPG, JPEG, GIF, WEBP, SVG, BMP, ICO
+ * Supported formats: PNG, JPG, JPEG, GIF, WEBP, HEIC, HEIF, SVG, BMP, ICO
+ * (Note: HEIC/HEIF support varies by AI model)
  * 
  * @example
  * Agent can use this tool to read UI reference images:
@@ -102,26 +105,40 @@ export function createReadImageTool(
                     isLocalMode: isLocalMode(config),
                 });
 
-                let imageData: Buffer;
 
                 if (isLocalMode(config)) {
                     // Read from local filesystem
-                    imageData = await fs.readFile(fullPath);
+                    const imageData = await fs.readFile(fullPath);
+                    const mimeType = getMimeType(fullPath);
+                    const base64 = imageData.toString("base64");
+                    const dataUrl = `data:${mimeType};base64,${base64}`;
+
+                    logger.info("Image read successfully from local filesystem", {
+                        path: fullPath,
+                        mimeType,
+                        dataUrlLength: dataUrl.length,
+                    });
+
+                    return { result: dataUrl, status: "success" };
                 } else {
                     // Read from sandbox
                     const sandboxInstance = await getSandboxInstanceOrThrow({
                         xSandboxSessionId: state.sandboxSessionId,
                     });
 
+                    // Properly escape the path for shell execution to prevent injection
+                    // Replace ' with '\'' and wrap in single quotes
+                    const escapedPath = `'${fullPath.replace(/'/g, "'\\''")}'`;
+
                     // readFile returns string - need to convert
                     // For binary files, we use base64 command in sandbox
                     const result = await sandboxInstance.executeCommand({
-                        command: `base64 -w 0 "${fullPath}"`,
+                        command: `base64 -w 0 ${escapedPath}`,
                         workdir: workDir,
                     });
 
                     if (result.exitCode !== 0) {
-                        throw new Error(`Failed to read image: ${result.result}`);
+                        throw new Error(`Failed to read image (exit code ${result.exitCode}): ${result.result}`);
                     }
 
                     // Result is already base64 encoded
@@ -136,19 +153,6 @@ export function createReadImageTool(
 
                     return { result: dataUrl, status: "success" };
                 }
-
-                // For local mode, encode to base64
-                const mimeType = getMimeType(fullPath);
-                const base64 = imageData.toString("base64");
-                const dataUrl = `data:${mimeType};base64,${base64}`;
-
-                logger.info("Image read successfully", {
-                    path: fullPath,
-                    mimeType,
-                    dataUrlLength: dataUrl.length,
-                });
-
-                return { result: dataUrl, status: "success" };
             } catch (error) {
                 const errorMessage =
                     error instanceof Error ? error.message : String(error);
@@ -169,7 +173,7 @@ Use this tool when you need to:
 
 The returned base64 data URL can be processed by vision-capable AI models.
 
-Supported formats: PNG, JPG, JPEG, GIF, WEBP, SVG, BMP, ICO
+Supported formats: PNG, JPG, JPEG, GIF, WEBP, HEIC, HEIF, SVG, BMP, ICO
 
 Example paths:
 - "designs/login-page.png" - relative to repo root
