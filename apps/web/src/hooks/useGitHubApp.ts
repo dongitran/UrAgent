@@ -521,13 +521,15 @@ export function useGitHubApp(): UseGitHubAppReturn {
   };
 
   // Get the default branch for the currently selected repository
-  const defaultBranch = selectedRepository
+  // Priority: 1) NEXT_PUBLIC_DEFAULT_BRANCH env var, 2) GitHub API's default_branch
+  const defaultBranchFromEnv = process.env.NEXT_PUBLIC_DEFAULT_BRANCH;
+  const defaultBranch = defaultBranchFromEnv || (selectedRepository
     ? repositories.find(
       (repo) =>
         repo.full_name ===
         `${selectedRepository.owner}/${selectedRepository.repo}`,
     )?.default_branch || null
-    : null;
+    : null);
 
   return {
     // Installation and general state
