@@ -46,6 +46,8 @@ import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
+import { getSkillsRepoPrompt } from "../../../../utils/skills-prompt.js";
+
 // Debug logging controlled by GEMINI_DEBUG env var
 const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
 
@@ -85,7 +87,8 @@ function formatSystemPrompt(
     .replaceAll(
       "{USER_REQUEST_PROMPT}",
       formatUserRequestPrompt(state.messages),
-    );
+    )
+    .replaceAll("{SKILLS_REPO_PROMPT}", getSkillsRepoPrompt());
 }
 
 const formatCacheablePrompt = (

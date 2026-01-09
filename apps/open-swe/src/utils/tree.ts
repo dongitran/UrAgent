@@ -19,10 +19,10 @@ export const FAILED_TO_GENERATE_TREE_MESSAGE =
 
 /**
  * Fallback tree command when 'tree' is not available
- * Uses git ls-files + awk to generate a tree-like structure
+ * Uses git ls-files + explicitly includes .skills folder if it exists
  * Shows directory structure with proper indentation
  */
-const FALLBACK_TREE_COMMAND = `git ls-files | head -1000 | awk -F/ '
+const FALLBACK_TREE_COMMAND = `{ git ls-files; [ -d .skills ] && find .skills -maxdepth 6 -not -path '*/.*' | sed 's|^\\./||'; } | sort | uniq | head -1000 | awk -F/ '
 {
   # Track directories we have already printed
   path = ""
@@ -90,7 +90,7 @@ export async function getCodebaseTree(
     // Use provider-aware path resolution via getRepoAbsolutePath
     // providerType is required for correct path when SANDBOX_PROVIDER=multi
     const repoDir = getRepoAbsolutePath(targetRepository, undefined, providerType);
-    
+
     // Use fallback command directly (tree is not available in E2B sandbox)
     // This uses git ls-files which is always available in git repos
     const response = await executor.executeCommand({
@@ -120,10 +120,10 @@ export async function getCodebaseTree(
       ...(errorFields ? { errorFields } : {}),
       ...(e instanceof Error
         ? {
-            name: e.name,
-            message: e.message,
-            stack: e.stack,
-          }
+          name: e.name,
+          message: e.message,
+          stack: e.stack,
+        }
         : {}),
     });
     return FAILED_TO_GENERATE_TREE_MESSAGE;
@@ -158,10 +158,10 @@ async function getCodebaseTreeLocal(config: GraphConfig): Promise<string> {
     logger.error("Failed to generate tree in local mode", {
       ...(e instanceof Error
         ? {
-            name: e.name,
-            message: e.message,
-            stack: e.stack,
-          }
+          name: e.name,
+          message: e.message,
+          stack: e.stack,
+        }
         : { error: e }),
     });
     return FAILED_TO_GENERATE_TREE_MESSAGE;

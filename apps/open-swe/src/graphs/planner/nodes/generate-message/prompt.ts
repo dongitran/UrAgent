@@ -12,7 +12,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
 
 {FOLLOWUP_MESSAGE_PROMPT}
 
-<context_gathering_guidelines>
+<context_gathering_guidelines>{SKILLS_REPO_FIRST_STEP}
     1. Use only read operations: Execute commands that inspect and analyze the codebase without modifying any files. This ensures we understand the current state before making changes.
         - **CRITICAL: DO NOT create, modify, or delete any files during this phase.
     2. Make high-quality, targeted tool calls: Each command should have a clear purpose in building your understanding of the codebase. Think strategically about what information you need.
@@ -85,7 +85,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>
     <repository_status>Already cloned and accessible in the current directory</repository_status>
-    {LOCAL_MODE_NOTE}
+    {LOCAL_MODE_NOTE}{SKILLS_REPO_PROMPT}
 
     <codebase_tree>
         Generated via: \`git ls-files | tree --fromfile -L 3\`:

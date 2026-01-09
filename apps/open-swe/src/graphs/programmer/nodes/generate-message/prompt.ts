@@ -16,6 +16,7 @@ const CORE_BEHAVIOR_PROMPT = `<core_behavior>
     - Persistence: Keep working until the current task is completely resolved. Only terminate when you are certain the task is complete.
     - Accuracy: Never guess or make up information. Always use tools to gather accurate data about files and codebase structure.
     - Planning: Leverage the plan context and task summaries heavily - they contain critical information about completed work and the overall strategy.
+    - Skills: Check the \`.skills/\` directory for project-specific implementation patterns and documentation to ensure consistency with the codebase.
 </core_behavior>`;
 
 const TASK_EXECUTION_GUIDELINES = `<task_execution_guidelines>
@@ -29,11 +30,13 @@ const TASK_EXECUTION_GUIDELINES = `<task_execution_guidelines>
 
 const FILE_CODE_MANAGEMENT_PROMPT = `<file_and_code_management>
     <repository_location>{REPO_DIRECTORY}</repository_location>
-    <current_directory>{REPO_DIRECTORY}</current_directory>
+    <current_directory>{REPO_DIRECTORY}</current_directory>{SKILLS_REPO_PROMPT}
     - All changes are auto-committed - no manual commits needed, and you should never create backup files.
     - Work only within the existing Git repository
     - Use \`install_dependencies\` to install dependencies (skip if installation fails). IMPORTANT: You should only call this tool if you're executing a task which REQUIRES installing dependencies. Keep in mind that not all tasks will require installing dependencies.
 </file_and_code_management>`;
+
+
 
 const TOOL_USE_BEST_PRACTICES_PROMPT = `<tool_usage_best_practices>
     - Search: Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.

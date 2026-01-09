@@ -28,7 +28,7 @@ import {
 import { Command, END } from "@langchain/langgraph";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 
-import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
+import { getSandboxInstanceWithErrorHandling, deleteSandbox } from "../../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
@@ -472,12 +472,33 @@ export async function takeAction(
     ...allStateUpdates,
   };
 
-  // If run was cancelled by user, stop the graph immediately
+  // If run was cancelled by user, cleanup sandbox and stop the graph immediately
   if (isRunCancelledByUser) {
-    logger.info("Stopping graph because run has been cancelled by user");
+    logger.warn("Stopping graph because run has been cancelled by user");
+
+    // Cleanup sandbox on cancellation to avoid orphaned resources
+    if (state.sandboxSessionId) {
+      try {
+        const deleted = await deleteSandbox(state.sandboxSessionId);
+        logger.info("Sandbox cleanup on cancellation", {
+          sandboxSessionId: state.sandboxSessionId,
+          deleted,
+        });
+      } catch (cleanupError) {
+        logger.warn("Failed to cleanup sandbox on cancellation", {
+          sandboxSessionId: state.sandboxSessionId,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+    }
+
     return new Command({
       goto: END,
-      update: commandUpdate,
+      update: {
+        ...commandUpdate,
+        // Clear sandbox session ID since it's been deleted
+        sandboxSessionId: undefined,
+      },
     });
   }
 

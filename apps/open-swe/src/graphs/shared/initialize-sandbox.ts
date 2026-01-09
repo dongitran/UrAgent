@@ -8,7 +8,10 @@ import {
   TargetRepository,
 } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
-import { getProvider } from "../../utils/sandbox.js";
+import {
+  ensureSkillsRepository,
+  getProvider,
+} from "../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
@@ -27,6 +30,7 @@ import {
 } from "@openswe/shared/open-swe/local-mode";
 import { ISandbox, SandboxProviderType } from "../../utils/sandbox-provider/types.js";
 import { getBranch } from "../../utils/github/api.js";
+import { LocalSandbox } from "../../utils/sandbox-provider/local-provider.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -41,6 +45,7 @@ type InitializeSandboxState = {
   internalMessages?: BaseMessage[];
   dependenciesInstalled?: boolean;
   customRules?: CustomRules;
+  skillsRepository?: TargetRepository;
 };
 
 export async function initializeSandbox(
@@ -62,42 +67,16 @@ export async function initializeSandbox(
     branchName = newBranchName;
   }
 
-  // Fast-path: If sandbox was already validated by caller (e.g., startProgrammerRun),
-  // skip full initialization and just resume the existing sandbox.
-  // This prevents duplicate sandbox creation when transitioning from planner to programmer.
-  if (sandboxValidated && sandboxSessionId) {
-    logger.info("Sandbox already validated, using fast-path resume", {
-      sandboxSessionId,
-      sandboxValidated,
-    });
+  // Get GitHub tokens early as they are needed in multiple paths
+  const { githubInstallationToken } = isLocalMode(config)
+    ? { githubInstallationToken: "" }
+    : await getGitHubTokensFromConfig(config);
 
-    try {
-      const provider = getProvider();
-      const existingSandbox = await provider.get(sandboxSessionId);
-
-      logger.info("Fast-path resume successful", {
-        sandboxId: existingSandbox.id,
-        providerType: existingSandbox.providerType,
-      });
-
-      // Return minimal state update - sandbox is already set up
-      return {
-        sandboxSessionId: existingSandbox.id,
-        sandboxProviderType: existingSandbox.providerType,
-        branchName,
-      };
-    } catch (error) {
-      // If fast-path fails, fall through to normal initialization
-      logger.warn("Fast-path resume failed, falling back to normal initialization", {
-        sandboxSessionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
   // Note: We'll determine the actual provider type AFTER sandbox is created/resumed
   // because in multi-provider mode, we don't know which provider will be selected
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
 
+  // Define event helpers early so they can be used in ensureSkillsRepository
   const events: CustomNodeEvent[] = [];
   const emitStepEvent = (
     base: CustomNodeEvent,
@@ -132,7 +111,49 @@ export async function initializeSandbox(
     }),
   ];
 
-  // Check if we're in local mode before trying to get GitHub tokens
+  // Placeholder local helper removed in favor of direct shared calls
+
+  // Fast-path: If sandbox was already validated by caller (e.g., startProgrammerRun),
+  // skip full initialization and just resume the existing sandbox.
+  // This prevents duplicate sandbox creation when transitioning from planner to programmer.
+  if (sandboxValidated && sandboxSessionId) {
+    logger.info("Sandbox already validated, using fast-path resume", {
+      sandboxSessionId,
+      sandboxValidated,
+    });
+
+    try {
+      const provider = getProvider();
+      const existingSandbox = await provider.get(sandboxSessionId);
+
+      logger.info("Fast-path resume successful", {
+        sandboxId: existingSandbox.id,
+        providerType: existingSandbox.providerType,
+      });
+
+      // Ensure skills repo is available even in fast-path
+      const repoSkills = await ensureSkillsRepository(existingSandbox, targetRepository, config, {
+        skillsRepoFromState: state.skillsRepository,
+        emitStepEvent,
+      });
+
+      // Return minimal state update - sandbox is already set up
+      return {
+        sandboxSessionId: existingSandbox.id,
+        sandboxProviderType: existingSandbox.providerType,
+        branchName,
+        skillsRepository: repoSkills,
+      };
+    } catch (error) {
+      // If fast-path fails, fall through to normal initialization
+      logger.warn("Fast-path resume failed, falling back to normal initialization", {
+        sandboxSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // Check if we're in local mode before proceeding
   if (isLocalMode(config)) {
     return initializeSandboxLocal(
       { ...state, branchName },
@@ -141,8 +162,6 @@ export async function initializeSandbox(
       createEventsMessage,
     );
   }
-
-  const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
 
   if (!sandboxSessionId) {
     emitStepEvent(
@@ -240,6 +259,12 @@ export async function initializeSandbox(
         throw new Error("Failed to pull latest changes.");
       }
 
+      // Ensure skills repo is available BEFORE generating tree (so .skills appears in tree output)
+      const repoSkills = await ensureSkillsRepository(existingSandboxInstance, targetRepository, config, {
+        skillsRepoFromState: state.skillsRepository,
+        emitStepEvent,
+      });
+
       const generateCodebaseTreeActionId = uuidv4();
       const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
         nodeId: INITIALIZE_NODE_ID,
@@ -281,6 +306,7 @@ export async function initializeSandbox(
             config,
           ),
           branchName,
+          skillsRepository: repoSkills,
         };
       } catch {
         emitStepEvent(
@@ -291,6 +317,7 @@ export async function initializeSandbox(
         const eventsMessages = createEventsMessage();
         const userMessages = state.messages || [];
 
+        // Skills repo already cloned before try block, just use repoSkills from outer scope
         return {
           sandboxSessionId: existingSandboxInstance.id,
           sandboxProviderType: actualProviderType,
@@ -303,6 +330,7 @@ export async function initializeSandbox(
             config,
           ),
           branchName,
+          skillsRepository: repoSkills,
         };
       }
     } catch (resumeError) {
@@ -523,6 +551,14 @@ export async function initializeSandbox(
     typeof cloneRepoRes === "string" ? cloneRepoRes : branchName;
   emitStepEvent(baseCloneRepoAction, "success");
 
+  // --- SKILLS REPOSITORY CLONING LOGIC ---
+  // Ensure skills repo is available in new creation path
+  const repoSkills = await ensureSkillsRepository(sandboxInstance, targetRepository, config, {
+    skillsRepoFromState: state.skillsRepository,
+    emitStepEvent,
+  });
+  // --- END SKILLS REPOSITORY CLONING LOGIC ---
+
   // Checking out branch
   const checkoutBranchActionId = uuidv4();
   const baseCheckoutBranchAction: CustomNodeEvent = {
@@ -579,6 +615,7 @@ export async function initializeSandbox(
     dependenciesInstalled: false,
     customRules: await getCustomRulesWithSandboxInstance(sandboxInstance, absoluteRepoDir, config),
     branchName: newBranchName,
+    skillsRepository: repoSkills,
   };
 }
 
@@ -678,22 +715,31 @@ async function initializeSandboxLocal(
     );
   }
 
-  // Create a mock sandbox ID for consistency
-  const mockSandboxId = `local-${Date.now()}-${crypto.randomBytes(16).toString("hex")}`;
+  // Create a real LocalSandbox for local mode
+  const localSandbox = new LocalSandbox(
+    `local-${Date.now()}-${crypto.randomBytes(16).toString("hex")}`,
+  );
+
+  // Ensure skills repo is available in local mode too!
+  const repoSkills = await ensureSkillsRepository(localSandbox, targetRepository, config, {
+    skillsRepoFromState: state.skillsRepository,
+    emitStepEvent,
+  });
 
   const eventsMessages = createEventsMessage();
   const userMessages = state.messages || [];
 
   return {
-    sandboxSessionId: mockSandboxId,
+    sandboxSessionId: localSandbox.id,
     sandboxProviderType: 'local',
     targetRepository,
     codebaseTree,
     messages: eventsMessages,
     internalMessages: [...userMessages, ...eventsMessages],
     dependenciesInstalled: false,
-    // In local mode, pass null for sandbox - getCustomRulesWithSandboxInstance handles this
+    // In local mode, pass undefined for customRules if not yet implemented
     customRules: undefined,
     branchName: branchName,
+    skillsRepository: repoSkills,
   };
 }

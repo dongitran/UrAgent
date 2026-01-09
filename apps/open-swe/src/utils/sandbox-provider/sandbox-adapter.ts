@@ -20,6 +20,7 @@ import {
   CreateSandboxOptions,
 } from "./types.js";
 import { getSandboxProvider } from "./index.js";
+import { ensureSkillsRepository } from "../sandbox.js";
 
 const logger = createLogger(LogLevel.DEBUG, "SandboxAdapter");
 
@@ -61,12 +62,12 @@ export async function createSandbox(
   options?: CreateSandboxOptions,
 ): Promise<ISandbox> {
   const provider = getProvider();
-  
+
   logger.debug("Creating sandbox via adapter", {
     provider: provider.name,
     options,
   });
-  
+
   return provider.create(options);
 }
 
@@ -76,12 +77,12 @@ export async function createSandbox(
  */
 export async function getSandbox(sandboxId: string): Promise<ISandbox> {
   const provider = getProvider();
-  
+
   logger.debug("Getting sandbox via adapter", {
     provider: provider.name,
     sandboxId,
   });
-  
+
   return provider.get(sandboxId);
 }
 
@@ -91,12 +92,12 @@ export async function getSandbox(sandboxId: string): Promise<ISandbox> {
  */
 export async function stopSandbox(sandboxId: string): Promise<string> {
   const provider = getProvider();
-  
+
   logger.debug("Stopping sandbox via adapter", {
     provider: provider.name,
     sandboxId,
   });
-  
+
   await provider.stop(sandboxId);
   return sandboxId;
 }
@@ -107,12 +108,12 @@ export async function stopSandbox(sandboxId: string): Promise<string> {
  */
 export async function deleteSandbox(sandboxId: string): Promise<boolean> {
   const provider = getProvider();
-  
+
   logger.debug("Deleting sandbox via adapter", {
     provider: provider.name,
     sandboxId,
   });
-  
+
   return provider.delete(sandboxId);
 }
 
@@ -140,6 +141,10 @@ export async function getSandboxWithErrorHandling(
   // Handle local mode
   if (isLocalMode(config)) {
     const mockSandbox = createMockLocalSandbox(sandboxSessionId);
+
+    // Ensure skills repo is available in local mode too!
+    await ensureSkillsRepository(mockSandbox, targetRepository, config);
+
     return {
       sandbox: mockSandbox,
       codebaseTree: null,
@@ -183,15 +188,15 @@ export async function getSandboxWithErrorHandling(
     });
 
     const sandbox = await createSandboxWithRetry(provider);
-    
+
     // Clone repository - use provider-aware path from sandbox instance
     // sandbox.providerType gives us the actual provider ('daytona' or 'e2b')
     const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, sandbox.providerType);
     const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
-    
+
     // Get GitHub token from config
     const githubToken = config.configurable?.["x-github-installation-token"];
-    
+
     await sandbox.git.clone({
       url: cloneUrl,
       targetDir: absoluteRepoDir,
@@ -201,6 +206,24 @@ export async function getSandboxWithErrorHandling(
       // Pass base branch for E2B to fetch reference (needed for git diff)
       baseBranch: targetRepository.branch,
     });
+
+    const skillsInstance: ISandbox = {
+      id: sandbox.id,
+      state: SandboxState.STARTED,
+      providerType: sandbox.providerType,
+      executeCommand: (o) => sandbox.executeCommand(o),
+      readFile: (p) => sandbox.readFile(p),
+      writeFile: (p, c) => sandbox.writeFile(p, c),
+      exists: (p) => sandbox.exists(p),
+      mkdir: (p) => sandbox.mkdir(p),
+      remove: (p) => sandbox.remove(p),
+      git: sandbox.git,
+      start: () => sandbox.start(),
+      stop: () => sandbox.stop(),
+      getNative: () => sandbox.getNative(),
+    };
+
+    await ensureSkillsRepository(skillsInstance, targetRepository, config);
 
     return {
       sandbox,
@@ -220,14 +243,14 @@ async function createSandboxWithRetry(
   maxAttempts: number = 3,
 ): Promise<ISandbox> {
   let lastError: Error | undefined;
-  
+
   // Multi-provider handles template/user selection internally
   // For single providers, they use their default template/user if not specified
   // This is safe because:
   // - MultiSandboxProvider.create() determines correct template based on selected sub-provider
   // - DaytonaSandboxProvider.create() uses defaultSnapshot if not specified
   // - E2BSandboxProvider.create() uses defaultTemplate if not specified
-  
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       return await provider.create();
@@ -240,7 +263,7 @@ async function createSandboxWithRetry(
       });
     }
   }
-  
+
   throw lastError ?? new Error(`Failed to create sandbox after ${maxAttempts} attempts`);
 }
 
@@ -249,36 +272,36 @@ async function createSandboxWithRetry(
  */
 function createMockLocalSandbox(sandboxId?: string): ISandbox {
   const id = sandboxId || `local-mock-${Date.now()}`;
-  
+
   return {
     id,
     state: SandboxState.STARTED,
     providerType: SandboxProviderType.LOCAL,
-    
+
     async executeCommand() {
       throw new Error("Local mode: use LocalShellExecutor instead");
     },
-    
+
     async readFile() {
       throw new Error("Local mode: use fs.readFile instead");
     },
-    
+
     async writeFile() {
       throw new Error("Local mode: use fs.writeFile instead");
     },
-    
+
     async exists() {
       throw new Error("Local mode: use fs.existsSync instead");
     },
-    
+
     async mkdir() {
       throw new Error("Local mode: use fs.mkdirSync instead");
     },
-    
+
     async remove() {
       throw new Error("Local mode: use fs.rmSync instead");
     },
-    
+
     git: {
       async clone() {
         throw new Error("Local mode: use git CLI instead");
@@ -302,15 +325,15 @@ function createMockLocalSandbox(sandboxId?: string): ISandbox {
         throw new Error("Local mode: use git CLI instead");
       },
     },
-    
+
     async start() {
       // No-op for local mode
     },
-    
+
     async stop() {
       // No-op for local mode
     },
-    
+
     getNative<T>(): T {
       return { id, state: 'started' } as unknown as T;
     },
@@ -322,7 +345,7 @@ function createMockLocalSandbox(sandboxId?: string): ISandbox {
  */
 export function getCurrentProviderType(): SandboxProviderType {
   const provider = getProvider();
-  
+
   switch (provider.name) {
     case 'e2b':
       return SandboxProviderType.E2B;

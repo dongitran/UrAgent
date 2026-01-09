@@ -69,6 +69,10 @@ export function BranchSelector({
     defaultBranch,
   } = useGitHubAppProvider();
 
+  // Override defaultBranch with env var if available (ensures env config takes precedence)
+  const envDefaultBranch = process.env.NEXT_PUBLIC_DEFAULT_BRANCH;
+  const effectiveDefaultBranch = envDefaultBranch || defaultBranch;
+
   // Auto-select default branch when repository changes and branches are loaded
   useEffect(() => {
     if (
@@ -88,10 +92,10 @@ export function BranchSelector({
             // branch was found after search. can return early
             return;
           }
-          setSelectedBranch(findDefaultBranch(branches, defaultBranch));
+          setSelectedBranch(findDefaultBranch(branches, effectiveDefaultBranch));
         });
       } else if (!selectedBranch) {
-        setSelectedBranch(findDefaultBranch(branches, defaultBranch));
+        setSelectedBranch(findDefaultBranch(branches, effectiveDefaultBranch));
       }
     }
   }, [
@@ -101,7 +105,7 @@ export function BranchSelector({
     branchesError,
     selectedBranch,
     setSelectedBranch,
-    defaultBranch,
+    effectiveDefaultBranch,
   ]);
 
   const handleSelect = (branchName: string) => {

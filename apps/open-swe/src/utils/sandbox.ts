@@ -10,8 +10,144 @@ import type { ISandbox, ISandboxProvider } from "./sandbox-provider/types.js";
 import { SandboxState, SandboxProviderType } from "./sandbox-provider/types.js";
 import { getSandboxProvider } from "./sandbox-provider/index.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { v4 as uuidv4 } from "uuid";
+import {
+  INITIALIZE_NODE_ID,
+  CustomNodeEvent,
+} from "@openswe/shared/open-swe/custom-node-events";
+import { LocalSandbox } from "./sandbox-provider/local-provider.js";
 
 const logger = createLogger(LogLevel.DEBUG, "Sandbox");
+
+/**
+ * Helper to ensure the skills repository is cloned and available.
+ * Skills are cloned into the main repository's .skills folder for easy access.
+ */
+export async function ensureSkillsRepository(
+  sandboxInstance: ISandbox,
+  mainRepoInfo: TargetRepository,
+  config: GraphConfig,
+  options?: {
+    skillsRepoFromState?: TargetRepository;
+    emitStepEvent?: (
+      base: CustomNodeEvent,
+      status: "pending" | "success" | "error" | "skipped",
+      error?: string,
+    ) => void;
+  },
+): Promise<TargetRepository | undefined> {
+  const { skillsRepoFromState, emitStepEvent } = options || {};
+  const configurable = config.configurable as unknown as {
+    skillsRepository?: TargetRepository;
+  };
+
+  // Try to get skills repo from state, config, or fallback to env vars
+  let skillsRepo = skillsRepoFromState || configurable?.skillsRepository;
+
+  // Fallback to env vars if not provided in state or config
+  if (!skillsRepo) {
+    const envOwner = process.env.SKILLS_REPOSITORY_OWNER;
+    const envRepo = process.env.SKILLS_REPOSITORY_NAME;
+    if (envOwner && envRepo) {
+      skillsRepo = {
+        owner: envOwner,
+        repo: envRepo,
+        branch: process.env.SKILLS_REPOSITORY_BRANCH || "main",
+      };
+    }
+  }
+
+  if (skillsRepo) {
+    const skillsCloneActionId = uuidv4();
+    const skillsRepoName = `${skillsRepo.owner}/${skillsRepo.repo}`;
+    const baseSkillsCloneAction: CustomNodeEvent = {
+      nodeId: INITIALIZE_NODE_ID,
+      createdAt: new Date().toISOString(),
+      actionId: skillsCloneActionId,
+      action: "Cloning skills repository",
+      data: {
+        status: "pending",
+        sandboxSessionId: sandboxInstance.id,
+        branch: skillsRepo.branch,
+        repo: skillsRepoName,
+      },
+    };
+
+    emitStepEvent?.(baseSkillsCloneAction, "pending");
+
+    try {
+      const { githubInstallationToken } = isLocalMode(config)
+        ? { githubInstallationToken: "" }
+        : await getGitHubTokensFromConfig(config);
+
+      // Clone skills into main repo .skills folder for easy relative path access
+      const absoluteRepoDir = getRepoAbsolutePath(
+        mainRepoInfo,
+        undefined,
+        sandboxInstance.providerType,
+      );
+      const skillsRepoDir = `${absoluteRepoDir}/.skills`;
+      const skillsCloneUrl = `https://github.com/${skillsRepo.owner}/${skillsRepo.repo}.git`;
+
+      // Check if skills repo already exists
+      const skillsExists = await sandboxInstance.exists(skillsRepoDir);
+      if (skillsExists) {
+        logger.info("SKILLS REPO: Already exists, skipping clone", {
+          targetDir: skillsRepoDir,
+        });
+        return skillsRepo;
+      }
+
+      logger.warn("SKILLS REPO: About to clone", {
+        url: skillsCloneUrl,
+        targetDir: skillsRepoDir,
+        branch: skillsRepo.branch,
+        providerType: sandboxInstance.providerType,
+        absoluteRepoDir,
+        sandboxId: sandboxInstance.id,
+      });
+
+      await sandboxInstance.git.clone({
+        url: skillsCloneUrl,
+        targetDir: skillsRepoDir,
+        branch: skillsRepo.branch,
+        baseBranch: skillsRepo.branch,
+        username: "x-access-token",
+        token: githubInstallationToken,
+      });
+
+      // Add .skills to .git/info/exclude to prevent accidental commits
+      try {
+        await sandboxInstance.executeCommand({
+          command: `mkdir -p .git/info && echo ".skills" >> .git/info/exclude`,
+          workdir: absoluteRepoDir,
+        });
+        logger.warn("SKILLS REPO: Added .skills to .git/info/exclude");
+      } catch (excludeError) {
+        logger.error("SKILLS REPO: Failed to add .skills to exclude", {
+          error: excludeError,
+        });
+      }
+
+      emitStepEvent?.(baseSkillsCloneAction, "success");
+      logger.warn("SKILLS REPO: Clone SUCCESS", {
+        targetDir: skillsRepoDir,
+        branch: skillsRepo.branch,
+      });
+    } catch (error) {
+      logger.warn("SKILLS REPO: Clone FAILED", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      emitStepEvent?.(
+        baseSkillsCloneAction,
+        "skipped",
+        "Failed to clone skills repo, proceeding without it.",
+      );
+    }
+  }
+
+  return skillsRepo;
+}
 
 // Singleton instance of Daytona (kept for backward compatibility)
 let daytonaInstance: Daytona | null = null;
@@ -103,7 +239,7 @@ export async function deleteSandbox(
   sandboxSessionId: string,
 ): Promise<boolean> {
   const provider = getProvider();
-  logger.debug("[SANDBOX] Deleting sandbox", { 
+  logger.debug("[SANDBOX] Deleting sandbox", {
     sandboxSessionId,
     provider: provider.name,
   });
@@ -126,10 +262,10 @@ export async function deleteSandbox(
       error:
         error instanceof Error
           ? {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            }
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
           : error,
     });
     return false;
@@ -163,13 +299,13 @@ async function createSandbox(attempt: number): Promise<Sandbox | null> {
       durationMs: Date.now() - startTime,
       ...(e instanceof Error
         ? {
-            name: e.name,
-            message: e.message,
-            stack: e.stack,
-          }
+          name: e.name,
+          message: e.message,
+          stack: e.stack,
+        }
         : {
-            error: e,
-          }),
+          error: e,
+        }),
     });
     return null;
   }
@@ -268,9 +404,9 @@ export async function getSandboxWithErrorHandling(
         error:
           error instanceof Error
             ? {
-                name: error.name,
-                message: error.message,
-              }
+              name: error.name,
+              message: error.message,
+            }
             : error,
       },
     );
@@ -315,6 +451,79 @@ export async function getSandboxWithErrorHandling(
       sandboxId: sandbox.id,
       sandboxState: sandbox.state,
     });
+
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    await ensureSkillsRepository(
+      {
+        id: sandbox.id,
+        state: SandboxState.STARTED,
+        providerType: SandboxProviderType.DAYTONA,
+        executeCommand: async (opts) => {
+          const res = await sandbox.process.executeCommand(
+            opts.command,
+            opts.workdir,
+            opts.env,
+            opts.timeout,
+          );
+          return {
+            exitCode: res.exitCode,
+            result: res.result,
+            artifacts: res.artifacts ? {
+              stdout: res.artifacts.stdout || '',
+              stderr: (res.artifacts as any).stderr,
+            } : undefined,
+          };
+        },
+        readFile: async (p) => {
+          const res = await sandbox.process.executeCommand(`cat "${p}"`);
+          if (res.exitCode !== 0) throw new Error(`Read failed: ${res.result}`);
+          return res.result;
+        },
+        writeFile: async (p, c) => {
+          const delimiter = `EOF_${Date.now()}`;
+          const command = `cat > "${p}" << '${delimiter}'\n${c}\n${delimiter}`;
+          const res = await sandbox.process.executeCommand(command);
+          if (res.exitCode !== 0) throw new Error(`Write failed: ${res.result}`);
+        },
+        exists: async (p) => {
+          const res = await sandbox.process.executeCommand(`test -e "${p}" && echo "exists" || echo "not_exists"`);
+          return res.result.trim() === 'exists';
+        },
+        mkdir: async (p) => {
+          const res = await sandbox.process.executeCommand(`mkdir -p "${p}"`);
+          if (res.exitCode !== 0) throw new Error(`Mkdir failed: ${res.result}`);
+        },
+        remove: async (p) => {
+          const res = await sandbox.process.executeCommand(`rm -rf "${p}"`);
+          if (res.exitCode !== 0) throw new Error(`Remove failed: ${res.result}`);
+        },
+        git: {
+          clone: async (o) => {
+            const cloneUrl = o.token
+              ? o.url.replace("https://", `https://${o.username || "x-access-token"}:${o.token}@`)
+              : o.url;
+            await sandbox.git.clone(cloneUrl, o.targetDir, o.branch, o.commit);
+          },
+          add: async (dir, files) => await sandbox.git.add(dir, files),
+          commit: async (opts) => {
+            await sandbox.git.commit(opts.workdir, opts.message, opts.authorName, opts.authorEmail);
+          },
+          push: async (opts) => await sandbox.git.push(opts.workdir),
+          pull: async (opts) => await sandbox.git.pull(opts.workdir),
+          createBranch: async (dir, name) => await sandbox.git.createBranch(dir, name),
+          status: async (dir) => {
+            const status = await sandbox.git.status(dir);
+            return JSON.stringify(status);
+          },
+        },
+        start: async () => { },
+        stop: async () => { },
+        getNative: <T>() => sandbox as unknown as T,
+      },
+      targetRepository,
+      config,
+    );
+
     return {
       sandbox,
       codebaseTree: codebaseTreeToReturn,
@@ -340,7 +549,7 @@ export async function getSandboxInstanceWithErrorHandling(
   sandboxProviderType?: string;
 }> {
   const provider = getProvider();
-  
+
   logger.debug("[SANDBOX] getSandboxInstanceWithErrorHandling called", {
     sandboxSessionId,
     targetRepository: `${targetRepository.owner}/${targetRepository.repo}`,
@@ -350,37 +559,20 @@ export async function getSandboxInstanceWithErrorHandling(
   });
 
   if (isLocalMode(config)) {
-    // In local mode, create a mock ISandbox
-    const mockSandbox: ISandbox = {
-      id: sandboxSessionId || "local-mock-sandbox",
-      state: SandboxState.STARTED,
-      providerType: SandboxProviderType.LOCAL,
-      executeCommand: async () => ({ exitCode: 0, result: "" }),
-      readFile: async () => "",
-      writeFile: async () => {},
-      exists: async () => false,
-      mkdir: async () => {},
-      remove: async () => {},
-      git: {
-        clone: async () => {},
-        add: async () => {},
-        commit: async () => {},
-        push: async () => {},
-        pull: async () => {},
-        createBranch: async () => {},
-        status: async () => "",
-      },
-      start: async () => {},
-      stop: async () => {},
-      getNative: () => null as any,
-    };
+    // In local mode, use the real LocalSandbox
+    const localSandbox = new LocalSandbox(
+      sandboxSessionId || `local-${Date.now()}`,
+    );
 
-    logger.debug("[SANDBOX] Local mode - returning mock sandbox", {
-      mockSandboxId: mockSandbox.id,
+    logger.debug("[SANDBOX] Local mode - using LocalSandbox", {
+      sandboxId: localSandbox.id,
     });
 
+    // Ensure skills repo is available in local mode too!
+    await ensureSkillsRepository(localSandbox, targetRepository, config);
+
     return {
-      sandboxInstance: mockSandbox,
+      sandboxInstance: localSandbox,
       codebaseTree: null,
       dependenciesInstalled: null,
       sandboxProviderType: SandboxProviderType.LOCAL,
@@ -392,7 +584,7 @@ export async function getSandboxInstanceWithErrorHandling(
       throw new Error("No sandbox ID provided.");
     }
 
-    logger.debug("[SANDBOX] Getting existing sandbox via provider", { 
+    logger.debug("[SANDBOX] Getting existing sandbox via provider", {
       sandboxSessionId,
       provider: provider.name,
     });
@@ -454,20 +646,20 @@ export async function getSandboxInstanceWithErrorHandling(
         error:
           error instanceof Error
             ? {
-                name: error.name,
-                message: error.message,
-              }
+              name: error.name,
+              message: error.message,
+            }
             : error,
       },
     );
 
     let sandboxInstance: ISandbox | null = null;
     let numSandboxCreateAttempts = 0;
-    
+
     // For multi-provider, it handles template/user selection internally based on selected sub-provider
     // For single providers, we determine the correct template/user based on provider type
     let createOptions: { template?: string; user?: string; autoDeleteInterval?: number };
-    
+
     if (provider.name === 'multi') {
       // Multi-provider will determine correct template/user based on which provider it selects
       // We only pass autoDeleteInterval, let multi-provider handle the rest
@@ -487,7 +679,7 @@ export async function getSandboxInstanceWithErrorHandling(
       };
       logger.debug("[SANDBOX] Using single provider", { provider: provider.name, template, user });
     }
-    
+
     while (!sandboxInstance && numSandboxCreateAttempts < 3) {
       try {
         sandboxInstance = await provider.create(createOptions);
@@ -508,7 +700,7 @@ export async function getSandboxInstanceWithErrorHandling(
     }
 
     const { githubInstallationToken } = await getGitHubTokensFromConfig(config);
-    
+
     // Get provider-aware path - MUST use sandboxInstance.providerType (not provider.name)
     // because in multi-provider mode, provider.name is 'multi' but sandboxInstance.providerType
     // is the actual provider ('daytona' or 'e2b')
@@ -523,7 +715,7 @@ export async function getSandboxInstanceWithErrorHandling(
       actualProviderType: sandboxInstance.providerType,
       absoluteRepoDir,
     });
-    
+
     await sandboxInstance.git.clone({
       url: cloneUrl,
       targetDir: absoluteRepoDir,
@@ -567,6 +759,10 @@ export async function getSandboxInstanceWithErrorHandling(
       sandboxState: sandboxInstance.state,
       provider: provider.name,
     });
+
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    await ensureSkillsRepository(sandboxInstance, targetRepository, config);
+
     return {
       sandboxInstance,
       codebaseTree: codebaseTreeToReturn,

@@ -69,7 +69,7 @@ export function parseCustomRulesFromString(
   ) {
     repositoryStructure = contents.substring(
       contents.indexOf(REPOSITORY_STRUCTURE_OPEN_TAG) +
-        REPOSITORY_STRUCTURE_OPEN_TAG.length,
+      REPOSITORY_STRUCTURE_OPEN_TAG.length,
       contents.indexOf(REPOSITORY_STRUCTURE_CLOSE_TAG),
     );
   }
@@ -79,7 +79,7 @@ export function parseCustomRulesFromString(
   ) {
     dependenciesAndInstallation = contents.substring(
       contents.indexOf(DEPENDENCIES_AND_INSTALLATION_OPEN_TAG) +
-        DEPENDENCIES_AND_INSTALLATION_OPEN_TAG.length,
+      DEPENDENCIES_AND_INSTALLATION_OPEN_TAG.length,
       contents.indexOf(DEPENDENCIES_AND_INSTALLATION_CLOSE_TAG),
     );
   }
@@ -89,7 +89,7 @@ export function parseCustomRulesFromString(
   ) {
     testingInstructions = contents.substring(
       contents.indexOf(TESTING_INSTRUCTIONS_OPEN_TAG) +
-        TESTING_INSTRUCTIONS_OPEN_TAG.length,
+      TESTING_INSTRUCTIONS_OPEN_TAG.length,
       contents.indexOf(TESTING_INSTRUCTIONS_CLOSE_TAG),
     );
   }
@@ -99,7 +99,7 @@ export function parseCustomRulesFromString(
   ) {
     pullRequestFormatting = contents.substring(
       contents.indexOf(PULL_REQUEST_FORMATTING_OPEN_TAG) +
-        PULL_REQUEST_FORMATTING_OPEN_TAG.length,
+      PULL_REQUEST_FORMATTING_OPEN_TAG.length,
       contents.indexOf(PULL_REQUEST_FORMATTING_CLOSE_TAG),
     );
   }
@@ -204,8 +204,8 @@ async function getCustomRulesLocal(
       logger.debug("AGENTS.md not found, trying other files", { error });
     }
 
-    // Try to read AGENT.md, CLAUDE.md, CURSOR.md
-    const filesToTry = ["AGENT.md", "CLAUDE.md", "CURSOR.md"];
+    // Try to read AGENT.md, CLAUDE.md, CURSOR.md, RULES.md
+    const filesToTry = ["AGENT.md", "CLAUDE.md", "CURSOR.md", "RULES.md"];
 
     for (const fileName of filesToTry) {
       try {
@@ -216,7 +216,29 @@ async function getCustomRulesLocal(
         }
       } catch (error) {
         // File doesn't exist, continue to next file
-        logger.error(`Failed to read ${fileName}`, { error });
+      }
+    }
+
+    // Try to read rules from .skills directory
+    const skillsPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+    const skillsBaseDir = join(workingDirectory, ".skills");
+    const skillsSearchDirs = [skillsBaseDir];
+    if (skillsPath) {
+      skillsSearchDirs.unshift(join(skillsBaseDir, skillsPath));
+    }
+
+    for (const searchDir of skillsSearchDirs) {
+      for (const fileName of filesToTry) {
+        try {
+          const filePath = join(searchDir, fileName);
+          const content = await fs.readFile(filePath, "utf-8");
+          if (content && content.length > 0) {
+            logger.info("Found custom rules in skills directory", { filePath });
+            return parseCustomRulesFromString(content);
+          }
+        } catch (error) {
+          // File doesn't exist, continue
+        }
       }
     }
   } catch (error) {
@@ -252,34 +274,32 @@ export async function getCustomRulesWithSandboxInstance(
       return parseCustomRulesFromString(agentsMdRes.result);
     }
 
-    const catAgentMdFileCommand = ["cat", "AGENT.md"];
-    const catClaudeMdFileCommand = ["cat", "CLAUDE.md"];
-    const catCursorMdFileCommand = ["cat", "CURSOR.md"];
-    const [agentMdRes, claudeMdRes, cursorMdRes] = await Promise.all([
-      executor.executeCommand({
-        command: catAgentMdFileCommand.join(" "),
-        workdir: rootDir,
-        sandboxInstance,
-      }),
-      executor.executeCommand({
-        command: catClaudeMdFileCommand.join(" "),
-        workdir: rootDir,
-        sandboxInstance,
-      }),
-      executor.executeCommand({
-        command: catCursorMdFileCommand.join(" "),
-        workdir: rootDir,
-        sandboxInstance,
-      }),
-    ]);
-    if (agentMdRes.exitCode === 0 && agentMdRes.result?.length > 0) {
-      return parseCustomRulesFromString(agentMdRes.result);
+    // Prepare commands for root and skills subfolder
+    const skillsPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+
+    const fileNames = ["AGENT.md", "CLAUDE.md", "CURSOR.md", "RULES.md"];
+    const locations = [rootDir];
+    if (skillsPath) {
+      locations.push(join(rootDir, ".skills", skillsPath));
     }
-    if (claudeMdRes.exitCode === 0 && claudeMdRes.result?.length > 0) {
-      return parseCustomRulesFromString(claudeMdRes.result);
-    }
-    if (cursorMdRes.exitCode === 0 && cursorMdRes.result?.length > 0) {
-      return parseCustomRulesFromString(cursorMdRes.result);
+    locations.push(join(rootDir, ".skills"));
+
+    for (const location of locations) {
+      for (const fileName of fileNames) {
+        try {
+          const res = await executor.executeCommand({
+            command: `cat "${fileName}"`,
+            workdir: location,
+            sandboxInstance,
+          });
+          if (res.exitCode === 0 && res.result?.length > 0) {
+            logger.info("Found custom rules", { location, fileName });
+            return parseCustomRulesFromString(res.result);
+          }
+        } catch (e) {
+          // Continue to next
+        }
+      }
     }
   } catch (error) {
     const sandboxErrorFields = getSandboxErrorFields(error);
