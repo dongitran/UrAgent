@@ -44,20 +44,20 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     const name = error.name.toLowerCase();
-    
-    if (message.includes('timeout') || 
-        message.includes('network') || 
-        message.includes('econnreset') ||
-        message.includes('econnrefused') ||
-        message.includes('socket') ||
-        message.includes('fetch failed') ||
-        message.includes('502') || 
-        message.includes('503') || 
-        message.includes('504') ||
-        message.includes('gateway') ||
-        message.includes('cloudfront') ||
-        name.includes('timeout') ||
-        name.includes('abort')) {
+
+    if (message.includes('timeout') ||
+      message.includes('network') ||
+      message.includes('econnreset') ||
+      message.includes('econnrefused') ||
+      message.includes('socket') ||
+      message.includes('fetch failed') ||
+      message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504') ||
+      message.includes('gateway') ||
+      message.includes('cloudfront') ||
+      name.includes('timeout') ||
+      name.includes('abort')) {
       return true;
     }
   }
@@ -86,7 +86,7 @@ async function executeSandboxCommandWithRetry(
       return response;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
       if (isRetryableError(error) && attempt < SANDBOX_MAX_RETRIES - 1) {
         const delay = SANDBOX_RETRY_DELAY_MS * Math.pow(2, attempt);
         logger.warn("[DAYTONA] Command failed, retrying...", {
@@ -100,7 +100,7 @@ async function executeSandboxCommandWithRetry(
         await sleep(delay);
         continue;
       }
-      
+
       throw error;
     }
   }
@@ -202,7 +202,7 @@ export function getBranchName(configOrThreadId: GraphConfig | string): string {
     throw new Error("No thread ID provided");
   }
 
-  const branchName = `open-swe/${threadId}`;
+  const branchName = `uragent/${threadId}`;
   logger.info("Generated branch name from thread ID", {
     threadId,
     branchName,
@@ -420,9 +420,9 @@ export async function checkoutBranchAndCommit(
     const errorFields =
       pushRes instanceof Error
         ? {
-            message: pushRes.message,
-            name: pushRes.name,
-          }
+          message: pushRes.message,
+          name: pushRes.name,
+        }
         : pushRes;
 
     logger.error("Failed to push changes, attempting to pull and push again", {
@@ -445,9 +445,9 @@ export async function checkoutBranchAndCommit(
       const errorFields =
         pullRes instanceof Error
           ? {
-              message: pullRes.message,
-              name: pullRes.name,
-            }
+            message: pullRes.message,
+            name: pullRes.name,
+          }
           : pullRes;
       logger.error("Failed to pull changes after a push failed.", {
         ...errorFields,
@@ -472,11 +472,11 @@ export async function checkoutBranchAndCommit(
       const errorFields = {
         ...(pushRes2 instanceof Error
           ? {
-              name: pushRes2.name,
-              message: pushRes2.message,
-              stack: pushRes2.stack,
-              cause: pushRes2.cause,
-            }
+            name: pushRes2.name,
+            message: pushRes2.message,
+            stack: pushRes2.stack,
+            cause: pushRes2.cause,
+          }
           : pushRes2),
       };
       logger.error("Failed to push changes", {
@@ -743,11 +743,11 @@ async function performClone(
 
   const branchExists = branchName
     ? !!(await getBranch({
-        owner: targetRepository.owner,
-        repo: targetRepository.repo,
-        branchName,
-        githubInstallationToken,
-      }))
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+      branchName,
+      githubInstallationToken,
+    }))
     : false;
 
   if (branchExists) {
@@ -918,9 +918,9 @@ export async function checkoutFilesFromCommit(
         error:
           error instanceof Error
             ? {
-                name: error.name,
-                message: error.message,
-              }
+              name: error.name,
+              message: error.message,
+            }
             : error,
       });
     }
@@ -1081,7 +1081,7 @@ export async function checkoutBranchAndCommitWithInstance(
   }
   const userName = `${botAppName}[bot]`;
   const userEmail = `${botAppName}@users.noreply.github.com`;
-  
+
   // Commit using ISandbox.git.commit()
   await sandboxInstance.git.commit({
     workdir: absoluteRepoDir,
@@ -1112,9 +1112,9 @@ export async function checkoutBranchAndCommitWithInstance(
     const errorFields =
       pushRes instanceof Error
         ? {
-            message: pushRes.message,
-            name: pushRes.name,
-          }
+          message: pushRes.message,
+          name: pushRes.name,
+        }
         : pushRes;
 
     logger.error("Failed to push changes, attempting to pull and push again", {
@@ -1142,9 +1142,9 @@ export async function checkoutBranchAndCommitWithInstance(
       const errorFields =
         pullRes instanceof Error
           ? {
-              message: pullRes.message,
-              name: pullRes.name,
-            }
+            message: pullRes.message,
+            name: pullRes.name,
+          }
           : pullRes;
       logger.error("Failed to pull changes after a push failed.", {
         ...errorFields,
@@ -1175,11 +1175,11 @@ export async function checkoutBranchAndCommitWithInstance(
       const errorFields = {
         ...(pushRes2 instanceof Error
           ? {
-              name: pushRes2.name,
-              message: pushRes2.message,
-              stack: pushRes2.stack,
-              cause: pushRes2.cause,
-            }
+            name: pushRes2.name,
+            message: pushRes2.message,
+            stack: pushRes2.stack,
+            cause: pushRes2.cause,
+          }
           : pushRes2),
       };
       logger.error("Failed to push changes", {
@@ -1296,7 +1296,7 @@ export async function pushEmptyCommitWithInstance(
     // Use sandboxInstance.providerType for correct path resolution in multi-provider mode
     const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, sandboxInstance.providerType);
     const executor = createShellExecutor(config);
-    
+
     const setGitConfigRes = await executor.executeCommand({
       command: `git config user.name "${userName}" && git config user.email "${userEmail}"`,
       workdir: absoluteRepoDir,
