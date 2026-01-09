@@ -8,6 +8,7 @@ import {
   createShellTool,
   createSearchDocumentForTool,
   createWriteDefaultTsConfigTool,
+  createReadImageTool,
 } from "../../../tools/index.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import {
@@ -114,6 +115,7 @@ export async function takeAction(
     state,
     config,
   );
+  const readImageTool = createReadImageTool(state, config);
 
   const higherContextLimitToolNames = [
     ...mcpTools.map((t) => t.name),
@@ -132,6 +134,7 @@ export async function takeAction(
     getURLContentTool,
     searchDocumentForTool,
     writeDefaultTsConfigTool,
+    readImageTool,
     ...(shouldIncludeReviewCommentTool(state, config)
       ? [
         createReplyToReviewCommentTool(state, config),
