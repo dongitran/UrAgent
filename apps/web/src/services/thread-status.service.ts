@@ -10,6 +10,10 @@ import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { SessionCache, SessionCacheData } from "@/hooks/useThreadsStatus";
+import {
+  isAuthenticationError,
+  redirectToKeycloakLogin,
+} from "@/lib/auth-redirect";
 
 function getErrorFields(error: unknown): {
   message: string;
@@ -170,6 +174,21 @@ export async function fetchThreadStatus(
       sessionCache,
     );
   } catch (error) {
+    // If authentication error (401/token expired), redirect to login
+    if (isAuthenticationError(error)) {
+      console.warn(
+        `Authentication error fetching thread status for ${threadId}, redirecting to login`,
+      );
+      redirectToKeycloakLogin();
+      // Return pending status while redirecting
+      return {
+        graph: lastPollingState?.graph || "manager",
+        runId: lastPollingState?.runId || "",
+        threadId: lastPollingState?.threadId || threadId,
+        status: "pending" as ThreadUIStatus,
+      };
+    }
+
     const errorFields = getErrorFields(error);
     console.error(`Error fetching thread status for ${threadId}:`, error);
 
