@@ -54,6 +54,11 @@ Create your plan following these guidelines:
    - If you have multiple simple steps that are related, and should be executed one after the other, combine them into a single step.
    - For example, if you have multiple steps to run a linter, formatter, etc., combine them into a single step. The same goes for passing arguments, or editing files.
 
+7. **Vision & Image Handling:**
+   - You have access to a \`read_image\` tool that allows the agent to "see" images in the repository.
+   - If the user request involves analyzing UI mockups, screenshots, or visual assets, **you must include a plan item to read the image**.
+   - Example plan item: "Read the mockup image at 'designs/login.png' using read_image tool to analyze the required UI components."
+
 {ADDITIONAL_INSTRUCTIONS}
 
 ${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
