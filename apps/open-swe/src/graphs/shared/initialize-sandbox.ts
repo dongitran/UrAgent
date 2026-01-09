@@ -693,6 +693,17 @@ async function initializeSandboxLocal(
     "skipped",
   );
 
+  // Create a real LocalSandbox for local mode
+  const localSandbox = new LocalSandbox(
+    `local-${Date.now()}-${crypto.randomBytes(16).toString("hex")}`,
+  );
+
+  // Ensure skills repo is available in local mode too!
+  const repoSkills = await ensureSkillsRepository(localSandbox, targetRepository, config, {
+    skillsRepoFromState: state.skillsRepository,
+    emitStepEvent,
+  });
+
   // Generate codebase tree locally
   const generateCodebaseTreeActionId = uuidv4();
   const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
@@ -720,17 +731,6 @@ async function initializeSandboxLocal(
       "Failed to generate codebase tree.",
     );
   }
-
-  // Create a real LocalSandbox for local mode
-  const localSandbox = new LocalSandbox(
-    `local-${Date.now()}-${crypto.randomBytes(16).toString("hex")}`,
-  );
-
-  // Ensure skills repo is available in local mode too!
-  const repoSkills = await ensureSkillsRepository(localSandbox, targetRepository, config, {
-    skillsRepoFromState: state.skillsRepository,
-    emitStepEvent,
-  });
 
   const eventsMessages = createEventsMessage();
   const userMessages = state.messages || [];
