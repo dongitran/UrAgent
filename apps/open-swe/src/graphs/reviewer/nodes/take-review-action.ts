@@ -62,11 +62,18 @@ import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
+import { END } from "@langchain/langgraph";
 
 export async function takeReviewerActions(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  if (await isRunCancelled(config)) {
+    return new Command({
+      goto: END,
+    });
+  }
   const { reviewerMessages } = state;
   const lastMessage = reviewerMessages[reviewerMessages.length - 1];
 
@@ -245,6 +252,9 @@ export async function takeReviewerActions(
   // Execute sequential tools one at a time (shell commands that may consume lots of memory)
   const sequentialResults: { toolMessage: ToolMessage; imageMessage?: HumanMessage }[] = [];
   for (const toolCall of sequentialCalls) {
+    if (await isRunCancelled(config)) {
+      break;
+    }
     const result = await executeToolCall(toolCall);
     sequentialResults.push(result);
   }

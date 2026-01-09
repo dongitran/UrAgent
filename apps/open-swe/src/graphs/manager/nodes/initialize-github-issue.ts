@@ -10,6 +10,7 @@ import { getIssue } from "../../../utils/github/api.js";
 import { extractTasksFromIssueContent } from "../../../utils/github/issue-task.js";
 import { getMessageContentFromIssue } from "../../../utils/github/issue-messages.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 /**
  * The initialize function will do nothing if there's already a human message
@@ -19,6 +20,9 @@ export async function initializeGithubIssue(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return {};
+  }
   if (isLocalMode(config)) {
     // In local mode, we don't need GitHub issues
     // The human message should already be in the state from the CLI input

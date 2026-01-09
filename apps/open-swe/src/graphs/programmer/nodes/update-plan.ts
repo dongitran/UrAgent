@@ -32,6 +32,7 @@ import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 
@@ -129,6 +130,9 @@ export async function updatePlan(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return {};
+  }
   const lastMessage = state.internalMessages[state.internalMessages.length - 1];
 
   if (!lastMessage || !isAIMessage(lastMessage) || !lastMessage.id) {
@@ -164,8 +168,8 @@ export async function updatePlan(
     tool_choice: updatePlanTool.name,
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: false,
-        }
+        parallel_tool_calls: false,
+      }
       : {}),
   });
 

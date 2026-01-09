@@ -18,6 +18,7 @@ import {
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { trackCachePerformance } from "../../utils/caching.js";
 import { getModelManager } from "../../utils/llms/model-manager.js";
+import { isRunCancelled } from "../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");
 
@@ -89,6 +90,9 @@ export async function diagnoseError(
   state: DiagnoseErrorInputs,
   config: GraphConfig,
 ): Promise<DiagnoseErrorUpdate> {
+  if (await isRunCancelled(config)) {
+    return state;
+  }
   const lastFailedAction = state.messages.findLast(
     (m) => isToolMessage(m) && m.status === "error",
   );

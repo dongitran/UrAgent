@@ -78,6 +78,7 @@ import {
   detectLoop,
   generateLoopWarningPrompt,
 } from "../../../../utils/loop-detection.js";
+import { isRunCancelled } from "../../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -588,7 +589,13 @@ async function createToolsAndPrompt(
 export async function generateAction(
   state: GraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<GraphUpdate | any> {
+  if (await isRunCancelled(config)) {
+    return {
+      messages: [],
+      internalMessages: [],
+    };
+  }
   // Emit custom event: Starting programmer action
   config.writer?.({
     type: "programmer_start",

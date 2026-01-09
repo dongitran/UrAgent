@@ -47,6 +47,7 @@ import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
 import { getSkillsRepoPrompt } from "../../../../utils/skills-prompt.js";
+import { isRunCancelled } from "../../../../utils/run-cancellation.js";
 
 // Debug logging controlled by GEMINI_DEBUG env var
 const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
@@ -245,6 +246,9 @@ export async function generateReviewActions(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return { messages: [], reviewerMessages: [] };
+  }
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.REVIEWER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(

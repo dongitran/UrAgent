@@ -19,6 +19,11 @@ import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { createWriteTechnicalNotesToolFields } from "@openswe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
+import { Command, END } from "@langchain/langgraph";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "Notetaker");
 
 const SCRATCHPAD_PROMPT = `You've also wrote technical notes to a scratchpad throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
 
@@ -101,7 +106,14 @@ const condenseContextTool = createWriteTechnicalNotesToolFields();
 export async function notetaker(
   state: PlannerGraphState,
   config: GraphConfig,
-): Promise<PlannerGraphUpdate> {
+): Promise<PlannerGraphUpdate | Command> {
+  // Check if run was cancelled before executing
+  if (await isRunCancelled(config)) {
+    logger.warn("Stopping planner (notetaker) because run has been cancelled by user");
+    return new Command({
+      goto: END,
+    });
+  }
   const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(
@@ -116,8 +128,8 @@ export async function notetaker(
     tool_choice: condenseContextTool.name,
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: false,
-        }
+        parallel_tool_calls: false,
+      }
       : {}),
   });
 

@@ -53,6 +53,7 @@ import {
 } from "../../../utils/github/plan.js";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -187,6 +188,11 @@ export async function interruptProposedPlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  if (await isRunCancelled(config)) {
+    return new Command({
+      goto: END,
+    });
+  }
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");

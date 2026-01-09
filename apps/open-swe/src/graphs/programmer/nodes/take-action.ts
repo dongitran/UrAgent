@@ -26,7 +26,7 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { Command, END } from "@langchain/langgraph";
-import { createLangGraphClient } from "../../../utils/langgraph-client.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 import { getSandboxInstanceWithErrorHandling, deleteSandbox } from "../../../utils/sandbox.js";
 import {
@@ -53,44 +53,6 @@ import {
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
-/**
- * Check if the current run has been cancelled by the user.
- * This is used to prevent committing changes after the user has stopped the programmer.
- */
-async function isRunCancelled(config: GraphConfig): Promise<boolean> {
-  const threadId = config.configurable?.thread_id;
-  const runId = config.configurable?.run_id;
-
-  if (!threadId || !runId) {
-    return false;
-  }
-
-  try {
-    const client = createLangGraphClient();
-    const run = await client.runs.get(threadId, runId);
-
-    // Check if run status indicates cancellation
-    const cancelledStatuses = ["cancelled", "interrupted", "error"];
-    const isCancelled = cancelledStatuses.includes(run.status);
-
-    if (isCancelled) {
-      logger.info("Run has been cancelled by user", {
-        threadId,
-        runId,
-        status: run.status,
-      });
-    }
-
-    return isCancelled;
-  } catch (error) {
-    // If we can't check the run status, assume it's not cancelled
-    // This prevents blocking the workflow due to API errors
-    logger.warn("Failed to check run cancellation status", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-}
 
 export async function takeAction(
   state: GraphState,
@@ -302,6 +264,9 @@ export async function takeAction(
   // Execute sequential tools one at a time (shell commands that may consume lots of memory)
   const sequentialResults: { toolMessage: ToolMessage; stateUpdates: any }[] = [];
   for (const toolCall of sequentialCalls) {
+    if (await isRunCancelled(config)) {
+      break;
+    }
     const result = await executeToolCall(toolCall);
     sequentialResults.push(result);
   }

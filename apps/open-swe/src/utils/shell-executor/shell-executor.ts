@@ -10,6 +10,7 @@ import { createLogger, LogLevel } from "../logger.js";
 import { ExecuteCommandOptions, LocalExecuteResponse } from "./types.js";
 import { getSandboxInstanceOrThrow } from "../../tools/utils/get-sandbox-id.js";
 import { ISandbox } from "../sandbox-provider/types.js";
+import { isRunCancelled } from "../run-cancellation.js";
 
 const logger = createLogger(LogLevel.DEBUG, "ShellExecutor");
 
@@ -36,34 +37,34 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     const name = error.name.toLowerCase();
-    
+
     // Network/timeout errors
-    if (message.includes('timeout') || 
-        message.includes('network') || 
-        message.includes('econnreset') ||
-        message.includes('econnrefused') ||
-        message.includes('socket') ||
-        message.includes('fetch failed') ||
-        name.includes('timeout') ||
-        name.includes('abort')) {
+    if (message.includes('timeout') ||
+      message.includes('network') ||
+      message.includes('econnreset') ||
+      message.includes('econnrefused') ||
+      message.includes('socket') ||
+      message.includes('fetch failed') ||
+      name.includes('timeout') ||
+      name.includes('abort')) {
       return true;
     }
-    
+
     // Gateway errors (502, 503, 504) - often from CloudFront
-    if (message.includes('502') || 
-        message.includes('503') || 
-        message.includes('504') ||
-        message.includes('gateway') ||
-        message.includes('cloudfront')) {
+    if (message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504') ||
+      message.includes('gateway') ||
+      message.includes('cloudfront')) {
       return true;
     }
-    
+
     // Rate limit errors
     if (message.includes('429') || message.includes('rate limit')) {
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -202,6 +203,11 @@ export class ShellExecutor {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < SANDBOX_MAX_RETRIES; attempt++) {
+      // Check for cancellation before each retry attempt
+      if (this.config && await isRunCancelled(this.config)) {
+        throw new Error("Run cancelled");
+      }
+
       logger.debug("[DAYTONA] Executing command in sandbox", {
         sandboxId: sandbox.id,
         sandboxState: sandbox.state,
@@ -237,17 +243,17 @@ export class ShellExecutor {
           attempt: attempt + 1,
           artifacts: response.artifacts
             ? {
-                stdoutLength: response.artifacts.stdout?.length ?? 0,
-                stderrLength:
-                  (response.artifacts as { stdout?: string; stderr?: string })
-                    .stderr?.length ?? 0,
-                stdoutPreview:
-                  response.artifacts.stdout?.substring(0, 300) ?? "null",
-                stderrPreview:
-                  (
-                    response.artifacts as { stdout?: string; stderr?: string }
-                  ).stderr?.substring(0, 300) ?? "null",
-              }
+              stdoutLength: response.artifacts.stdout?.length ?? 0,
+              stderrLength:
+                (response.artifacts as { stdout?: string; stderr?: string })
+                  .stderr?.length ?? 0,
+              stdoutPreview:
+                response.artifacts.stdout?.substring(0, 300) ?? "null",
+              stderrPreview:
+                (
+                  response.artifacts as { stdout?: string; stderr?: string }
+                ).stderr?.substring(0, 300) ?? "null",
+            }
             : null,
           fullResponse: JSON.stringify(response).substring(0, 1000),
         });
@@ -314,10 +320,10 @@ export class ShellExecutor {
           error:
             error instanceof Error
               ? {
-                  name: error.name,
-                  message: error.message,
-                  stack: error.stack,
-                }
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
               : error,
         });
         throw error;
@@ -355,6 +361,7 @@ export class ShellExecutor {
         workdir,
         env,
         timeout,
+        config: this.config,
       });
 
       const duration = Date.now() - startTime;

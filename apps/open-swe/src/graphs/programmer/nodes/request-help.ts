@@ -23,6 +23,7 @@ import {
 import { postGitHubIssueComment } from "../../../utils/github/plan.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
@@ -46,6 +47,11 @@ export async function requestHelp(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  if (await isRunCancelled(config)) {
+    return new Command({
+      goto: END,
+    });
+  }
   const lastMessage = state.internalMessages[state.internalMessages.length - 1];
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
