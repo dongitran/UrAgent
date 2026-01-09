@@ -2,6 +2,7 @@ import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { ModelManager, Provider } from "./llms/model-manager.js";
 import { createLogger, LogLevel } from "./logger.js";
+import { isRunCancelled } from "./run-cancellation.js";
 import { Runnable, RunnableConfig } from "@langchain/core/runnables";
 import { StructuredToolInterface } from "@langchain/core/tools";
 import {
@@ -59,21 +60,21 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     const errorName = error.name.toLowerCase();
-    
+
     // Abort errors (timeout, cancelled requests)
-    if (errorName === 'aborterror' || 
-        message.includes('abort') || 
-        message.includes('aborted') ||
-        message.includes('operation was aborted')) {
+    if (errorName === 'aborterror' ||
+      message.includes('abort') ||
+      message.includes('aborted') ||
+      message.includes('operation was aborted')) {
       return true;
     }
     // Network errors
-    if (message.includes('fetch failed') || 
-        message.includes('network') ||
-        message.includes('econnreset') ||
-        message.includes('econnrefused') ||
-        message.includes('etimedout') ||
-        message.includes('socket hang up')) {
+    if (message.includes('fetch failed') ||
+      message.includes('network') ||
+      message.includes('econnreset') ||
+      message.includes('econnrefused') ||
+      message.includes('etimedout') ||
+      message.includes('socket hang up')) {
       return true;
     }
     // Rate limit errors (429)
@@ -107,7 +108,7 @@ function useProviderMessages(
 export class FallbackRunnable<
   RunInput extends BaseLanguageModelInput = BaseLanguageModelInput,
   CallOptions extends ConfigurableChatModelCallOptions =
-    ConfigurableChatModelCallOptions,
+  ConfigurableChatModelCallOptions,
 > extends ConfigurableModel<RunInput, CallOptions> {
   private primaryRunnable: any;
   private config: GraphConfig;
@@ -180,6 +181,11 @@ export class FallbackRunnable<
     for (let i = 0; i < modelConfigs.length; i++) {
       const modelConfig = modelConfigs[i];
       const modelKey = `${modelConfig.provider}:${modelConfig.modelName}`;
+
+      // Check for cancellation before trying a new model
+      if (await isRunCancelled(this.config)) {
+        throw new Error("Run cancelled");
+      }
 
       debugLog(
         `[Gemini Debug] Trying model ${i + 1}/${modelConfigs.length}`,
@@ -301,7 +307,7 @@ export class FallbackRunnable<
         // withConfig() can create a RunnableBinding that loses the boundTools
         const config = this.extractConfig();
         const modelHasBoundTools = !!(runnableToUse as any)?.boundTools;
-        
+
         debugLog(`[Gemini Debug] Before withConfig decision`, {
           hasConfig: !!config,
           configKeys: config ? Object.keys(config) : [],
@@ -313,7 +319,7 @@ export class FallbackRunnable<
         // OR if config doesn't contain tools (to avoid overwriting)
         if (config && !modelHasBoundTools) {
           runnableToUse = runnableToUse.withConfig(config);
-          
+
           debugLog(`[Gemini Debug] After withConfig`, {
             runnableToUseType: runnableToUse?.constructor?.name,
             hasBoundTools: !!(runnableToUse as any)?.boundTools,
@@ -349,6 +355,10 @@ export class FallbackRunnable<
         // Retry logic with exponential backoff for each model
         let modelLastError: Error | undefined;
         for (let retryAttempt = 0; retryAttempt < FALLBACK_MAX_RETRIES; retryAttempt++) {
+          // Check for cancellation before each retry attempt
+          if (await isRunCancelled(this.config)) {
+            throw new Error("Run cancelled");
+          }
           try {
             const result = await runnableToUse.invoke(messagesToInvoke, options);
 
@@ -362,7 +372,7 @@ export class FallbackRunnable<
             return result;
           } catch (invokeError) {
             modelLastError = invokeError instanceof Error ? invokeError : new Error(String(invokeError));
-            
+
             // Check if error is retryable and we have retries left
             if (isRetryableError(invokeError) && retryAttempt < FALLBACK_MAX_RETRIES - 1) {
               const delay = calculateRetryDelay(retryAttempt);
@@ -617,7 +627,7 @@ export class FallbackRunnable<
           };
         }
       }
-      
+
       depth++;
       current = current.bound;
     }

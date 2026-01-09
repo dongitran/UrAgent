@@ -32,6 +32,8 @@ import { ISandbox, SandboxProviderType } from "../../utils/sandbox-provider/type
 import { getBranch } from "../../utils/github/api.js";
 import { LocalSandbox } from "../../utils/sandbox-provider/local-provider.js";
 
+import { isRunCancelled } from "../../utils/run-cancellation.js";
+
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
 type InitializeSandboxState = {
@@ -52,6 +54,10 @@ export async function initializeSandbox(
   state: InitializeSandboxState,
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
+  if (await isRunCancelled(config)) {
+    logger.warn("Stopping sandbox initialization because run was cancelled");
+    return state; // Just return current state to avoid proceeding with expensive ops
+  }
   const { sandboxSessionId, targetRepository, sandboxValidated } = state;
   let { branchName } = state;
 

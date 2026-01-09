@@ -36,11 +36,12 @@ import { createScratchpadTool } from "../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
-import { Command } from "@langchain/langgraph";
+import { Command, END } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -48,6 +49,15 @@ export async function takeActions(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  // Check if run was cancelled before executing tool calls
+  if (await isRunCancelled(config)) {
+    logger.warn("Stopping planner because run has been cancelled by user");
+    return new Command({
+      goto: END,
+      update: {},
+    });
+  }
+
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
 

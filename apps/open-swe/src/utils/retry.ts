@@ -1,6 +1,10 @@
+import { isRunCancelled } from "./run-cancellation.js";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
+
 interface RetryOptions {
   retries?: number;
   delay?: number;
+  config?: GraphConfig;
 }
 
 /**
@@ -13,11 +17,16 @@ export async function withRetry<T>(
   fn: () => Promise<T>,
   options: RetryOptions = {},
 ): Promise<T | Error | undefined> {
-  const { retries = 3, delay = 0 } = options;
+  const { retries = 3, delay = 0, config } = options;
 
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
+    // Check for cancellation before each attempt
+    if (config && await isRunCancelled(config)) {
+      return new Error("Run cancelled");
+    }
+
     try {
       return await fn();
     } catch (error) {

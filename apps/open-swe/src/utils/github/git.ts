@@ -23,6 +23,7 @@ import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createShellExecutor } from "../shell-executor/index.js";
 import { shouldCreateIssue } from "../should-create-issue.js";
 import { ISandbox } from "../sandbox-provider/types.js";
+import { isRunCancelled } from "../run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -72,10 +73,15 @@ async function executeSandboxCommandWithRetry(
   command: string,
   workdir: string,
   timeout: number,
+  config?: GraphConfig,
 ): Promise<{ exitCode: number; result: string }> {
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt < SANDBOX_MAX_RETRIES; attempt++) {
+    // Check for cancellation before each retry attempt
+    if (config && await isRunCancelled(config)) {
+      throw new Error("Run cancelled");
+    }
     try {
       const response = await sandbox.process.executeCommand(
         command,
@@ -413,7 +419,7 @@ export async function checkoutBranchAndCommit(
         options.githubInstallationToken,
       );
     },
-    { retries: 3, delay: 0 },
+    { retries: 3, delay: 0, config },
   );
 
   if (pushRes instanceof Error) {
@@ -438,7 +444,7 @@ export async function checkoutBranchAndCommit(
           options.githubInstallationToken,
         );
       },
-      { retries: 1, delay: 0 },
+      { retries: 1, delay: 0, config },
     );
 
     if (pullRes instanceof Error) {
@@ -464,7 +470,7 @@ export async function checkoutBranchAndCommit(
           options.githubInstallationToken,
         );
       },
-      { retries: 3, delay: 0 },
+      { retries: 3, delay: 0, config },
     );
 
     if (pushRes2 instanceof Error) {
@@ -1105,7 +1111,7 @@ export async function checkoutBranchAndCommitWithInstance(
         throw error;
       }
     },
-    { retries: 3, delay: 0 },
+    { retries: 3, delay: 0, config },
   );
 
   if (pushRes instanceof Error) {
@@ -1135,7 +1141,7 @@ export async function checkoutBranchAndCommitWithInstance(
           throw error;
         }
       },
-      { retries: 1, delay: 0 },
+      { retries: 1, delay: 0, config },
     );
 
     if (pullRes instanceof Error) {
@@ -1167,7 +1173,7 @@ export async function checkoutBranchAndCommitWithInstance(
           throw error;
         }
       },
-      { retries: 3, delay: 0 },
+      { retries: 3, delay: 0, config },
     );
 
     if (pushRes2 instanceof Error) {

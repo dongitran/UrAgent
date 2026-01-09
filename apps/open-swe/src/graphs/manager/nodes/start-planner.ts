@@ -23,6 +23,7 @@ import { getRecentUserRequest } from "../../../utils/user-request.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -66,6 +67,9 @@ export async function startPlanner(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return {};
+  }
   const plannerThreadId = state.plannerSession?.threadId ?? uuidv4();
   const followupMessage = getRecentUserRequest(state.messages, {
     returnFullMessage: true,
@@ -142,13 +146,13 @@ export async function startPlanner(
     logger.error("Failed to start planner", {
       ...(error instanceof Error
         ? {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-          }
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        }
         : {
-            error,
-          }),
+          error,
+        }),
     });
     throw error;
   }

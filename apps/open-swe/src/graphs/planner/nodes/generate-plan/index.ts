@@ -16,6 +16,7 @@ import {
   formatFollowupMessagePrompt,
   isFollowupRequest,
 } from "../../utils/followup.js";
+import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getProvider } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
@@ -31,6 +32,10 @@ import { filterMessagesWithoutContent } from "../../../../utils/message/content.
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { isRunCancelled } from "../../../../utils/run-cancellation.js";
+import { Command, END } from "@langchain/langgraph";
+
+const logger = createLogger(LogLevel.INFO, "GeneratePlan");
 
 function formatSystemPrompt(
   state: PlannerGraphState,
@@ -45,8 +50,8 @@ function formatSystemPrompt(
     "{FOLLOWUP_MESSAGE_PROMPT}",
     isFollowup
       ? "\n" +
-          formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan) +
-          "\n\n"
+      formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan) +
+      "\n\n"
       : "",
   )
     .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
@@ -66,7 +71,14 @@ function formatSystemPrompt(
 export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
-): Promise<PlannerGraphUpdate> {
+): Promise<PlannerGraphUpdate | Command> {
+  // Check if run was cancelled before executing
+  if (await isRunCancelled(config)) {
+    logger.warn("Stopping planner (generatePlan) because run has been cancelled by user");
+    return new Command({
+      goto: END,
+    });
+  }
   // Emit custom event: Starting plan generation
   config.writer?.({
     type: "planner_start",
@@ -93,8 +105,8 @@ export async function generatePlan(
     tool_choice: sessionPlanTool.name,
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: false,
-        }
+        parallel_tool_calls: false,
+      }
       : {}),
   });
 

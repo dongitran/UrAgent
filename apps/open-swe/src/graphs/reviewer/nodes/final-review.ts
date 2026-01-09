@@ -38,6 +38,7 @@ import { createScratchpadTool } from "../../../tools/scratchpad.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "FinalReview");
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -120,6 +121,9 @@ export async function finalReview(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return state;
+  }
   const completedTool = createCodeReviewMarkTaskCompletedFields();
   const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
@@ -134,8 +138,8 @@ export async function finalReview(
     tool_choice: "any",
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: false,
-        }
+        parallel_tool_calls: false,
+      }
       : {}),
   });
 

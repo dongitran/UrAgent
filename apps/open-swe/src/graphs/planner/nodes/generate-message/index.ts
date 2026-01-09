@@ -3,6 +3,8 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
+import { isRunCancelled } from "../../../../utils/run-cancellation.js";
+import { END, Command } from "@langchain/langgraph";
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   createGetURLContentTool,
@@ -107,7 +109,14 @@ function formatSystemPrompt(
 export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
-): Promise<PlannerGraphUpdate> {
+): Promise<PlannerGraphUpdate | Command> {
+  // Check if run was cancelled before executing
+  if (await isRunCancelled(config)) {
+    logger.warn("Stopping planner (generateAction) because run has been cancelled by user");
+    return new Command({
+      goto: END,
+    });
+  }
   const model = await loadModel(config, LLMTask.PLANNER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.PLANNER);

@@ -32,6 +32,7 @@ import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "CreateNewSession");
 
@@ -45,6 +46,9 @@ export async function createNewSession(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return { messages: [] };
+  }
   const titleAndContent = await createIssueFieldsFromMessages(
     state.messages,
     config.configurable,
@@ -111,14 +115,14 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
   const baseBranch = state.targetRepository?.branch || "main";
   const shouldCreateNewBranch = !state.branchName || state.branchName === baseBranch;
   const branchNameForSession = shouldCreateNewBranch ? getBranchName(config) : state.branchName;
-  
+
   logger.info("Creating new session with branch", {
     stateBranchName: state.branchName,
     baseBranch,
     shouldCreateNewBranch,
     branchNameForSession,
   });
-  
+
   const commandUpdate: ManagerGraphUpdate = {
     githubIssueId: newIssueNumber,
     targetRepository: state.targetRepository,

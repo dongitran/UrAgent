@@ -33,6 +33,8 @@ import {
 } from "../../../utils/github/git.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
+import { END } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "HandleCompletedTask");
 
@@ -40,6 +42,11 @@ export async function handleCompletedTask(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  if (await isRunCancelled(config)) {
+    return new Command({
+      goto: END,
+    });
+  }
   const markCompletedTool = createMarkTaskCompletedToolFields();
   const markCompletedMessage =
     state.internalMessages[state.internalMessages.length - 1];

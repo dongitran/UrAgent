@@ -12,6 +12,7 @@ import { createReviewStartedToolFields } from "@openswe/shared/open-swe/tools";
 import { getSandboxErrorFields } from "../../../utils/sandbox-error-fields.js";
 import { ISandbox } from "../../../utils/sandbox-provider/types.js";
 import { createShellExecutor } from "../../../utils/shell-executor/index.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
 
@@ -111,6 +112,9 @@ export async function initializeState(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return state;
+  }
   logger.info("Initializing state for reviewer");
 
   // get the base branch name, then get the changed files

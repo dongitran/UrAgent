@@ -9,6 +9,7 @@ import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { getMessageContentString } from "@openswe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import {
   completeTask,
@@ -43,6 +44,11 @@ export async function generateConclusion(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  if (await isRunCancelled(config)) {
+    return new Command({
+      goto: END,
+    });
+  }
   const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(

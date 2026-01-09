@@ -5,6 +5,8 @@
  * allowing the application to switch between providers without changing business logic.
  */
 
+import { GraphConfig } from "@openswe/shared/open-swe/types";
+
 /**
  * Result of executing a command in the sandbox
  */
@@ -26,6 +28,7 @@ export interface ExecuteCommandOptions {
   env?: Record<string, string>;
   timeout?: number;
   user?: string;
+  config?: GraphConfig;
 }
 
 /**
@@ -44,6 +47,8 @@ export interface CreateSandboxOptions {
   envs?: Record<string, string>;
   /** Custom metadata */
   metadata?: Record<string, string>;
+  /** Graph config for cancellation checks */
+  config?: GraphConfig;
 }
 
 /**
@@ -120,43 +125,43 @@ export interface SandboxInfo {
 export interface ISandbox {
   /** Unique identifier */
   readonly id: string;
-  
+
   /** Current state */
   readonly state: SandboxState;
-  
+
   /** Provider type that created this sandbox ('daytona' or 'e2b') */
   readonly providerType: SandboxProviderType;
-  
+
   /**
    * Execute a command in the sandbox
    */
   executeCommand(options: ExecuteCommandOptions): Promise<ExecuteCommandResult>;
-  
+
   /**
    * Read a file from the sandbox
    */
   readFile(path: string): Promise<string>;
-  
+
   /**
    * Write a file to the sandbox
    */
   writeFile(path: string, content: string): Promise<void>;
-  
+
   /**
    * Check if a file/directory exists
    */
   exists(path: string): Promise<boolean>;
-  
+
   /**
    * Create a directory
    */
   mkdir(path: string): Promise<void>;
-  
+
   /**
    * Remove a file or directory
    */
   remove(path: string): Promise<void>;
-  
+
   /**
    * Git operations
    */
@@ -169,23 +174,23 @@ export interface ISandbox {
     createBranch(workdir: string, branchName: string): Promise<void>;
     status(workdir: string): Promise<string>;
   };
-  
+
   /**
    * Start the sandbox (if stopped)
    */
   start(): Promise<void>;
-  
+
   /**
    * Stop the sandbox
    */
   stop(): Promise<void>;
-  
+
   /**
    * Extend sandbox timeout/lifetime
    * @param timeoutMs - New timeout in milliseconds from now
    */
   extendTimeout?(timeoutMs: number): Promise<void>;
-  
+
   /**
    * Get the underlying native sandbox object
    * Use with caution - breaks abstraction
@@ -200,27 +205,27 @@ export interface ISandbox {
 export interface ISandboxProvider {
   /** Provider name (e.g., 'daytona', 'e2b') */
   readonly name: string;
-  
+
   /**
    * Create a new sandbox
    */
   create(options?: CreateSandboxOptions): Promise<ISandbox>;
-  
+
   /**
    * Get an existing sandbox by ID
    */
   get(sandboxId: string): Promise<ISandbox>;
-  
+
   /**
    * Stop a sandbox
    */
   stop(sandboxId: string): Promise<void>;
-  
+
   /**
    * Delete a sandbox
    */
   delete(sandboxId: string): Promise<boolean>;
-  
+
   /**
    * List all sandboxes
    */
@@ -243,7 +248,7 @@ export enum SandboxProviderType {
  */
 export interface SandboxProviderConfig {
   type: SandboxProviderType;
-  
+
   /** Daytona-specific config */
   daytona?: {
     apiUrl?: string;
@@ -251,14 +256,14 @@ export interface SandboxProviderConfig {
     defaultSnapshot?: string;
     defaultUser?: string;
   };
-  
+
   /** E2B-specific config */
   e2b?: {
     apiKey?: string;
     defaultTemplate?: string;
     domain?: string;
   };
-  
+
   /** Local mode config */
   local?: {
     workingDirectory?: string;

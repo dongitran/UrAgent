@@ -26,6 +26,7 @@ import {
   getCurrentPlanItem,
 } from "../../../utils/current-task.js";
 import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "DiagnoseError");
 
@@ -102,6 +103,9 @@ export async function diagnoseError(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return { messages: [], internalMessages: [] };
+  }
   const lastFailedAction = state.internalMessages.findLast(
     (m) => isToolMessage(m) && m.status === "error",
   );

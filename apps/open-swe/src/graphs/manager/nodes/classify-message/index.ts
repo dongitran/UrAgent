@@ -46,6 +46,7 @@ import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";
 import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
+import { isRunCancelled } from "../../../../utils/run-cancellation.js";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 /**
@@ -58,6 +59,11 @@ export async function classifyMessage(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  if (await isRunCancelled(config)) {
+    return new Command({
+      goto: END,
+    });
+  }
   const userMessage = state.messages.findLast(isHumanMessage);
   if (!userMessage) {
     throw new Error("No human message found.");
@@ -79,8 +85,8 @@ export async function classifyMessage(
     const plannerThreadValues = plannerThread?.values;
     programmerThread = plannerThreadValues?.programmerSession?.threadId
       ? await langGraphClient.threads.get(
-          plannerThreadValues.programmerSession.threadId,
-        )
+        plannerThreadValues.programmerSession.threadId,
+      )
       : undefined;
   }
 
@@ -118,8 +124,8 @@ export async function classifyMessage(
     tool_choice: respondAndRouteTool.name,
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: false,
-        }
+        parallel_tool_calls: false,
+      }
       : {}),
   });
 
@@ -298,10 +304,10 @@ export async function classifyMessage(
               githubIssueId,
               githubIssueCommentId: createdIssue.id,
               ...((toolCallArgs.route as string) ===
-              "start_planner_for_followup"
+                "start_planner_for_followup"
                 ? {
-                    isFollowup: true,
-                  }
+                  isFollowup: true,
+                }
                 : {}),
             },
           }),
@@ -353,11 +359,11 @@ export async function classifyMessage(
       messages: newMessages,
       ...(newPlannerId && state.plannerSession?.threadId
         ? {
-            plannerSession: {
-              threadId: state.plannerSession.threadId,
-              runId: newPlannerId,
-            },
-          }
+          plannerSession: {
+            threadId: state.plannerSession.threadId,
+            runId: newPlannerId,
+          },
+        }
         : {}),
     };
     return new Command({

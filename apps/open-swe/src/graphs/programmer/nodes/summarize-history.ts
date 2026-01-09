@@ -23,6 +23,7 @@ import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { getMessagesSinceLastSummary } from "../../../utils/tokens.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
 <user_request>
@@ -149,6 +150,9 @@ export async function summarizeHistory(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return {};
+  }
   const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(

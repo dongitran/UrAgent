@@ -50,6 +50,7 @@ import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { postGitHubIssueComment, generateNaturalComment } from "../../../utils/github/plan.js";
 import { createShellExecutor } from "../../../utils/shell-executor/index.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -98,6 +99,9 @@ export async function openPullRequest(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  if (await isRunCancelled(config)) {
+    return {};
+  }
   logger.info("=== OPEN PR NODE STARTED ===", {
     branchName: state.branchName,
     targetBranch: state.targetRepository?.branch,
@@ -140,7 +144,7 @@ export async function openPullRequest(
   // Use ShellExecutor for retry support on transient errors
   const executor = createShellExecutor(config);
   const baseBranch = state.targetRepository.branch ?? "";
-  
+
   // Git diff with local base branch (always exists because providers clone base branch first)
   const gitDiffRes = await executor.executeCommand({
     command: `git diff --name-only ${baseBranch}`,
@@ -221,8 +225,8 @@ export async function openPullRequest(
     tool_choice: openPrTool.name,
     ...(modelSupportsParallelToolCallsParam
       ? {
-          parallel_tool_calls: false,
-        }
+        parallel_tool_calls: false,
+      }
       : {}),
   });
 
@@ -369,11 +373,11 @@ export async function openPullRequest(
       const prAction = prForTask ? "updated" : "created";
       const completedTasksCount = getActivePlanItems(state.taskPlan).filter(t => t.completed).length;
       const totalTasksCount = getActivePlanItems(state.taskPlan).length;
-      
+
       // Get issue content for language detection
       const issueContent = getInitialUserRequest(state.internalMessages);
       const { issueTitle, issueBody } = extractIssueTitleAndBodyFromContent(issueContent);
-      
+
       logger.warn("[OpenPR] Issue content for language detection", {
         issueContentLength: issueContent?.length || 0,
         issueContentSnippet: issueContent?.slice(0, 200),
@@ -381,7 +385,7 @@ export async function openPullRequest(
         extractedBodyLength: issueBody?.length || 0,
         extractedBodySnippet: issueBody?.slice(0, 100),
       });
-      
+
       const completionMessage = await generateNaturalComment({
         type: "implementation_complete",
         prNumber: pullRequest.number,
@@ -393,7 +397,7 @@ export async function openPullRequest(
         issueTitle,
         issueBody,
       });
-      
+
       await postGitHubIssueComment({
         githubIssueId: state.githubIssueId,
         targetRepository: state.targetRepository,

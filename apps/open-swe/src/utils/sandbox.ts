@@ -11,11 +11,9 @@ import { SandboxState, SandboxProviderType } from "./sandbox-provider/types.js";
 import { getSandboxProvider } from "./sandbox-provider/index.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { v4 as uuidv4 } from "uuid";
-import {
-  INITIALIZE_NODE_ID,
-  CustomNodeEvent,
-} from "@openswe/shared/open-swe/custom-node-events";
+import { INITIALIZE_NODE_ID, CustomNodeEvent } from "@openswe/shared/open-swe/custom-node-events";
 import { LocalSandbox } from "./sandbox-provider/local-provider.js";
+import { isRunCancelled } from "./run-cancellation.js";
 
 const logger = createLogger(LogLevel.DEBUG, "Sandbox");
 
@@ -414,6 +412,9 @@ export async function getSandboxWithErrorHandling(
     let sandbox: Sandbox | null = null;
     let numSandboxCreateAttempts = 0;
     while (!sandbox && numSandboxCreateAttempts < 3) {
+      if (await isRunCancelled(config)) {
+        throw new Error("Run cancelled");
+      }
       sandbox = await createSandbox(numSandboxCreateAttempts);
       if (!sandbox) {
         numSandboxCreateAttempts++;
@@ -681,6 +682,9 @@ export async function getSandboxInstanceWithErrorHandling(
     }
 
     while (!sandboxInstance && numSandboxCreateAttempts < 3) {
+      if (await isRunCancelled(config)) {
+        throw new Error("Run cancelled");
+      }
       try {
         sandboxInstance = await provider.create(createOptions);
       } catch (e) {

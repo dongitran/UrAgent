@@ -279,7 +279,7 @@ export function ThreadView({
       (plannerStream.values.programmerSession.runId !==
         programmerSession?.runId ||
         plannerStream.values.programmerSession.threadId !==
-          programmerSession?.threadId)
+        programmerSession?.threadId)
     ) {
       setProgrammerSession?.(plannerStream.values.programmerSession);
 
@@ -317,8 +317,15 @@ export function ThreadView({
     }
   };
 
-  const cancelRun = () => {
-    // TODO: ideally this calls stream.client.runs.cancel(threadId, runId)
+  const cancelRun = async () => {
+    const runId = (stream as any).runId;
+    if (displayThread.id && runId) {
+      try {
+        await stream.client.runs.cancel(displayThread.id, runId, true);
+      } catch (error) {
+        console.error("Failed to cancel manager run (may already be stopped):", error);
+      }
+    }
     stream.stop();
   };
 
@@ -351,9 +358,9 @@ export function ThreadView({
   // Merge optimistic message with stream messages
   const displayMessages = optimisticMessage
     ? [
-        optimisticMessage,
-        ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
-      ]
+      optimisticMessage,
+      ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
+    ]
     : filteredMessages;
 
   const shouldDisableManagerInput = !hasGitHubIssue

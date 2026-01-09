@@ -22,11 +22,19 @@ import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
+import { END } from "@langchain/langgraph";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  // Check if run was cancelled before executing
+  if (await isRunCancelled(config)) {
+    return new Command({
+      goto: END,
+    });
+  }
   if (isLocalMode(config) || !shouldCreateIssue(config)) {
     return new Command({
       update: {},
@@ -105,12 +113,12 @@ export async function prepareGraphState(
   // TODO: We should prob have a UI component for "Previous Task Notes" so we can surface this in the UI.
   const summaryMessage = state.contextGatheringNotes
     ? new AIMessage({
-        id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
-        content: `Here are the notes taken while planning for the previous task:\n${state.contextGatheringNotes}`,
-        additional_kwargs: {
-          summaryMessage: true,
-        },
-      })
+      id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+      content: `Here are the notes taken while planning for the previous task:\n${state.contextGatheringNotes}`,
+      additional_kwargs: {
+        summaryMessage: true,
+      },
+    })
     : undefined;
 
   const commandUpdate: PlannerGraphUpdate = {

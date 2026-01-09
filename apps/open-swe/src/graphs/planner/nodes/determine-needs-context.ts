@@ -1,4 +1,4 @@
-import { Command } from "@langchain/langgraph";
+import { Command, END } from "@langchain/langgraph";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -19,6 +19,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "DetermineNeedsContext");
 
@@ -119,6 +120,13 @@ export async function determineNeedsContext(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  // Check if run was cancelled before executing
+  if (await isRunCancelled(config)) {
+    logger.warn("Stopping planner (determineNeedsContext) because run has been cancelled by user");
+    return new Command({
+      goto: END,
+    });
+  }
   const [missingMessages, model] = await Promise.all([
     shouldCreateIssue(config) ? getMissingMessages(state, config) : [],
     loadModel(config, LLMTask.ROUTER),
