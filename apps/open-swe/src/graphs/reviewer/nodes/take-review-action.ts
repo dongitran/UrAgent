@@ -4,10 +4,12 @@ import {
   isToolMessage,
   ToolMessage,
   AIMessage,
+  HumanMessage,
 } from "@langchain/core/messages";
 import {
   createInstallDependenciesTool,
   createShellTool,
+  createReadImageTool,
 } from "../../../tools/index.js";
 import { GraphConfig, TaskPlan } from "@openswe/shared/open-swe/types";
 import {
@@ -77,12 +79,14 @@ export async function takeReviewerActions(
   const viewTool = createViewTool(state, config);
   const installDependenciesTool = createInstallDependenciesTool(state, config);
   const scratchpadTool = createScratchpadTool("");
+  const readImageTool = createReadImageTool(state, config);
   const allTools = [
     shellTool,
     searchTool,
     viewTool,
     installDependenciesTool,
     scratchpadTool,
+    readImageTool,
   ];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
@@ -118,17 +122,19 @@ export async function takeReviewerActions(
     );
 
   // Helper function to execute a single tool call
-  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<ToolMessage> => {
+  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<{ toolMessage: ToolMessage; imageMessage?: HumanMessage }> => {
     const tool = toolsMap[toolCall.name];
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
-      return new ToolMessage({
-        id: uuidv4(),
-        tool_call_id: toolCall.id ?? "",
-        content: `Unknown tool: ${toolCall.name}`,
-        name: toolCall.name,
-        status: "error",
-      });
+      return {
+        toolMessage: new ToolMessage({
+          id: uuidv4(),
+          tool_call_id: toolCall.id ?? "",
+          content: `Unknown tool: ${toolCall.name}`,
+          name: toolCall.name,
+          status: "error",
+        }),
+      };
     }
 
     logger.info("Executing review action", {
@@ -180,13 +186,41 @@ export async function takeReviewerActions(
       }
     }
 
-    return new ToolMessage({
+    const toolMessage = new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: truncateOutput(result, getTruncationOptions(toolCall.name, toolCall.args)),
       name: toolCall.name,
       status: toolCallStatus,
     });
+
+    // If this is read_image tool with successful image result, create HumanMessage with image content
+    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
+    // The image must be re-introduced as new input in a HumanMessage
+    let imageMessage: HumanMessage | undefined;
+    if (
+      toolCall.name === "read_image" &&
+      toolCallStatus === "success" &&
+      result.startsWith("data:image/")
+    ) {
+      logger.info("Creating HumanMessage with image content for read_image result in reviewer", {
+        imageDataUrlLength: result.length,
+      });
+      imageMessage = new HumanMessage({
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: result },
+          },
+          {
+            type: "text",
+            text: "Above is the image you requested via read_image tool. Use it as visual reference for your review.",
+          },
+        ],
+      });
+    }
+
+    return { toolMessage, imageMessage };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -204,7 +238,7 @@ export async function takeReviewerActions(
   });
 
   // Execute sequential tools one at a time (shell commands that may consume lots of memory)
-  const sequentialResults: ToolMessage[] = [];
+  const sequentialResults: { toolMessage: ToolMessage; imageMessage?: HumanMessage }[] = [];
   for (const toolCall of sequentialCalls) {
     const result = await executeToolCall(toolCall);
     sequentialResults.push(result);
@@ -214,16 +248,22 @@ export async function takeReviewerActions(
   const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
 
   // Combine results in original order
-  const toolCallResults: ToolMessage[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
     if (SEQUENTIAL_TOOLS.includes(toolCall.name)) {
-      toolCallResults.push(sequentialResults[seqIndex++]);
+      toolCallResultsWithUpdates.push(sequentialResults[seqIndex++]);
     } else {
-      toolCallResults.push(parallelResults[parIndex++]);
+      toolCallResultsWithUpdates.push(parallelResults[parIndex++]);
     }
   }
+
+  const toolCallResults = toolCallResultsWithUpdates.map(item => item.toolMessage);
+  // Collect image messages from read_image tool calls
+  const imageMessages = toolCallResultsWithUpdates
+    .map((item) => item.imageMessage)
+    .filter((msg): msg is HumanMessage => msg !== undefined);
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
@@ -293,10 +333,11 @@ export async function takeReviewerActions(
   ];
 
   // Include the modified message if it was filtered
+  // Also include image messages for multimodal processing
   const reviewerMessagesUpdate =
     wasFiltered && modifiedMessage
-      ? [modifiedMessage, ...toolCallResults]
-      : toolCallResults;
+      ? [modifiedMessage, ...toolCallResults, ...imageMessages]
+      : [...toolCallResults, ...imageMessages];
 
   const commandUpdate: ReviewerGraphUpdate = {
     messages: userFacingMessagesUpdate,
