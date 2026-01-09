@@ -186,10 +186,15 @@ export async function takeReviewerActions(
       }
     }
 
+    // For read_image, we must NOT truncate the base64 data as it would corrupt the image
+    const toolMessageContent = toolCall.name === "read_image"
+      ? result
+      : truncateOutput(result, getTruncationOptions(toolCall.name, toolCall.args));
+
     const toolMessage = new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
-      content: truncateOutput(result, getTruncationOptions(toolCall.name, toolCall.args)),
+      content: toolMessageContent,
       name: toolCall.name,
       status: toolCallStatus,
     });
