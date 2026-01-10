@@ -164,23 +164,28 @@ export async function getSandboxWithErrorHandling(
     const state = sandbox.state;
 
     if (state === SandboxState.STARTED) {
-      return {
-        sandbox,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-      };
-    }
-
-    if (state === SandboxState.STOPPED || state === SandboxState.ARCHIVED) {
+      logger.warn("Sandbox is already started, proceeding to ensure skills", { sandboxSessionId });
+    } else if (state === SandboxState.STOPPED || state === SandboxState.ARCHIVED) {
+      logger.debug("Sandbox is stopped/archived, starting it", { sandboxSessionId, state });
       await sandbox.start();
-      return {
-        sandbox,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-      };
+    } else {
+      // For any other state, recreate sandbox
+      throw new Error(`Sandbox in unrecoverable state: ${state}`);
     }
 
-    throw new Error(`Sandbox in unrecoverable state: ${state}`);
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    await ensureSkillsRepository(sandbox, targetRepository, config);
+
+    // Simple delay to ensure filesystem consistency
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // For legacy adapter, we return codebaseTree: null to maintain signature,
+    // though the files are now available for subsequent tool calls.
+    return {
+      sandbox,
+      codebaseTree: null,
+      dependenciesInstalled: null,
+    };
   } catch (error) {
     // Recreate sandbox if any step fails
     logger.info("Recreating sandbox due to error", {

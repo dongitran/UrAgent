@@ -143,12 +143,33 @@ export async function initializeSandbox(
         emitStepEvent,
       });
 
-      // Return minimal state update - sandbox is already set up
+      // Simple delay to ensure filesystem consistency after clone/link
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Regenerate tree to include .skills folder (fixes intermittent missing .skills issue)
+      const actualProviderType = existingSandbox.providerType;
+      const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, actualProviderType);
+      let codebaseTree: string | undefined;
+      try {
+        codebaseTree = await getCodebaseTree(config, existingSandbox.id, targetRepository, actualProviderType);
+        logger.warn("Fast-path: Regenerated codebase tree to include .skills", {
+          sandboxId: existingSandbox.id,
+          hasTree: !!codebaseTree,
+        });
+      } catch (treeError) {
+        logger.warn("Fast-path: Failed to regenerate tree, using existing", {
+          error: treeError instanceof Error ? treeError.message : String(treeError),
+        });
+      }
+
+      // Return state update with fresh tree
       return {
         sandboxSessionId: existingSandbox.id,
         sandboxProviderType: existingSandbox.providerType,
         branchName,
         skillsRepository: repoSkills,
+        codebaseTree,
+        customRules: await getCustomRulesWithSandboxInstance(existingSandbox, absoluteRepoDir, config),
       };
     } catch (error) {
       // If fast-path fails, fall through to normal initialization
@@ -271,6 +292,9 @@ export async function initializeSandbox(
         emitStepEvent,
       });
 
+      // Simple delay to ensure filesystem consistency after clone/link
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
       const generateCodebaseTreeActionId = uuidv4();
       const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
         nodeId: INITIALIZE_NODE_ID,
@@ -285,8 +309,9 @@ export async function initializeSandbox(
         },
       };
       emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
+
       try {
-        const codebaseTree = await getCodebaseTree(config, existingSandboxInstance.id, undefined, actualProviderType);
+        const codebaseTree = await getCodebaseTree(config, existingSandboxInstance.id, targetRepository, actualProviderType);
         if (codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE) {
           emitStepEvent(
             baseGenerateCodebaseTreeAction,
@@ -563,6 +588,9 @@ export async function initializeSandbox(
     skillsRepoFromState: state.skillsRepository,
     emitStepEvent,
   });
+
+  // Simple delay to ensure filesystem consistency after clone/link
+  await new Promise((resolve) => setTimeout(resolve, 2000));
   // --- END SKILLS REPOSITORY CLONING LOGIC ---
 
   // Checking out branch
@@ -596,9 +624,10 @@ export async function initializeSandbox(
     },
   };
   emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
+
   let codebaseTree: string | undefined;
   try {
-    codebaseTree = await getCodebaseTree(config, sandboxInstance.id, undefined, actualProviderType);
+    codebaseTree = await getCodebaseTree(config, sandboxInstance.id, targetRepository, actualProviderType);
     emitStepEvent(baseGenerateCodebaseTreeAction, "success");
   } catch (_) {
     emitStepEvent(
@@ -703,6 +732,9 @@ async function initializeSandboxLocal(
     skillsRepoFromState: state.skillsRepository,
     emitStepEvent,
   });
+
+  // Simple delay to ensure filesystem consistency after clone/link
+  await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // Generate codebase tree locally
   const generateCodebaseTreeActionId = uuidv4();
