@@ -86,14 +86,25 @@ export async function ensureSkillsRepository(
       );
       const skillsRepoDir = `${absoluteRepoDir}/.skills`;
       const skillsCloneUrl = `https://github.com/${skillsRepo.owner}/${skillsRepo.repo}.git`;
+      const skillsGitDir = `${skillsRepoDir}/.git`;
 
-      // Check if skills repo already exists
+      // Check if skills repo already exists and is valid (has .git folder)
       const skillsExists = await sandboxInstance.exists(skillsRepoDir);
-      if (skillsExists) {
-        logger.info("SKILLS REPO: Already exists, skipping clone", {
+      const skillsGitExists = await sandboxInstance.exists(skillsGitDir);
+
+      if (skillsExists && skillsGitExists) {
+        logger.info("SKILLS REPO: Already exists and valid, skipping clone", {
           targetDir: skillsRepoDir,
         });
         return skillsRepo;
+      }
+
+      // If exists but invalid (e.g., partial clone), clean it up first
+      if (skillsExists) {
+        logger.warn("SKILLS REPO: Exists but invalid (missing .git), cleaning up for fresh clone", {
+          targetDir: skillsRepoDir,
+        });
+        await sandboxInstance.remove(skillsRepoDir);
       }
 
       logger.warn("SKILLS REPO: About to clone", {
@@ -105,22 +116,36 @@ export async function ensureSkillsRepository(
         sandboxId: sandboxInstance.id,
       });
 
-      await sandboxInstance.git.clone({
-        url: skillsCloneUrl,
-        targetDir: skillsRepoDir,
-        branch: skillsRepo.branch,
-        baseBranch: skillsRepo.branch,
-        username: "x-access-token",
-        token: githubInstallationToken,
-      });
+      const { withRetry } = await import("./retry.js");
+      const cloneResult = await withRetry(async () => {
+        const cloneOptions = {
+          url: skillsCloneUrl,
+          targetDir: skillsRepoDir,
+          branch: skillsRepo.branch,
+          baseBranch: skillsRepo.branch,
+          username: "x-access-token",
+          token: githubInstallationToken || undefined,
+        };
+        await sandboxInstance.git.clone(cloneOptions);
+        return true;
+      }, { retries: 2, delay: 5000, config });
+
+      if (cloneResult instanceof Error) {
+        throw cloneResult;
+      }
 
       // Add .skills to .git/info/exclude to prevent accidental commits
       try {
-        await sandboxInstance.executeCommand({
-          command: `mkdir -p .git/info && echo ".skills" >> .git/info/exclude`,
-          workdir: absoluteRepoDir,
-        });
-        logger.warn("SKILLS REPO: Added .skills to .git/info/exclude");
+        const gitDirExists = await sandboxInstance.exists(`${absoluteRepoDir}/.git`);
+        if (gitDirExists) {
+          await sandboxInstance.executeCommand({
+            command: `mkdir -p .git/info && echo ".skills" >> .git/info/exclude`,
+            workdir: absoluteRepoDir,
+          });
+          logger.warn("SKILLS REPO: Added .skills to .git/info/exclude");
+        } else {
+          logger.warn("SKILLS REPO: .git directory not found, skipping exclude update");
+        }
       } catch (excludeError) {
         logger.error("SKILLS REPO: Failed to add .skills to exclude", {
           error: excludeError,
@@ -133,13 +158,13 @@ export async function ensureSkillsRepository(
         branch: skillsRepo.branch,
       });
     } catch (error) {
-      logger.warn("SKILLS REPO: Clone FAILED", {
+      logger.warn("SKILLS REPO: Clone FAILED after retries", {
         error: error instanceof Error ? error.message : String(error),
       });
       emitStepEvent?.(
         baseSkillsCloneAction,
         "skipped",
-        "Failed to clone skills repo, proceeding without it.",
+        `Failed to clone skills repo: ${error instanceof Error ? error.message : String(error)}. Proceeding without it.`,
       );
     }
   }
@@ -364,17 +389,10 @@ export async function getSandboxWithErrorHandling(
     const state = sandbox.state;
 
     if (state === "started") {
-      logger.debug("[DAYTONA] Sandbox is already started, returning", {
+      logger.warn("[DAYTONA] Sandbox is already started, proceeding to ensure skills and generate tree", {
         sandboxSessionId,
       });
-      return {
-        sandbox,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-      };
-    }
-
-    if (state === "stopped" || state === "archived") {
+    } else if (state === "stopped" || state === "archived") {
       logger.debug("[DAYTONA] Sandbox is stopped/archived, starting it", {
         sandboxSessionId,
         state,
@@ -385,12 +403,104 @@ export async function getSandboxWithErrorHandling(
         sandboxSessionId,
         durationMs: Date.now() - startStartTime,
       });
-      return {
-        sandbox,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-      };
+    } else {
+      // For any other state, recreate sandbox
+      throw new Error(`Sandbox in unrecoverable state: ${state}`);
     }
+
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    const skillsInstance: ISandbox = {
+      id: sandbox.id,
+      state: SandboxState.STARTED,
+      providerType: SandboxProviderType.DAYTONA,
+      executeCommand: async (opts) => {
+        const res = await sandbox.process.executeCommand(
+          opts.command,
+          opts.workdir,
+          opts.env,
+          opts.timeout,
+        );
+        return {
+          exitCode: res.exitCode,
+          result: res.result,
+          artifacts: res.artifacts ? {
+            stdout: res.artifacts.stdout || '',
+            stderr: (res.artifacts as any).stderr,
+          } : undefined,
+        };
+      },
+      exists: async (p) => {
+        const res = await sandbox.process.executeCommand(`test -e "${p}" && echo "exists" || echo "not_exists"`);
+        return res.result.trim() === 'exists';
+      },
+      readFile: async (p) => {
+        const res = await sandbox.process.executeCommand(`cat "${p}"`);
+        if (res.exitCode !== 0) throw new Error(`Read failed: ${res.result}`);
+        return res.result;
+      },
+      writeFile: async (p, c) => {
+        const delimiter = `EOF_${Date.now()}`;
+        const command = `cat > "${p}" << '${delimiter}'\n${c}\n${delimiter}`;
+        const res = await sandbox.process.executeCommand(command);
+        if (res.exitCode !== 0) throw new Error(`Write failed: ${res.result}`);
+      },
+      mkdir: async (p) => {
+        const res = await sandbox.process.executeCommand(`mkdir -p "${p}"`);
+        if (res.exitCode !== 0) throw new Error(`Mkdir failed: ${res.result}`);
+      },
+      remove: async (p) => {
+        const res = await sandbox.process.executeCommand(`rm -rf "${p}"`);
+        if (res.exitCode !== 0) throw new Error(`Remove failed: ${res.result}`);
+      },
+      git: {
+        clone: async (o) => {
+          const cloneUrl = o.token
+            ? o.url.replace("https://", `https://${o.username || "x-access-token"}:${o.token}@`)
+            : o.url;
+          await sandbox.git.clone(cloneUrl, o.targetDir, o.branch, o.commit);
+        },
+        add: async (dir, files) => await sandbox.git.add(dir, files),
+        commit: async (opts) => {
+          await sandbox.git.commit(opts.workdir, opts.message, opts.authorName, opts.authorEmail);
+        },
+        push: async (opts) => await sandbox.git.push(opts.workdir),
+        pull: async (opts) => await sandbox.git.pull(opts.workdir),
+        createBranch: async (dir, name) => await sandbox.git.createBranch(dir, name),
+        status: async (dir) => {
+          const status = await sandbox.git.status(dir);
+          return JSON.stringify(status);
+        },
+      },
+      start: async () => { },
+      stop: async () => { },
+      getNative: <T>() => sandbox as unknown as T,
+    };
+
+    await ensureSkillsRepository(skillsInstance, targetRepository, config);
+
+    // Simple delay to ensure filesystem consistency after clone/link
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Get codebase tree - this is Daytona-specific function so always use DAYTONA provider type
+    const codebaseTree = await getCodebaseTree(
+      config,
+      sandbox.id,
+      targetRepository,
+      SandboxProviderType.DAYTONA,
+    );
+    const codebaseTreeToReturn =
+      codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;
+
+    logger.warn("[DAYTONA] Sandbox resumed successfully", {
+      sandboxId: sandbox.id,
+      sandboxState: sandbox.state,
+    });
+
+    return {
+      sandbox,
+      codebaseTree: codebaseTreeToReturn,
+      dependenciesInstalled: false,
+    };
 
     // For any other state, recreate sandbox
     throw new Error(`Sandbox in unrecoverable state: ${state}`);
@@ -438,6 +548,79 @@ export async function getSandboxWithErrorHandling(
       stateBranchName: branchName,
     });
 
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    const skillsInstance: ISandbox = {
+      id: sandbox.id,
+      state: SandboxState.STARTED,
+      providerType: SandboxProviderType.DAYTONA,
+      executeCommand: async (opts) => {
+        const res = await sandbox.process.executeCommand(
+          opts.command,
+          opts.workdir,
+          opts.env,
+          opts.timeout,
+        );
+        return {
+          exitCode: res.exitCode,
+          result: res.result,
+          artifacts: res.artifacts ? {
+            stdout: res.artifacts.stdout || '',
+            stderr: (res.artifacts as any).stderr,
+          } : undefined,
+        };
+      },
+      readFile: async (p) => {
+        const res = await sandbox.process.executeCommand(`cat "${p}"`);
+        if (res.exitCode !== 0) throw new Error(`Read failed: ${res.result}`);
+        return res.result;
+      },
+      writeFile: async (p, c) => {
+        const delimiter = `EOF_${Date.now()}`;
+        const command = `cat > "${p}" << '${delimiter}'\n${c}\n${delimiter}`;
+        const res = await sandbox.process.executeCommand(command);
+        if (res.exitCode !== 0) throw new Error(`Write failed: ${res.result}`);
+      },
+      exists: async (p) => {
+        const res = await sandbox.process.executeCommand(`test -e "${p}" && echo "exists" || echo "not_exists"`);
+        return res.result.trim() === 'exists';
+      },
+      mkdir: async (p) => {
+        const res = await sandbox.process.executeCommand(`mkdir -p "${p}"`);
+        if (res.exitCode !== 0) throw new Error(`Mkdir failed: ${res.result}`);
+      },
+      remove: async (p) => {
+        const res = await sandbox.process.executeCommand(`rm -rf "${p}"`);
+        if (res.exitCode !== 0) throw new Error(`Remove failed: ${res.result}`);
+      },
+      git: {
+        clone: async (o) => {
+          const cloneUrl = o.token
+            ? o.url.replace("https://", `https://${o.username || "x-access-token"}:${o.token}@`)
+            : o.url;
+          await sandbox.git.clone(cloneUrl, o.targetDir, o.branch, o.commit);
+        },
+        add: async (dir, files) => await sandbox.git.add(dir, files),
+        commit: async (opts) => {
+          await sandbox.git.commit(opts.workdir, opts.message, opts.authorName, opts.authorEmail);
+        },
+        push: async (opts) => await sandbox.git.push(opts.workdir),
+        pull: async (opts) => await sandbox.git.pull(opts.workdir),
+        createBranch: async (dir, name) => await sandbox.git.createBranch(dir, name),
+        status: async (dir) => {
+          const status = await sandbox.git.status(dir);
+          return JSON.stringify(status);
+        },
+      },
+      start: async () => { },
+      stop: async () => { },
+      getNative: <T>() => sandbox as unknown as T,
+    };
+
+    await ensureSkillsRepository(skillsInstance, targetRepository, config);
+
+    // Simple delay to ensure filesystem consistency after clone/link
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     // Get codebase tree - this is Daytona-specific function so always use DAYTONA provider type
     const codebaseTree = await getCodebaseTree(
       config,
@@ -448,82 +631,10 @@ export async function getSandboxWithErrorHandling(
     const codebaseTreeToReturn =
       codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;
 
-    logger.info("[DAYTONA] Sandbox created successfully", {
+    logger.warn("[DAYTONA] Sandbox created/recreated successfully", {
       sandboxId: sandbox.id,
       sandboxState: sandbox.state,
     });
-
-    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
-    await ensureSkillsRepository(
-      {
-        id: sandbox.id,
-        state: SandboxState.STARTED,
-        providerType: SandboxProviderType.DAYTONA,
-        executeCommand: async (opts) => {
-          const res = await sandbox.process.executeCommand(
-            opts.command,
-            opts.workdir,
-            opts.env,
-            opts.timeout,
-          );
-          return {
-            exitCode: res.exitCode,
-            result: res.result,
-            artifacts: res.artifacts ? {
-              stdout: res.artifacts.stdout || '',
-              stderr: (res.artifacts as any).stderr,
-            } : undefined,
-          };
-        },
-        readFile: async (p) => {
-          const res = await sandbox.process.executeCommand(`cat "${p}"`);
-          if (res.exitCode !== 0) throw new Error(`Read failed: ${res.result}`);
-          return res.result;
-        },
-        writeFile: async (p, c) => {
-          const delimiter = `EOF_${Date.now()}`;
-          const command = `cat > "${p}" << '${delimiter}'\n${c}\n${delimiter}`;
-          const res = await sandbox.process.executeCommand(command);
-          if (res.exitCode !== 0) throw new Error(`Write failed: ${res.result}`);
-        },
-        exists: async (p) => {
-          const res = await sandbox.process.executeCommand(`test -e "${p}" && echo "exists" || echo "not_exists"`);
-          return res.result.trim() === 'exists';
-        },
-        mkdir: async (p) => {
-          const res = await sandbox.process.executeCommand(`mkdir -p "${p}"`);
-          if (res.exitCode !== 0) throw new Error(`Mkdir failed: ${res.result}`);
-        },
-        remove: async (p) => {
-          const res = await sandbox.process.executeCommand(`rm -rf "${p}"`);
-          if (res.exitCode !== 0) throw new Error(`Remove failed: ${res.result}`);
-        },
-        git: {
-          clone: async (o) => {
-            const cloneUrl = o.token
-              ? o.url.replace("https://", `https://${o.username || "x-access-token"}:${o.token}@`)
-              : o.url;
-            await sandbox.git.clone(cloneUrl, o.targetDir, o.branch, o.commit);
-          },
-          add: async (dir, files) => await sandbox.git.add(dir, files),
-          commit: async (opts) => {
-            await sandbox.git.commit(opts.workdir, opts.message, opts.authorName, opts.authorEmail);
-          },
-          push: async (opts) => await sandbox.git.push(opts.workdir),
-          pull: async (opts) => await sandbox.git.pull(opts.workdir),
-          createBranch: async (dir, name) => await sandbox.git.createBranch(dir, name),
-          status: async (dir) => {
-            const status = await sandbox.git.status(dir);
-            return JSON.stringify(status);
-          },
-        },
-        start: async () => { },
-        stop: async () => { },
-        getNative: <T>() => sandbox as unknown as T,
-      },
-      targetRepository,
-      config,
-    );
 
     return {
       sandbox,
@@ -572,6 +683,9 @@ export async function getSandboxInstanceWithErrorHandling(
     // Ensure skills repo is available in local mode too!
     await ensureSkillsRepository(localSandbox, targetRepository, config);
 
+    // Simple delay to ensure filesystem consistency after clone/link
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     return {
       sandboxInstance: localSandbox,
       codebaseTree: null,
@@ -606,38 +720,52 @@ export async function getSandboxInstanceWithErrorHandling(
     const state = sandboxInstance.state;
 
     if (state === SandboxState.STARTED) {
-      logger.debug("[SANDBOX] Sandbox is already started, returning", {
+      logger.warn("[SANDBOX] Sandbox is already started, proceeding to ensure skills and generate tree", {
         sandboxSessionId,
       });
-      return {
-        sandboxInstance,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-        sandboxProviderType: sandboxInstance.providerType,
-      };
-    }
-
-    if (state === SandboxState.STOPPED || state === SandboxState.ARCHIVED) {
-      logger.debug("[SANDBOX] Sandbox is stopped/archived, starting it", {
+    } else if (state === SandboxState.STOPPED || state === SandboxState.ARCHIVED) {
+      logger.warn("[SANDBOX] Sandbox is stopped/archived, starting it", {
         sandboxSessionId,
         state,
       });
       const startStartTime = Date.now();
       await sandboxInstance.start();
-      logger.debug("[SANDBOX] Sandbox started successfully", {
+      logger.warn("[SANDBOX] Sandbox started successfully", {
         sandboxSessionId,
         durationMs: Date.now() - startStartTime,
       });
-      return {
-        sandboxInstance,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-        sandboxProviderType: sandboxInstance.providerType,
-      };
+    } else {
+      // For any other state, recreate sandbox
+      throw new Error(`Sandbox in unrecoverable state: ${state}`);
     }
 
-    // For any other state, recreate sandbox
-    throw new Error(`Sandbox in unrecoverable state: ${state}`);
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    await ensureSkillsRepository(sandboxInstance, targetRepository, config);
+
+    // Simple delay to ensure filesystem consistency after clone/link
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Get codebase tree - use sandboxInstance.providerType for correct path
+    const codebaseTree = await getCodebaseTree(
+      config,
+      sandboxInstance.id,
+      targetRepository,
+      sandboxInstance.providerType,
+    );
+    const codebaseTreeToReturn =
+      codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;
+
+    logger.warn("[SANDBOX] Sandbox resumed successfully", {
+      sandboxId: sandboxInstance.id,
+      sandboxState: sandboxInstance.state,
+      provider: provider.name,
+    });
+
+    return {
+      sandboxInstance,
+      codebaseTree: codebaseTreeToReturn,
+      dependenciesInstalled: false,
+    };
   } catch (error) {
     // Recreate sandbox if any step fails
     logger.info(
@@ -748,6 +876,12 @@ export async function getSandboxInstanceWithErrorHandling(
       }
     }
 
+    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
+    await ensureSkillsRepository(sandboxInstance, targetRepository, config);
+
+    // Simple delay to ensure filesystem consistency after clone/link
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     // Get codebase tree - use sandboxInstance.providerType for correct path
     const codebaseTree = await getCodebaseTree(
       config,
@@ -763,9 +897,6 @@ export async function getSandboxInstanceWithErrorHandling(
       sandboxState: sandboxInstance.state,
       provider: provider.name,
     });
-
-    // --- ENSURE SKILLS REPOSITORY IS CLONED ---
-    await ensureSkillsRepository(sandboxInstance, targetRepository, config);
 
     return {
       sandboxInstance,

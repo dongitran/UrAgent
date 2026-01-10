@@ -1,31 +1,27 @@
-
-
 /**
  * Skills repo prompt template for agents.
  * Skills are cloned into .skills folder inside main repo for relative path access.
+ * NOTE: Skill files are already listed in codebase_tree - no need for 'ls' command.
  */
 export const SKILLS_REPO_PROMPT_TEMPLATE = `
     <skills_repository>
         <location>.skills/{SKILLS_SUBFOLDER}</location>
+        <files_listed_in>codebase_tree (no need to run 'ls')</files_listed_in>
         <instructions>
-            You have access to a skills folder at .skills/{SKILLS_SUBFOLDER} containing project-specific documentation and guidelines.
-            
-            **Check if relevant skill files exist that could help you understand the codebase or solve the task.**
-            
-            To read files from skills folder (use relative paths from repo root):
-            - List available files: ls .skills/{SKILLS_SUBFOLDER}
-            - View a file: view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"
+            Skills folder contains project-specific documentation and coding guidelines.
+            Files are already listed in codebase_tree under .skills/ - look for "_:" arrays containing filenames.
+            To read a skill file: view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"
         </instructions>
     </skills_repository>`;
 
 /**
  * Skills first step template for Planner's context gathering phase.
+ * NOTE: Files are already in codebase_tree - no need for 'ls' command.
  */
 export const SKILLS_FIRST_STEP_TEMPLATE = `
-    0. **CHECK .skills FOLDER FIRST**: Before exploring the main codebase, list and review relevant files in the .skills folder.
-        - Run: ls .skills/{SKILLS_SUBFOLDER}
-        - Read relevant skill files using relative paths: view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"
-        - Skills contain project-specific guidelines and documentation that help you understand the codebase better.`;
+    0. **CHECK .skills FOLDER FIRST**: Skills contain project-specific guidelines crucial for understanding the codebase.
+        - Skill files are already listed in codebase_tree under .skills/ (look for "_:" arrays)
+        - Read relevant skill files: view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"`;
 
 /**
  * Get the skills repo prompt section - only returns content if configured via env vars.

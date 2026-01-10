@@ -34,6 +34,7 @@ export const INIT_STEPS = [
   "Resuming sandbox",
   "Creating sandbox",
   "Cloning repository",
+  "Cloning skills repository",
   "Pulling latest changes",
   "Configuring git user",
   "Checking out branch",

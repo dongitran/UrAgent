@@ -160,7 +160,10 @@ By reviewing these actions, and comparing them to the plan and original user req
     <dependencies_installed>{DEPENDENCIES_INSTALLED}</dependencies_installed>
 
     <codebase_tree>
-        Generated via: \`git ls-files | tree --fromfile -L 3\`:
+        Codebase file structure in compact nested format:
+        - Directories are nested objects: {dir:{subdir:{...}}}
+        - Files are in "_:" arrays: {src:{_:[app.ts,utils.ts]}}
+        
         {CODEBASE_TREE}
     </codebase_tree>{SKILLS_REPO_PROMPT}
 
