@@ -18,25 +18,59 @@ export const FAILED_TO_GENERATE_TREE_MESSAGE =
   "Failed to generate tree. Please try again.";
 
 /**
- * Fallback tree command - outputs flat file paths which will be transformed to JSON nested format
- * Uses git ls-files + explicitly includes .skills folder if it exists
+ * Get paths to exclude from codebase tree from environment variable
+ * CODEBASE_TREE_EXCLUDE_PATHS: comma-separated list of folder paths to exclude
+ * Example: "applications/kpi-tool-api,applications/kpi-tool-web"
+ */
+function getExcludePaths(): string[] {
+  const excludePathsEnv = process.env.CODEBASE_TREE_EXCLUDE_PATHS?.trim();
+  if (!excludePathsEnv) {
+    return [];
+  }
+  return excludePathsEnv.split(',').map(p => p.trim()).filter(p => p);
+}
+
+/**
+ * Generate the fallback tree command with exclusion patterns
  * 
  * Output: Flat file paths (one per line), sorted alphabetically
- * These paths are then transformed to JSON nested format by transformToJsonNested()
- * which reduces token usage by ~66% compared to flat paths for deep nesting structures.
+ * These paths are then transformed to no-quote nested format by transformToJsonNested()
+ * which reduces token usage by ~64% compared to flat paths for deep nesting structures.
  * 
  * NOTE: To avoid duplicates, .skills files are collected via find -type f (files only),
  * and git ls-files excludes .skills folder.
+ * 
+ * Exclusions are read from CODEBASE_TREE_EXCLUDE_PATHS env variable.
  */
-const FALLBACK_TREE_COMMAND = `{ 
+function getFallbackTreeCommand(): string {
+  const excludePaths = getExcludePaths();
+
+  // Build grep -v patterns for excluded paths
+  // e.g. grep -v '^applications/kpi-tool-api/' | grep -v '^applications/kpi-tool-web/'
+  let excludeGrepChain = '';
+  if (excludePaths.length > 0) {
+    excludeGrepChain = excludePaths
+      .map(p => {
+        // Ensure path ends with / for directory matching
+        const normalizedPath = p.endsWith('/') ? p : `${p}/`;
+        // Escape special regex chars in path
+        const escapedPath = normalizedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return `grep -v '^${escapedPath}'`;
+      })
+      .join(' | ');
+    excludeGrepChain = ' | ' + excludeGrepChain;
+  }
+
+  return `{ 
   if [ -d .skills ]; then 
     find .skills -maxdepth 6 -type f 2>/dev/null; 
   fi; 
-  git ls-files 2>/dev/null | grep -v '^.skills/'; 
+  git ls-files 2>/dev/null | grep -v '^.skills/'${excludeGrepChain}; 
   if [ ! -d .git ]; then 
-    find . -maxdepth 6 -type f -not -path '*/.*' 2>/dev/null | sed 's|^./||'; 
+    find . -maxdepth 6 -type f -not -path '*/.*' 2>/dev/null | sed 's|^./||'${excludeGrepChain}; 
   fi; 
-} | sort -u | head -3000`;
+} | sort -u | head -6000`;
+}
 
 /**
  * Transform flat file paths to nested no-quote format for maximum token efficiency
@@ -169,7 +203,7 @@ export async function getCodebaseTree(
     // Use fallback command directly (tree is not available in E2B sandbox)
     // This uses git ls-files which is always available in git repos
     const response = await executor.executeCommand({
-      command: FALLBACK_TREE_COMMAND,
+      command: getFallbackTreeCommand(),
       workdir: repoDir,
       timeout: TIMEOUT_SEC,
       sandboxSessionId,
@@ -221,7 +255,7 @@ export async function getCodebaseTree(
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       const retryResponse = await executor.executeCommand({
-        command: FALLBACK_TREE_COMMAND,
+        command: getFallbackTreeCommand(),
         workdir: repoDir,
         timeout: TIMEOUT_SEC,
         sandboxSessionId,
@@ -257,7 +291,7 @@ async function getCodebaseTreeLocal(config: GraphConfig): Promise<string> {
 
     // Use fallback command directly (tree may not be available)
     const response = await executor.executeCommand({
-      command: FALLBACK_TREE_COMMAND,
+      command: getFallbackTreeCommand(),
       timeout: TIMEOUT_SEC,
     });
 
