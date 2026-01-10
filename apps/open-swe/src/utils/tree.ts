@@ -69,7 +69,7 @@ function getFallbackTreeCommand(): string {
   if [ ! -d .git ]; then 
     find . -maxdepth 6 -type f -not -path '*/.*' 2>/dev/null | sed 's|^./||'${excludeGrepChain}; 
   fi; 
-} | sort -u | head -6000`;
+} | sort -u | head -8000`;
 }
 
 /**

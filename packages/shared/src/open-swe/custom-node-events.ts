@@ -73,5 +73,5 @@ export function mapCustomEventsToSteps(events: CustomNodeEvent[]) {
           typeof event.data.error === "string" ? event.data.error : undefined,
       };
     return [];
-  }).filter((step) => step.status !== "skipped");
+  });
 }
