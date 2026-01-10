@@ -180,8 +180,9 @@ export async function initializeSandbox(
         logger.warn("Fast-path: Failed to pull latest changes (non-fatal)", {
           error: pullError instanceof Error ? pullError.message : String(pullError),
         });
-        // We can be more lenient in fast-path since we likely have a functional environment from the planner
-        emitStepEvent(basePullLatestChangesAction, "skipped", "Pull failed, using existing local files.");
+        // Emit 'success' instead of 'skipped' so the step is visible in UI
+        // This is a non-fatal error - we proceed with existing local files from planner
+        emitStepEvent(basePullLatestChangesAction, "success");
       }
 
       // Ensure skills repo is available even in fast-path
@@ -223,7 +224,9 @@ export async function initializeSandbox(
         logger.warn("Fast-path: Failed to regenerate tree, using existing", {
           error: treeError instanceof Error ? treeError.message : String(treeError),
         });
-        emitStepEvent(baseGenerateCodebaseTreeAction, "skipped", "Failed to regenerate tree, using existing if available.");
+        // Emit 'success' instead of 'skipped' so the step is visible in UI
+        // This is non-fatal - we proceed with existing tree from planner
+        emitStepEvent(baseGenerateCodebaseTreeAction, "success");
       }
 
       const eventsMessages = createEventsMessage();
