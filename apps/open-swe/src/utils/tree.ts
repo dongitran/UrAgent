@@ -41,8 +41,10 @@ function getExcludePaths(): string[] {
  * and git ls-files excludes .skills folder.
  * 
  * Exclusions are read from CODEBASE_TREE_EXCLUDE_PATHS env variable.
+ * 
+ * @param skipFiles - If true, list only directories and skip files
  */
-function getFallbackTreeCommand(): string {
+function getFallbackTreeCommand(skipFiles: boolean): string {
   const excludePaths = getExcludePaths();
 
   // Build grep -v patterns for excluded paths
@@ -55,10 +57,30 @@ function getFallbackTreeCommand(): string {
         const normalizedPath = p.endsWith('/') ? p : `${p}/`;
         // Escape special regex chars in path
         const escapedPath = normalizedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        // For skipFiles=true, we might want to exclude the folder itself too if it perfectly matches
+        if (skipFiles) {
+          const folderPath = p.endsWith('/') ? p.slice(0, -1) : p;
+          const escapedFolder = folderPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return `grep -v '^${escapedPath}' | grep -v '^${escapedFolder}$'`;
+        }
+
         return `grep -v '^${escapedPath}'`;
       })
       .join(' | ');
     excludeGrepChain = ' | ' + excludeGrepChain;
+  }
+
+  if (skipFiles) {
+    return `{ 
+  if [ -d .skills ]; then 
+    find .skills -maxdepth 6 -type d 2>/dev/null; 
+  fi; 
+  git ls-files 2>/dev/null | grep '/' | sed 's|/[^/]*$||' | grep -v '^.skills/'${excludeGrepChain}; 
+  if [ ! -d .git ]; then 
+    find . -maxdepth 6 -type d -not -path '*/.*' 2>/dev/null | sed 's|^./||' | grep -v '^$'${excludeGrepChain}; 
+  fi; 
+} | sort -u | head -8000`;
   }
 
   return `{ 
@@ -69,15 +91,19 @@ function getFallbackTreeCommand(): string {
   if [ ! -d .git ]; then 
     find . -maxdepth 6 -type f -not -path '*/.*' 2>/dev/null | sed 's|^./||'${excludeGrepChain}; 
   fi; 
-} | sort -u | head -6000`;
+} | sort -u | head -8000`;
 }
 
 /**
  * Transform flat file paths to nested no-quote format for maximum token efficiency
  * 
- * Input format:
+ * Input format (files):
  *   src/app.ts
  *   src/modules/user.ts
+ * 
+ * Input format (folders if skipFiles=true):
+ *   src
+ *   src/modules
  * 
  * Output format (no-quote nested):
  *   {src:{_:[app.ts],modules:{_:[user.ts]}}}
@@ -85,8 +111,11 @@ function getFallbackTreeCommand(): string {
  * This format avoids quotes which would be escaped as \" when embedded in JSON.
  * The "_" key contains array of files in that directory.
  * This saves ~64% vs flat paths and ~25% vs escaped JSON when embedded.
+ * 
+ * @param flatPaths - Flat file paths separated by newline
+ * @param skipFiles - If true, treat paths as folders and don't use "_" array
  */
-function transformToJsonNested(flatPaths: string): string {
+function transformToJsonNested(flatPaths: string, skipFiles: boolean = false): string {
   const files = flatPaths.split('\n').filter(f => f.trim());
 
   if (files.length === 0) {
@@ -100,21 +129,33 @@ function transformToJsonNested(flatPaths: string): string {
     const parts = filepath.split('/');
     let current = root;
 
-    // Navigate/create directories
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
-      if (!(part in current)) {
-        current[part] = {};
+    if (skipFiles) {
+      // All parts are directories
+      for (const part of parts) {
+        if (!part || part === '.') continue;
+        if (!(part in current)) {
+          current[part] = {};
+        }
+        current = current[part];
       }
-      current = current[part];
-    }
+    } else {
+      // Original logic for files
+      // Navigate/create directories
+      for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        if (!(part in current)) {
+          current[part] = {};
+        }
+        current = current[part];
+      }
 
-    // Add file to "_" array
-    const filename = parts[parts.length - 1];
-    if (!('_' in current)) {
-      current['_'] = [];
+      // Add file to "_" array
+      const filename = parts[parts.length - 1];
+      if (!('_' in current)) {
+        current['_'] = [];
+      }
+      current['_'].push(filename);
     }
-    current['_'].push(filename);
   }
 
   // Convert to no-quote format (avoids \" escaping when embedded in JSON)
@@ -200,10 +241,12 @@ export async function getCodebaseTree(
       hasTargetRepository: !!targetRepository,
     });
 
+    const skipFiles = process.env.CODEBASE_TREE_SKIP_FILES === 'true';
+
     // Use fallback command directly (tree is not available in E2B sandbox)
     // This uses git ls-files which is always available in git repos
     const response = await executor.executeCommand({
-      command: getFallbackTreeCommand(),
+      command: getFallbackTreeCommand(skipFiles),
       workdir: repoDir,
       timeout: TIMEOUT_SEC,
       sandboxSessionId,
@@ -255,7 +298,7 @@ export async function getCodebaseTree(
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       const retryResponse = await executor.executeCommand({
-        command: getFallbackTreeCommand(),
+        command: getFallbackTreeCommand(skipFiles),
         workdir: repoDir,
         timeout: TIMEOUT_SEC,
         sandboxSessionId,
@@ -267,11 +310,11 @@ export async function getCodebaseTree(
         } else {
           logger.warn("[TREE] Skills still not visible after retry");
         }
-        return transformToJsonNested(retryResponse.result);
+        return transformToJsonNested(retryResponse.result, skipFiles);
       }
     }
 
-    return transformToJsonNested(result);
+    return transformToJsonNested(result, skipFiles);
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     logger.error("Failed to generate tree (exception)", {
@@ -287,16 +330,17 @@ export async function getCodebaseTree(
  */
 async function getCodebaseTreeLocal(config: GraphConfig): Promise<string> {
   try {
+    const skipFiles = process.env.CODEBASE_TREE_SKIP_FILES === 'true';
     const executor = createShellExecutor(config);
 
     // Use fallback command directly (tree may not be available)
     const response = await executor.executeCommand({
-      command: getFallbackTreeCommand(),
+      command: getFallbackTreeCommand(skipFiles),
       timeout: TIMEOUT_SEC,
     });
 
     if (response.exitCode === 0 && response.result) {
-      return transformToJsonNested(response.result);
+      return transformToJsonNested(response.result, skipFiles);
     }
 
     logger.error("Failed to generate tree in local mode", {
