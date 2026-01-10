@@ -303,7 +303,10 @@ These are notes you took while gathering context for the plan:
     <are_dependencies_installed>{DEPENDENCIES_INSTALLED_PROMPT}</are_dependencies_installed>
 
     <codebase_tree>
-        Generated via: \`git ls-files | tree --fromfile -L 3\`
+        Codebase file structure in compact nested format:
+        - Directories are nested objects: {dir:{subdir:{...}}}
+        - Files are in "_:" arrays: {src:{_:[app.ts,utils.ts]}}
+        
         {CODEBASE_TREE}
     </codebase_tree>
 </codebase_structure>

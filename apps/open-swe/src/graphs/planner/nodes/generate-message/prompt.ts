@@ -88,7 +88,11 @@ Your sole objective in this phase is to gather comprehensive context about the c
     {LOCAL_MODE_NOTE}{SKILLS_REPO_PROMPT}
 
     <codebase_tree>
-        Generated via: \`git ls-files | tree --fromfile -L 3\`:
+        Codebase file structure in compact nested format:
+        - Directories are nested objects: {dir:{subdir:{...}}}
+        - Files are in "_:" arrays: {src:{_:[app.ts,utils.ts]}}
+        - Example: {src:{components:{_:[Button.tsx]},utils:{_:[helper.ts]}}}
+        
         {CODEBASE_TREE}
     </codebase_tree>
 </workspace_information>
