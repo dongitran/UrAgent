@@ -128,30 +128,93 @@ export async function initializeSandbox(
       sandboxValidated,
     });
 
+    const resumeSandboxActionId = uuidv4();
+    const baseResumeSandboxAction: CustomNodeEvent = {
+      nodeId: INITIALIZE_NODE_ID,
+      createdAt: new Date().toISOString(),
+      actionId: resumeSandboxActionId,
+      action: "Resuming sandbox",
+      data: {
+        status: "pending",
+        sandboxSessionId,
+        branch: branchName,
+        repo: repoName,
+      },
+    };
+    emitStepEvent(baseResumeSandboxAction, "pending");
+
     try {
       const provider = getProvider();
       const existingSandbox = await provider.get(sandboxSessionId);
+      emitStepEvent(baseResumeSandboxAction, "success");
 
-      logger.info("Fast-path resume successful", {
-        sandboxId: existingSandbox.id,
-        providerType: existingSandbox.providerType,
-      });
+      // Get the actual provider type and repo dir early for git pull and tree generation
+      const actualProviderType = existingSandbox.providerType;
+      const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, actualProviderType);
+
+      // Perform real pull in fast-path (even if recently done in planner) to ensure UI reflects progress
+      // and to guarantee the environment is up-to-date with any background changes during approval.
+      const pullLatestChangesActionId = uuidv4();
+      const basePullLatestChangesAction: CustomNodeEvent = {
+        nodeId: INITIALIZE_NODE_ID,
+        createdAt: new Date().toISOString(),
+        actionId: pullLatestChangesActionId,
+        action: "Pulling latest changes",
+        data: {
+          status: "pending",
+          sandboxSessionId,
+          branch: branchName,
+          repo: repoName,
+        },
+      };
+      emitStepEvent(basePullLatestChangesAction, "pending");
+
+      try {
+        await existingSandbox.git.pull({
+          workdir: absoluteRepoDir,
+          username: "x-access-token",
+          token: githubInstallationToken,
+        });
+        emitStepEvent(basePullLatestChangesAction, "success");
+      } catch (pullError) {
+        logger.warn("Fast-path: Failed to pull latest changes (non-fatal)", {
+          error: pullError instanceof Error ? pullError.message : String(pullError),
+        });
+        // We can be more lenient in fast-path since we likely have a functional environment from the planner
+        emitStepEvent(basePullLatestChangesAction, "skipped", "Pull failed, using existing local files.");
+      }
 
       // Ensure skills repo is available even in fast-path
-      const repoSkills = await ensureSkillsRepository(existingSandbox, targetRepository, config, {
+      const { skillsRepo: repoSkills, cloned } = await ensureSkillsRepository(existingSandbox, targetRepository, config, {
         skillsRepoFromState: state.skillsRepository,
         emitStepEvent,
       });
 
       // Simple delay to ensure filesystem consistency after clone/link
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (cloned) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
+      const generateCodebaseTreeActionId = uuidv4();
+      const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
+        nodeId: INITIALIZE_NODE_ID,
+        createdAt: new Date().toISOString(),
+        actionId: generateCodebaseTreeActionId,
+        action: "Generating codebase tree",
+        data: {
+          status: "pending",
+          sandboxSessionId,
+          branch: branchName,
+          repo: repoName,
+        },
+      };
+      emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
 
       // Regenerate tree to include .skills folder (fixes intermittent missing .skills issue)
-      const actualProviderType = existingSandbox.providerType;
-      const absoluteRepoDir = getRepoAbsolutePath(targetRepository, undefined, actualProviderType);
       let codebaseTree: string | undefined;
       try {
         codebaseTree = await getCodebaseTree(config, existingSandbox.id, targetRepository, actualProviderType);
+        emitStepEvent(baseGenerateCodebaseTreeAction, "success");
         logger.warn("Fast-path: Regenerated codebase tree to include .skills", {
           sandboxId: existingSandbox.id,
           hasTree: !!codebaseTree,
@@ -160,7 +223,11 @@ export async function initializeSandbox(
         logger.warn("Fast-path: Failed to regenerate tree, using existing", {
           error: treeError instanceof Error ? treeError.message : String(treeError),
         });
+        emitStepEvent(baseGenerateCodebaseTreeAction, "skipped", "Failed to regenerate tree, using existing if available.");
       }
+
+      const eventsMessages = createEventsMessage();
+      const userMessages = state.messages || [];
 
       // Return state update with fresh tree
       return {
@@ -169,6 +236,8 @@ export async function initializeSandbox(
         branchName,
         skillsRepository: repoSkills,
         codebaseTree,
+        messages: eventsMessages,
+        internalMessages: [...userMessages, ...eventsMessages],
         customRules: await getCustomRulesWithSandboxInstance(existingSandbox, absoluteRepoDir, config),
       };
     } catch (error) {
@@ -177,6 +246,7 @@ export async function initializeSandbox(
         sandboxSessionId,
         error: error instanceof Error ? error.message : String(error),
       });
+      emitStepEvent(baseResumeSandboxAction, "skipped", "Fast-path resume failed, falling back to normal initialization.");
     }
   }
 
@@ -287,13 +357,15 @@ export async function initializeSandbox(
       }
 
       // Ensure skills repo is available BEFORE generating tree (so .skills appears in tree output)
-      const repoSkills = await ensureSkillsRepository(existingSandboxInstance, targetRepository, config, {
+      const { skillsRepo: repoSkills, cloned } = await ensureSkillsRepository(existingSandboxInstance, targetRepository, config, {
         skillsRepoFromState: state.skillsRepository,
         emitStepEvent,
       });
 
       // Simple delay to ensure filesystem consistency after clone/link
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (cloned) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
 
       const generateCodebaseTreeActionId = uuidv4();
       const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
@@ -584,13 +656,15 @@ export async function initializeSandbox(
 
   // --- SKILLS REPOSITORY CLONING LOGIC ---
   // Ensure skills repo is available in new creation path
-  const repoSkills = await ensureSkillsRepository(sandboxInstance, targetRepository, config, {
+  const { skillsRepo: repoSkills, cloned } = await ensureSkillsRepository(sandboxInstance, targetRepository, config, {
     skillsRepoFromState: state.skillsRepository,
     emitStepEvent,
   });
 
   // Simple delay to ensure filesystem consistency after clone/link
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  if (cloned) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
   // --- END SKILLS REPOSITORY CLONING LOGIC ---
 
   // Checking out branch
@@ -728,13 +802,15 @@ async function initializeSandboxLocal(
   );
 
   // Ensure skills repo is available in local mode too!
-  const repoSkills = await ensureSkillsRepository(localSandbox, targetRepository, config, {
+  const { skillsRepo: repoSkills, cloned } = await ensureSkillsRepository(localSandbox, targetRepository, config, {
     skillsRepoFromState: state.skillsRepository,
     emitStepEvent,
   });
 
   // Simple delay to ensure filesystem consistency after clone/link
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  if (cloned) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
 
   // Generate codebase tree locally
   const generateCodebaseTreeActionId = uuidv4();
