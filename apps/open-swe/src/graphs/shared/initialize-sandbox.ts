@@ -393,7 +393,7 @@ export async function initializeSandbox(
     }
   }
 
-  // Creating new sandbox
+  // Creating new sandbox - emit event immediately so user sees something
   const createSandboxActionId = uuidv4();
   const baseCreateSandboxAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
@@ -408,37 +408,46 @@ export async function initializeSandbox(
     },
   };
 
+  // Emit "Creating sandbox" immediately so user sees feedback right away
+  emitStepEvent(baseCreateSandboxAction, "pending");
+
   // Acquire concurrency slot before creating sandbox (blocks if at capacity)
   // This ensures we don't exceed MAX_CONCURRENT_SANDBOXES limit
   if (sandboxConcurrencyManager.isEnabled()) {
-    const waitingForSlotActionId = uuidv4();
-    const baseWaitingForSlotAction: CustomNodeEvent = {
-      nodeId: INITIALIZE_NODE_ID,
-      createdAt: new Date().toISOString(),
-      actionId: waitingForSlotActionId,
-      action: "Waiting for sandbox slot",
-      data: {
-        status: "pending",
-        sandboxSessionId: null,
-        branch: branchName,
-        repo: repoName,
-        active: sandboxConcurrencyManager.getActiveCount(),
-        max: sandboxConcurrencyManager.getMaxConcurrent(),
-      },
-    };
-
     try {
       await sandboxConcurrencyManager.acquireSlot({
         onWaiting: () => {
-          emitStepEvent(baseWaitingForSlotAction, "pending");
+          // Update the "Creating sandbox" event to show we're waiting for a slot
+          emitStepEvent(
+            {
+              ...baseCreateSandboxAction,
+              action: "Creating sandbox (waiting for slot...)",
+              data: {
+                ...baseCreateSandboxAction.data,
+                waitingForSlot: true,
+                active: sandboxConcurrencyManager.getActiveCount(),
+                max: sandboxConcurrencyManager.getMaxConcurrent(),
+              },
+            },
+            "pending",
+          );
         },
         checkCancelled: async () => await isRunCancelled(config),
       });
-      // Only emit success if we actually waited (onWaiting was called)
-      // Skip emitting if the slot was immediately available
+      // After slot is acquired, update status to show we're now creating
+      emitStepEvent(
+        {
+          ...baseCreateSandboxAction,
+          data: {
+            ...baseCreateSandboxAction.data,
+            slotAcquired: true,
+          },
+        },
+        "pending",
+      );
     } catch (slotError) {
       emitStepEvent(
-        baseWaitingForSlotAction,
+        baseCreateSandboxAction,
         "error",
         slotError instanceof Error ? slotError.message : "Failed to acquire sandbox slot",
       );
@@ -446,7 +455,6 @@ export async function initializeSandbox(
     }
   }
 
-  emitStepEvent(baseCreateSandboxAction, "pending");
   let sandboxInstance: ISandbox;
   try {
     // Use provider abstraction to create sandbox - works with Daytona, E2B, and Multi
