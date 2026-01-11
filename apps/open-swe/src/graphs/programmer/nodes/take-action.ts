@@ -53,6 +53,42 @@ import {
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
+/**
+ * Check if an error is a "Run cancelled" error thrown from sandbox operations
+ */
+function isRunCancelledError(error: unknown): boolean {
+  return error instanceof Error && error.message === "Run cancelled";
+}
+
+/**
+ * Handle Run cancelled by deleting sandbox and returning END command
+ */
+async function handleRunCancelled(
+  sandboxSessionId: string | undefined,
+  source: string,
+): Promise<Command> {
+  logger.warn(`Stopping programmer (${source}) because run was cancelled by user (caught error)`);
+  if (sandboxSessionId) {
+    try {
+      await deleteSandbox(sandboxSessionId);
+      logger.info("Sandbox deleted after Run cancelled error", {
+        sandboxSessionId,
+        source,
+      });
+    } catch (deleteError) {
+      logger.warn("Failed to delete sandbox after Run cancelled error", {
+        sandboxSessionId,
+        error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+      });
+    }
+  }
+  return new Command({
+    goto: END,
+    update: {
+      sandboxSessionId: undefined,
+    },
+  });
+}
 
 export async function takeAction(
   state: GraphState,
@@ -272,7 +308,22 @@ export async function takeAction(
   }
 
   // Execute parallel tools concurrently (view, grep, textEditor - lightweight operations)
-  const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
+  let parallelResults;
+  try {
+    parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
+  } catch (error) {
+    // Log the error for debugging
+    logger.warn("Error during tool execution", {
+      error: error instanceof Error ? error.message : String(error),
+      sandboxSessionId: state.sandboxSessionId,
+      isRunCancelled: isRunCancelledError(error),
+    });
+    // Handle "Run cancelled" error thrown from inside tool execution
+    if (isRunCancelledError(error)) {
+      return await handleRunCancelled(state.sandboxSessionId, "takeAction-toolExecution");
+    }
+    throw error;
+  }
 
   // Combine results in original order
   const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; stateUpdates: any }[] = [];
@@ -330,7 +381,23 @@ export async function takeAction(
 
   if (!isLocalMode(config)) {
     const repoPath = getRepoAbsolutePath(state.targetRepository, undefined, sandboxInstance.providerType);
-    const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
+
+    let changedFiles: string[] = [];
+    try {
+      changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
+    } catch (error) {
+      // Log the error for debugging
+      logger.warn("Error during git status check", {
+        error: error instanceof Error ? error.message : String(error),
+        sandboxSessionId: state.sandboxSessionId,
+        isRunCancelled: isRunCancelledError(error),
+      });
+      // Handle "Run cancelled" error thrown from git status check
+      if (isRunCancelledError(error)) {
+        return await handleRunCancelled(state.sandboxSessionId, "takeAction-changedFilesCheck");
+      }
+      throw error;
+    }
 
     logger.info("Changed files check in take-action", {
       changedFilesCount: changedFiles.length,

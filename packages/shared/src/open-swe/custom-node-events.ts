@@ -52,26 +52,29 @@ export type Step = {
  */
 export function mapCustomEventsToSteps(events: CustomNodeEvent[]) {
   return INIT_STEPS.flatMap((stepName) => {
+    // Use startsWith to match actions with suffixes like "Creating sandbox (waiting for slot...)"
     const event = [...events]
-      .filter((e) => e.action === stepName)
+      .filter((e) => e.action === stepName || e.action.startsWith(stepName + " ("))
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )[0];
     if (!event) return [];
+    // Use event.action as the display name to show suffix like "(waiting for slot...)"
+    const displayName = event.action;
     if (event.data.status === "skipped")
-      return { name: stepName, status: "skipped" as const };
+      return { name: displayName, status: "skipped" as const };
     if (event.data.status === "pending")
-      return { name: stepName, status: "generating" as const };
+      return { name: displayName, status: "generating" as const };
     if (event.data.status === "success")
-      return { name: stepName, status: "success" as const };
+      return { name: displayName, status: "success" as const };
     if (event.data.status === "error")
       return {
-        name: stepName,
+        name: displayName,
         status: "error" as const,
         error:
           typeof event.data.error === "string" ? event.data.error : undefined,
       };
     return [];
-  });
+  }).filter((step) => step.status !== "skipped");
 }

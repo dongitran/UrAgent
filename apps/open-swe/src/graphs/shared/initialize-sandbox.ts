@@ -33,6 +33,7 @@ import { getBranch } from "../../utils/github/api.js";
 import { LocalSandbox } from "../../utils/sandbox-provider/local-provider.js";
 
 import { isRunCancelled } from "../../utils/run-cancellation.js";
+import { sandboxConcurrencyManager } from "../../utils/sandbox-concurrency.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -445,6 +446,9 @@ export async function initializeSandbox(
         try {
           const provider = getProvider();
           await provider.delete(sandboxSessionId);
+          // Release the slot that was acquired when this sandbox was originally created
+          // (e.g., in the Planner phase before transitioning to Programmer)
+          sandboxConcurrencyManager.releaseSlot();
           logger.info("Deleted old sandbox after resume failure", {
             sandboxSessionId,
             error: resumeError instanceof Error ? resumeError.message : String(resumeError),
@@ -464,7 +468,7 @@ export async function initializeSandbox(
     }
   }
 
-  // Creating new sandbox
+  // Creating new sandbox - emit event immediately so user sees something
   const createSandboxActionId = uuidv4();
   const baseCreateSandboxAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
@@ -479,7 +483,70 @@ export async function initializeSandbox(
     },
   };
 
+  // Emit "Creating sandbox" immediately so user sees feedback right away
   emitStepEvent(baseCreateSandboxAction, "pending");
+
+  // Acquire concurrency slot before creating sandbox (blocks if at capacity)
+  // This ensures we don't exceed MAX_CONCURRENT_SANDBOXES limit
+  if (sandboxConcurrencyManager.isEnabled()) {
+    try {
+      await sandboxConcurrencyManager.acquireSlot({
+        onWaiting: () => {
+          // Update the "Creating sandbox" event to show we're waiting for a slot
+          emitStepEvent(
+            {
+              ...baseCreateSandboxAction,
+              action: "Creating sandbox (waiting for slot...)",
+              data: {
+                ...baseCreateSandboxAction.data,
+                waitingForSlot: true,
+                active: sandboxConcurrencyManager.getActiveCount(),
+                max: sandboxConcurrencyManager.getMaxConcurrent(),
+              },
+            },
+            "pending",
+          );
+        },
+        onHeartbeat: () => {
+          // Emit periodic heartbeat to keep frontend stream alive during long waits
+          emitStepEvent(
+            {
+              ...baseCreateSandboxAction,
+              action: "Creating sandbox (waiting for slot...)",
+              data: {
+                ...baseCreateSandboxAction.data,
+                waitingForSlot: true,
+                active: sandboxConcurrencyManager.getActiveCount(),
+                max: sandboxConcurrencyManager.getMaxConcurrent(),
+                heartbeat: Date.now(),
+              },
+            },
+            "pending",
+          );
+        },
+        checkCancelled: async () => await isRunCancelled(config),
+      });
+      // After slot is acquired, update status to show we're now creating
+      emitStepEvent(
+        {
+          ...baseCreateSandboxAction,
+          data: {
+            ...baseCreateSandboxAction.data,
+            slotAcquired: true,
+          },
+        },
+        "pending",
+      );
+    } catch (slotError) {
+      emitStepEvent(
+        baseCreateSandboxAction,
+        "error",
+        slotError instanceof Error ? slotError.message : "Failed to acquire sandbox slot",
+      );
+      throw slotError;
+    }
+  }
+
   let sandboxInstance: ISandbox;
   try {
     // Use provider abstraction to create sandbox - works with Daytona, E2B, and Multi
@@ -522,6 +589,8 @@ export async function initializeSandbox(
       "error",
       "Failed to create sandbox environment. Please try again later.",
     );
+    // Release the concurrency slot since sandbox creation failed
+    sandboxConcurrencyManager.releaseSlot();
     throw new Error("Failed to create sandbox environment.");
   }
 
@@ -651,6 +720,8 @@ export async function initializeSandbox(
         : cloneRepoRes),
     };
     logger.error("Cloning repository failed", errorFields);
+    // Release the concurrency slot since we're failing after sandbox was created
+    sandboxConcurrencyManager.releaseSlot();
     throw new Error("Failed to clone repository.");
   }
   const newBranchName =

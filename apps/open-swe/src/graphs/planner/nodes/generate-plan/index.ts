@@ -75,6 +75,21 @@ export async function generatePlan(
   // Check if run was cancelled before executing
   if (await isRunCancelled(config)) {
     logger.warn("Stopping planner (generatePlan) because run has been cancelled by user");
+    // Delete sandbox to release concurrency slot
+    if (state.sandboxSessionId) {
+      const { deleteSandbox } = await import("../../../../utils/sandbox.js");
+      try {
+        await deleteSandbox(state.sandboxSessionId);
+        logger.info("Sandbox deleted after planner run was cancelled", {
+          sandboxSessionId: state.sandboxSessionId,
+        });
+      } catch (deleteError) {
+        logger.warn("Failed to delete sandbox after planner cancellation", {
+          sandboxSessionId: state.sandboxSessionId,
+          error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+        });
+      }
+    }
     return new Command({
       goto: END,
     });
