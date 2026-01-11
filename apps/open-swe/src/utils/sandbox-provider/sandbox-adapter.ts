@@ -174,10 +174,12 @@ export async function getSandboxWithErrorHandling(
     }
 
     // --- ENSURE SKILLS REPOSITORY IS CLONED ---
-    await ensureSkillsRepository(sandbox, targetRepository, config);
+    const skillsResult = await ensureSkillsRepository(sandbox, targetRepository, config);
 
     // Simple delay to ensure filesystem consistency
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (skillsResult.cloned) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
 
     // For legacy adapter, we return codebaseTree: null to maintain signature,
     // though the files are now available for subsequent tool calls.
