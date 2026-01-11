@@ -33,6 +33,7 @@ import { getBranch } from "../../utils/github/api.js";
 import { LocalSandbox } from "../../utils/sandbox-provider/local-provider.js";
 
 import { isRunCancelled } from "../../utils/run-cancellation.js";
+import { sandboxConcurrencyManager } from "../../utils/sandbox-concurrency.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -403,6 +404,44 @@ export async function initializeSandbox(
       repo: repoName,
     },
   };
+
+  // Acquire concurrency slot before creating sandbox (blocks if at capacity)
+  // This ensures we don't exceed MAX_CONCURRENT_SANDBOXES limit
+  if (sandboxConcurrencyManager.isEnabled()) {
+    const waitingForSlotActionId = uuidv4();
+    const baseWaitingForSlotAction: CustomNodeEvent = {
+      nodeId: INITIALIZE_NODE_ID,
+      createdAt: new Date().toISOString(),
+      actionId: waitingForSlotActionId,
+      action: "Waiting for sandbox slot",
+      data: {
+        status: "pending",
+        sandboxSessionId: null,
+        branch: branchName,
+        repo: repoName,
+        active: sandboxConcurrencyManager.getActiveCount(),
+        max: sandboxConcurrencyManager.getMaxConcurrent(),
+      },
+    };
+
+    try {
+      await sandboxConcurrencyManager.acquireSlot({
+        onWaiting: () => {
+          emitStepEvent(baseWaitingForSlotAction, "pending");
+        },
+        checkCancelled: async () => await isRunCancelled(config),
+      });
+      // Only emit success if we actually waited (onWaiting was called)
+      // Skip emitting if the slot was immediately available
+    } catch (slotError) {
+      emitStepEvent(
+        baseWaitingForSlotAction,
+        "error",
+        slotError instanceof Error ? slotError.message : "Failed to acquire sandbox slot",
+      );
+      throw slotError;
+    }
+  }
 
   emitStepEvent(baseCreateSandboxAction, "pending");
   let sandboxInstance: ISandbox;

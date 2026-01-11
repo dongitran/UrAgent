@@ -14,6 +14,7 @@ import { v4 as uuidv4 } from "uuid";
 import { INITIALIZE_NODE_ID, CustomNodeEvent } from "@openswe/shared/open-swe/custom-node-events";
 import { LocalSandbox } from "./sandbox-provider/local-provider.js";
 import { isRunCancelled } from "./run-cancellation.js";
+import { sandboxConcurrencyManager } from "./sandbox-concurrency.js";
 
 const logger = createLogger(LogLevel.DEBUG, "Sandbox");
 
@@ -276,6 +277,12 @@ export async function deleteSandbox(
       provider: provider.name,
       durationMs: Date.now() - startTime,
     });
+
+    // Release concurrency slot on successful deletion
+    if (result) {
+      sandboxConcurrencyManager.releaseSlot();
+    }
+
     return result;
   } catch (error) {
     logger.error("[SANDBOX] Failed to delete sandbox", {
