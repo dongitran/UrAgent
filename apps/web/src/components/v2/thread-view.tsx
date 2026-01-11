@@ -191,7 +191,16 @@ export function ThreadView({
     threadId: plannerSession?.threadId,
     onCustomEvent: (event) => {
       if (isCustomNodeEvent(event)) {
-        setCustomPlannerNodeEvents((prev) => [...prev, event]);
+        setCustomPlannerNodeEvents((prev) => {
+          // Update existing event with same actionId, or append new
+          const existingIdx = prev.findIndex((e) => e.actionId === event.actionId);
+          if (existingIdx !== -1) {
+            const updated = [...prev];
+            updated[existingIdx] = event;
+            return updated;
+          }
+          return [...prev, event];
+        });
       }
     },
     fetchStateHistory: false,
@@ -217,7 +226,16 @@ export function ThreadView({
     threadId: programmerSession?.threadId,
     onCustomEvent: (event) => {
       if (isCustomNodeEvent(event)) {
-        setCustomProgrammerNodeEvents((prev) => [...prev, event]);
+        setCustomProgrammerNodeEvents((prev) => {
+          // Update existing event with same actionId, or append new
+          const existingIdx = prev.findIndex((e) => e.actionId === event.actionId);
+          if (existingIdx !== -1) {
+            const updated = [...prev];
+            updated[existingIdx] = event;
+            return updated;
+          }
+          return [...prev, event];
+        });
       }
     },
     fetchStateHistory: false,

@@ -99,41 +99,40 @@ export function InitializeStep({
       {!collapsed && steps && steps.length > 0 && (
         <div className="p-2">
           <ul className="space-y-2">
-            {steps
-              .filter((step) => step.status !== "skipped")
-              .map((step, index) => (
-                <li
-                  key={index}
-                  className="flex items-center text-xs"
-                >
-                  <span className="mr-2">
-                    {stepStatusIcon[
-                      step.status as keyof typeof stepStatusIcon
-                    ] ?? (
+            {steps.map((step, index) => (
+              <li
+                key={index}
+                className="flex items-center text-xs"
+              >
+                <span className="mr-2">
+                  {stepStatusIcon[
+                    step.status as keyof typeof stepStatusIcon
+                  ] ?? (
                       <div
                         className={cn(
                           "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
+                          step.status === "skipped" && "opacity-50"
                         )}
                       />
                     )}
-                  </span>
-                  <span
-                    className={cn(
-                      "font-normal",
-                      step.status === "error"
-                        ? "text-red-500"
-                        : "text-gray-800 dark:text-gray-200",
-                    )}
-                  >
-                    {step.name}
-                  </span>
-                  {step.error && (
-                    <span className="ml-2 text-xs text-red-500">
-                      ({step.error})
-                    </span>
+                </span>
+                <span
+                  className={cn(
+                    "font-normal",
+                    step.status === "error"
+                      ? "text-red-500"
+                      : "text-gray-800 dark:text-gray-200",
                   )}
-                </li>
-              ))}
+                >
+                  {step.name}
+                </span>
+                {step.error && (
+                  <span className="ml-2 text-xs text-red-500">
+                    ({step.error})
+                  </span>
+                )}
+              </li>
+            ))}
           </ul>
         </div>
       )}

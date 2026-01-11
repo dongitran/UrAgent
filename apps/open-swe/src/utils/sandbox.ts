@@ -34,7 +34,7 @@ export async function ensureSkillsRepository(
       error?: string,
     ) => void;
   },
-): Promise<TargetRepository | undefined> {
+): Promise<{ skillsRepo: TargetRepository | undefined; cloned: boolean }> {
   const { skillsRepoFromState, emitStepEvent } = options || {};
   const configurable = config.configurable as unknown as {
     skillsRepository?: TargetRepository;
@@ -72,8 +72,6 @@ export async function ensureSkillsRepository(
       },
     };
 
-    emitStepEvent?.(baseSkillsCloneAction, "pending");
-
     try {
       const { githubInstallationToken } = isLocalMode(config)
         ? { githubInstallationToken: "" }
@@ -97,7 +95,7 @@ export async function ensureSkillsRepository(
         logger.info("SKILLS REPO: Already exists and valid, skipping clone", {
           targetDir: skillsRepoDir,
         });
-        return skillsRepo;
+        return { skillsRepo, cloned: false };
       }
 
       // If exists but invalid (e.g., partial clone), clean it up first
@@ -107,6 +105,9 @@ export async function ensureSkillsRepository(
         });
         await sandboxInstance.remove(skillsRepoDir);
       }
+
+      // Only emit event if we are actually going to clone
+      emitStepEvent?.(baseSkillsCloneAction, "pending");
 
       logger.warn("SKILLS REPO: About to clone", {
         url: skillsCloneUrl,
@@ -158,6 +159,7 @@ export async function ensureSkillsRepository(
         targetDir: skillsRepoDir,
         branch: skillsRepo.branch,
       });
+      return { skillsRepo, cloned: true };
     } catch (error) {
       logger.warn("SKILLS REPO: Clone FAILED after retries", {
         error: error instanceof Error ? error.message : String(error),
@@ -167,10 +169,11 @@ export async function ensureSkillsRepository(
         "skipped",
         `Failed to clone skills repo: ${error instanceof Error ? error.message : String(error)}. Proceeding without it.`,
       );
+      return { skillsRepo, cloned: false };
     }
   }
 
-  return skillsRepo;
+  return { skillsRepo, cloned: false };
 }
 
 // Singleton instance of Daytona (kept for backward compatibility)
@@ -483,10 +486,12 @@ export async function getSandboxWithErrorHandling(
       getNative: <T>() => sandbox as unknown as T,
     };
 
-    await ensureSkillsRepository(skillsInstance, targetRepository, config);
+    const skillsResult = await ensureSkillsRepository(skillsInstance, targetRepository, config);
 
     // Simple delay to ensure filesystem consistency after clone/link
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (skillsResult.cloned) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
 
     // Get codebase tree - this is Daytona-specific function so always use DAYTONA provider type
     const codebaseTree = await getCodebaseTree(
@@ -623,10 +628,12 @@ export async function getSandboxWithErrorHandling(
       getNative: <T>() => sandbox as unknown as T,
     };
 
-    await ensureSkillsRepository(skillsInstance, targetRepository, config);
+    const skillsResult = await ensureSkillsRepository(skillsInstance, targetRepository, config);
 
     // Simple delay to ensure filesystem consistency after clone/link
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (skillsResult.cloned) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
 
     // Get codebase tree - this is Daytona-specific function so always use DAYTONA provider type
     const codebaseTree = await getCodebaseTree(
@@ -688,10 +695,12 @@ export async function getSandboxInstanceWithErrorHandling(
     });
 
     // Ensure skills repo is available in local mode too!
-    await ensureSkillsRepository(localSandbox, targetRepository, config);
+    const skillsResult = await ensureSkillsRepository(localSandbox, targetRepository, config);
 
     // Simple delay to ensure filesystem consistency after clone/link
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (skillsResult.cloned) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
 
     return {
       sandboxInstance: localSandbox,
@@ -747,10 +756,12 @@ export async function getSandboxInstanceWithErrorHandling(
     }
 
     // --- ENSURE SKILLS REPOSITORY IS CLONED ---
-    await ensureSkillsRepository(sandboxInstance, targetRepository, config);
+    const skillsResult = await ensureSkillsRepository(sandboxInstance, targetRepository, config);
 
     // Simple delay to ensure filesystem consistency after clone/link
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (skillsResult.cloned) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
 
     // Get codebase tree - use sandboxInstance.providerType for correct path
     const codebaseTree = await getCodebaseTree(
@@ -884,10 +895,12 @@ export async function getSandboxInstanceWithErrorHandling(
     }
 
     // --- ENSURE SKILLS REPOSITORY IS CLONED ---
-    await ensureSkillsRepository(sandboxInstance, targetRepository, config);
+    const skillsResult = await ensureSkillsRepository(sandboxInstance, targetRepository, config);
 
     // Simple delay to ensure filesystem consistency after clone/link
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (skillsResult.cloned) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
 
     // Get codebase tree - use sandboxInstance.providerType for correct path
     const codebaseTree = await getCodebaseTree(

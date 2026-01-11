@@ -178,14 +178,29 @@ export function ActionsRenderer<
         return allCustomEvents;
       }
 
-      // Merge new events with existing ones, avoiding duplicates
-      const existingActionIds = new Set(prev.map((e) => e.actionId));
-      const newEvents = allCustomEvents.filter(
-        (e) => !existingActionIds.has(e.actionId),
-      );
+      // Merge new events with existing ones:
+      // - Events with matching actionId should UPDATE (not be filtered out)
+      // - This ensures 'success' events properly replace 'pending' events
+      const existingActionIds = new Map(prev.map((e, idx) => [e.actionId, idx]));
+      let hasUpdates = false;
+      const updatedPrev = [...prev];
+      const newEvents: CustomNodeEvent[] = [];
 
-      if (newEvents.length > 0) {
-        return [...prev, ...newEvents];
+      for (const newEvent of allCustomEvents) {
+        const existingIdx = existingActionIds.get(newEvent.actionId);
+        if (existingIdx !== undefined) {
+          // Only update if status actually changed
+          if (updatedPrev[existingIdx].data.status !== newEvent.data.status) {
+            updatedPrev[existingIdx] = newEvent;
+            hasUpdates = true;
+          }
+        } else {
+          newEvents.push(newEvent);
+        }
+      }
+
+      if (newEvents.length > 0 || hasUpdates) {
+        return [...updatedPrev, ...newEvents];
       }
 
       return prev;
