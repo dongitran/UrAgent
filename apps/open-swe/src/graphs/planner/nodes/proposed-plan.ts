@@ -189,6 +189,22 @@ export async function interruptProposedPlan(
   config: GraphConfig,
 ): Promise<Command> {
   if (await isRunCancelled(config)) {
+    // Run was cancelled, delete sandbox and end the process
+    // This releases the concurrency slot and cleans up resources
+    if (state.sandboxSessionId) {
+      const { deleteSandbox } = await import("../../../utils/sandbox.js");
+      try {
+        await deleteSandbox(state.sandboxSessionId);
+        logger.info("Sandbox deleted after run was cancelled", {
+          sandboxSessionId: state.sandboxSessionId,
+        });
+      } catch (deleteError) {
+        logger.warn("Failed to delete sandbox after run cancellation", {
+          sandboxSessionId: state.sandboxSessionId,
+          error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+        });
+      }
+    }
     return new Command({
       goto: END,
     });
@@ -344,7 +360,22 @@ export async function interruptProposedPlan(
   }
 
   if (humanResponse.type === "ignore") {
-    // Plan was ignored, end the process.
+    // Plan was ignored/rejected, delete sandbox and end the process
+    // This releases the concurrency slot and cleans up resources
+    if (state.sandboxSessionId) {
+      const { deleteSandbox } = await import("../../../utils/sandbox.js");
+      try {
+        await deleteSandbox(state.sandboxSessionId);
+        logger.info("Sandbox deleted after plan was rejected", {
+          sandboxSessionId: state.sandboxSessionId,
+        });
+      } catch (deleteError) {
+        logger.warn("Failed to delete sandbox after plan rejection", {
+          sandboxSessionId: state.sandboxSessionId,
+          error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+        });
+      }
+    }
     return new Command({
       goto: END,
     });

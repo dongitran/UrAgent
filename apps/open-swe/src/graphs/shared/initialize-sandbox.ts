@@ -620,6 +620,8 @@ export async function initializeSandbox(
         : cloneRepoRes),
     };
     logger.error("Cloning repository failed", errorFields);
+    // Release the concurrency slot since we're failing after sandbox was created
+    sandboxConcurrencyManager.releaseSlot();
     throw new Error("Failed to clone repository.");
   }
   const newBranchName =
