@@ -6,10 +6,12 @@
 export const SKILLS_REPO_PROMPT_TEMPLATE = `
     <skills_repository>
         <location>.skills/{SKILLS_SUBFOLDER}</location>
+        <priority>CRITICAL - Must read BEFORE any other context gathering</priority>
         <files_listed_in>codebase_tree (no need to run 'ls')</files_listed_in>
         <instructions>
-            Skills folder contains project-specific documentation and coding guidelines.
+            Skills folder contains project-specific documentation and coding guidelines that you MUST follow.
             Files are already listed in codebase_tree under .skills/ - look for "_:" arrays containing filenames.
+            Scan the file names and read files RELEVANT to the current task.
             To read a skill file: view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"
         </instructions>
     </skills_repository>`;

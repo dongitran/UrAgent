@@ -72,9 +72,11 @@ function getFallbackTreeCommand(skipFiles: boolean): string {
   }
 
   if (skipFiles) {
+    // NOTE: For .skills, always use -type f (files) instead of -type d (directories)
+    // This ensures .skills folder shows files even when skipFiles=true
     return `{ 
   if [ -d .skills ]; then 
-    find .skills -maxdepth 6 -type d 2>/dev/null; 
+    find .skills -maxdepth 6 -type f 2>/dev/null; 
   fi; 
   git ls-files 2>/dev/null | grep '/' | sed 's|/[^/]*$||' | grep -v '^.skills/'${excludeGrepChain}; 
   if [ ! -d .git ]; then 
@@ -159,23 +161,36 @@ function transformToJsonNested(flatPaths: string, skipFiles: boolean = false): s
   }
 
   // Convert to no-quote format (avoids \" escaping when embedded in JSON)
-  return toNoQuoteFormat(root);
+  // Pass isRoot=true to sort .skills to top of tree
+  return toNoQuoteFormat(root, true);
 }
 
 /**
  * Convert object to no-quote format string
  * Example: {key:{subkey:{_:[file1.ts,file2.ts]}}}
+ * @param isRoot - If true, sort .skills to appear first in the output
  */
-function toNoQuoteFormat(obj: Record<string, any>): string {
+function toNoQuoteFormat(obj: Record<string, any>, isRoot: boolean = false): string {
+  let entries = Object.entries(obj);
+
+  // At root level, sort to ensure .skills appears first
+  if (isRoot) {
+    entries.sort(([a], [b]) => {
+      if (a === '.skills') return -1;
+      if (b === '.skills') return 1;
+      return 0; // Keep original order for other keys
+    });
+  }
+
   const items: string[] = [];
 
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of entries) {
     if (Array.isArray(value)) {
       // Array of files: _:[file1.ts,file2.ts]
       items.push(`${key}:[${value.join(',')}]`);
     } else if (typeof value === 'object' && value !== null) {
-      // Nested directory
-      items.push(`${key}:${toNoQuoteFormat(value)}`);
+      // Nested directory (isRoot=false for nested)
+      items.push(`${key}:${toNoQuoteFormat(value, false)}`);
     } else {
       items.push(`${key}:${value}`);
     }

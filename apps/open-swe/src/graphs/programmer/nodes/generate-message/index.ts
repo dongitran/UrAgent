@@ -37,7 +37,7 @@ import {
   STATIC_SYSTEM_INSTRUCTIONS,
   CUSTOM_FRAMEWORK_PROMPT,
 } from "./prompt.js";
-import { getSkillsRepoPrompt } from "../../../../utils/skills-prompt.js";
+import { getSkillsRepoPrompt, getSkillsFirstStep } from "../../../../utils/skills-prompt.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
@@ -136,6 +136,7 @@ const formatStaticInstructionsPrompt = (
   )
     .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository, undefined, state.sandboxProviderType))
     .replaceAll("{SKILLS_REPO_PROMPT}", getSkillsRepoPrompt())
+    .replaceAll("{SKILLS_REPO_FIRST_STEP}", getSkillsFirstStep())
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replace(
       "{CUSTOM_FRAMEWORK_PROMPT}",

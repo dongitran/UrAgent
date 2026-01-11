@@ -82,6 +82,7 @@ class SandboxConcurrencyManager {
      */
     async acquireSlot(options?: {
         onWaiting?: () => void;
+        onHeartbeat?: () => void;
         checkCancelled?: () => Promise<boolean>;
     }): Promise<void> {
         // If concurrency limiting is disabled, return immediately
@@ -121,6 +122,9 @@ class SandboxConcurrencyManager {
 
                 // Wait before checking again
                 await new Promise((resolve) => setTimeout(resolve, this.checkIntervalMs));
+
+                // Emit heartbeat to keep frontend stream alive during long waits
+                options?.onHeartbeat?.();
 
                 logger.debug("Checking for available sandbox slot", {
                     active: this.activeSandboxCount,

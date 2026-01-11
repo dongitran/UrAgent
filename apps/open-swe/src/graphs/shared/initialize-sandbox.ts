@@ -507,6 +507,23 @@ export async function initializeSandbox(
             "pending",
           );
         },
+        onHeartbeat: () => {
+          // Emit periodic heartbeat to keep frontend stream alive during long waits
+          emitStepEvent(
+            {
+              ...baseCreateSandboxAction,
+              action: "Creating sandbox (waiting for slot...)",
+              data: {
+                ...baseCreateSandboxAction.data,
+                waitingForSlot: true,
+                active: sandboxConcurrencyManager.getActiveCount(),
+                max: sandboxConcurrencyManager.getMaxConcurrent(),
+                heartbeat: Date.now(),
+              },
+            },
+            "pending",
+          );
+        },
         checkCancelled: async () => await isRunCancelled(config),
       });
       // After slot is acquired, update status to show we're now creating
