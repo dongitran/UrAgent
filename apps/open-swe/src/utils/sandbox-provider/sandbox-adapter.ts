@@ -21,6 +21,7 @@ import {
 } from "./types.js";
 import { getSandboxProvider } from "./index.js";
 import { ensureSkillsRepository } from "../sandbox.js";
+import { sandboxConcurrencyManager } from "../sandbox-concurrency.js";
 
 const logger = createLogger(LogLevel.DEBUG, "SandboxAdapter");
 
@@ -114,7 +115,14 @@ export async function deleteSandbox(sandboxId: string): Promise<boolean> {
     sandboxId,
   });
 
-  return provider.delete(sandboxId);
+  const result = await provider.delete(sandboxId);
+
+  // Release concurrency slot on successful deletion
+  if (result) {
+    sandboxConcurrencyManager.releaseSlot();
+  }
+
+  return result;
 }
 
 /**

@@ -486,6 +486,8 @@ export async function initializeSandbox(
       "error",
       "Failed to create sandbox environment. Please try again later.",
     );
+    // Release the concurrency slot since sandbox creation failed
+    sandboxConcurrencyManager.releaseSlot();
     throw new Error("Failed to create sandbox environment.");
   }
 
