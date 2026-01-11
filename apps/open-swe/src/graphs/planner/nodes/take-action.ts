@@ -45,6 +45,42 @@ import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
+/**
+ * Check if an error is a "Run cancelled" error thrown from sandbox operations
+ */
+function isRunCancelledError(error: unknown): boolean {
+  return error instanceof Error && error.message === "Run cancelled";
+}
+
+/**
+ * Handle Run cancelled by deleting sandbox and returning END command
+ */
+async function handleRunCancelled(
+  sandboxSessionId: string | undefined,
+  source: string,
+): Promise<Command> {
+  logger.warn(`Stopping planner (${source}) because run was cancelled by user (caught error)`);
+  if (sandboxSessionId) {
+    const { deleteSandbox } = await import("../../../utils/sandbox.js");
+    try {
+      await deleteSandbox(sandboxSessionId);
+      logger.info("Sandbox deleted after Run cancelled error", {
+        sandboxSessionId,
+        source,
+      });
+    } catch (deleteError) {
+      logger.warn("Failed to delete sandbox after Run cancelled error", {
+        sandboxSessionId,
+        error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+      });
+    }
+  }
+  return new Command({
+    goto: END,
+    update: {},
+  });
+}
+
 export async function takeActions(
   state: PlannerGraphState,
   config: GraphConfig,
@@ -236,7 +272,22 @@ export async function takeActions(
     return { toolMessage, imageMessage, stateUpdates };
   });
 
-  const toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
+  let toolCallResultsWithUpdates;
+  try {
+    toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
+  } catch (error) {
+    // Log the error for debugging
+    logger.warn("Error during tool execution", {
+      error: error instanceof Error ? error.message : String(error),
+      sandboxSessionId: state.sandboxSessionId,
+      isRunCancelled: isRunCancelledError(error),
+    });
+    // Handle "Run cancelled" error thrown from inside tool execution (e.g., daytona-provider.ts)
+    if (isRunCancelledError(error)) {
+      return await handleRunCancelled(state.sandboxSessionId, "takeActions-toolExecution");
+    }
+    throw error;
+  }
   let toolCallResults = toolCallResultsWithUpdates.map(
     (item) => item.toolMessage,
   );
@@ -264,7 +315,24 @@ export async function takeActions(
     const repoPath = isLocalMode(config)
       ? getLocalWorkingDirectory()
       : getRepoAbsolutePath(state.targetRepository, undefined, sandboxInstance.providerType);
-    const changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
+
+    let changedFiles: string[] = [];
+    try {
+      changedFiles = await getChangedFilesStatusWithInstance(repoPath, sandboxInstance, config);
+    } catch (error) {
+      // Log the error for debugging
+      logger.warn("Error during git status check", {
+        error: error instanceof Error ? error.message : String(error),
+        sandboxSessionId: state.sandboxSessionId,
+        isRunCancelled: isRunCancelledError(error),
+      });
+      // Handle "Run cancelled" error thrown from git status check
+      if (isRunCancelledError(error)) {
+        return await handleRunCancelled(state.sandboxSessionId, "takeActions-changedFilesCheck");
+      }
+      throw error;
+    }
+
     if (changedFiles?.length > 0) {
       logger.warn(
         "Changes found in the codebase after taking action. Reverting.",
@@ -272,7 +340,20 @@ export async function takeActions(
           changedFiles,
         },
       );
-      await stashAndClearChanges(repoPath, null);
+      try {
+        await stashAndClearChanges(repoPath, null);
+      } catch (error) {
+        // Log the error for debugging
+        logger.warn("Error during stash changes", {
+          error: error instanceof Error ? error.message : String(error),
+          sandboxSessionId: state.sandboxSessionId,
+          isRunCancelled: isRunCancelledError(error),
+        });
+        if (isRunCancelledError(error)) {
+          return await handleRunCancelled(state.sandboxSessionId, "takeActions-stashChanges");
+        }
+        throw error;
+      }
 
       // Rewrite the tool call contents to include a changed files warning.
       toolCallResults = toolCallResults.map(
