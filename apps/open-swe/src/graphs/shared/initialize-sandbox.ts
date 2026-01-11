@@ -371,6 +371,9 @@ export async function initializeSandbox(
         try {
           const provider = getProvider();
           await provider.delete(sandboxSessionId);
+          // Release the slot that was acquired when this sandbox was originally created
+          // (e.g., in the Planner phase before transitioning to Programmer)
+          sandboxConcurrencyManager.releaseSlot();
           logger.info("Deleted old sandbox after resume failure", {
             sandboxSessionId,
             error: resumeError instanceof Error ? resumeError.message : String(resumeError),
