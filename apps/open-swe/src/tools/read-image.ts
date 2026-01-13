@@ -138,11 +138,17 @@ export function createReadImageTool(
                         contextSavings: "~99% reduction",
                     });
 
-                    return {
+                    // Serialize as JSON so processToolCallContent can parse it
+                    const cacheHitResult: ReadImageResult = {
                         result: formatCachedImageDescription(cachedDescription),
                         status: "success",
                         isFirstRead: false,
                         imagePath: fullPath,
+                    };
+
+                    return {
+                        result: JSON.stringify(cacheHitResult),
+                        status: "success",
                     };
                 }
 
@@ -203,13 +209,19 @@ export function createReadImageTool(
                     });
                 }
 
-                // Return with metadata for caching
-                return {
+                // Serialize as JSON so processToolCallContent can parse it
+                // The full ReadImageResult with metadata is stored in .result field
+                const firstReadResult: ReadImageResult = {
                     result: dataUrl,
                     status: "success",
                     isFirstRead: true,
                     imagePath: fullPath,
                     base64DataUrl: dataUrl,
+                };
+
+                return {
+                    result: JSON.stringify(firstReadResult),
+                    status: "success",
                 };
             } catch (error) {
                 const errorMessage =

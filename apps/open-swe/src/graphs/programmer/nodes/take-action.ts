@@ -387,34 +387,53 @@ export async function takeAction(
     .map((item) => item.pendingImageDescription)
     .filter((pd): pd is { imagePath: string; base64DataUrl: string } => pd !== undefined);
 
-  // Generate and cache image descriptions asynchronously
-  // This runs in the background and updates will be available for subsequent reads
+  // Generate image descriptions synchronously and add to state updates
+  // This ensures the cache is properly persisted for subsequent reads
+  let imageDescriptionCacheUpdate: Record<string, any> = {};
   if (pendingImageDescriptions.length > 0) {
-    logger.info("Scheduling async image description generation", {
+    logger.info("Generating image descriptions for caching", {
       count: pendingImageDescriptions.length,
       paths: pendingImageDescriptions.map(pd => pd.imagePath),
     });
 
-    // Fire-and-forget async generation - don't block the response
-    for (const pd of pendingImageDescriptions) {
-      generateAndCacheImageDescription(
-        pd.imagePath,
-        pd.base64DataUrl,
-        config,
-        state.imageDescriptionCache ?? {},
-      ).then((_cache) => {
-        // Note: This runs async, so we can't directly update state here
-        // The cache will be persisted when the next image read happens
-        logger.info("Image description generated and ready for caching", {
+    // Generate all descriptions in parallel but await completion
+    const descriptionPromises = pendingImageDescriptions.map(async (pd) => {
+      try {
+        const cache = await generateAndCacheImageDescription(
+          pd.imagePath,
+          pd.base64DataUrl,
+          config,
+          state.imageDescriptionCache ?? {},
+        );
+        logger.info("Image description generated and cached", {
           imagePath: pd.imagePath,
         });
-      }).catch(err => {
+        return cache;
+      } catch (err) {
         logger.error("Failed to generate image description", {
           imagePath: pd.imagePath,
           error: err instanceof Error ? err.message : String(err),
         });
-      });
+        return null;
+      }
+    });
+
+    const results = await Promise.all(descriptionPromises);
+
+    // Merge all successfully generated descriptions
+    for (const cache of results) {
+      if (cache) {
+        imageDescriptionCacheUpdate = { ...imageDescriptionCacheUpdate, ...cache };
+      }
     }
+  }
+
+  // Merge imageDescriptionCache into allStateUpdates
+  if (Object.keys(imageDescriptionCacheUpdate).length > 0) {
+    (allStateUpdates as any).imageDescriptionCache = {
+      ...(state.imageDescriptionCache ?? {}),
+      ...imageDescriptionCacheUpdate,
+    };
   }
 
   let wereDependenciesInstalled: boolean | null = null;
