@@ -417,6 +417,13 @@ export async function takeReviewerActions(
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
     }),
+    // Merge imageDescriptionCache updates for hybrid image analysis
+    ...(Object.keys(imageDescriptionCacheUpdate).length > 0 && {
+      imageDescriptionCache: {
+        ...((state as any).imageDescriptionCache ?? {}),
+        ...imageDescriptionCacheUpdate,
+      },
+    }),
   };
 
   const maxReviewActions = config.configurable?.maxReviewActions ?? 30;
