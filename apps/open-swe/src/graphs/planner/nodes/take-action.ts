@@ -39,7 +39,7 @@ import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command, END } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
-import { processToolCallContent } from "../../../utils/tool-output-processing.js";
+import { processToolCallContent, generateAndCacheImageDescription } from "../../../utils/tool-output-processing.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { isRunCancelled } from "../../../utils/run-cancellation.js";
 
@@ -225,7 +225,7 @@ export async function takeActions(
       }
     }
 
-    const { content, stateUpdates } = await processToolCallContent(
+    const { content, stateUpdates, pendingImageDescription } = await processToolCallContent(
       toolCall,
       result,
       {
@@ -251,30 +251,47 @@ export async function takeActions(
     // The image must be re-introduced as new input in a HumanMessage
     // For CACHED READS (description instead of base64), we skip the image message
     let imageMessage: HumanMessage | undefined;
-    if (
-      toolCall.name === "read_image" &&
-      toolCallStatus === "success" &&
-      result.startsWith("data:image/")  // Only for first-read (base64), not cached descriptions
-    ) {
-      logger.info("Creating HumanMessage with image content for read_image result in planner", {
-        imageDataUrlLength: result.length,
-      });
-      imageMessage = new HumanMessage({
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: result },
-          },
-          {
-            type: "text",
-            text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning. A text description will be cached for subsequent references.",
-          },
-        ],
-      });
+    if (toolCall.name === "read_image" && toolCallStatus === "success") {
+      if (pendingImageDescription) {
+        // FIRST READ: Create HumanMessage with actual image for visual analysis
+        logger.info("Creating HumanMessage with image content for first read_image result in planner", {
+          imagePath: pendingImageDescription.imagePath,
+          base64Length: pendingImageDescription.base64DataUrl.length,
+        });
+        imageMessage = new HumanMessage({
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: pendingImageDescription.base64DataUrl },
+            },
+            {
+              type: "text",
+              text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning. A text description will be cached for subsequent references.",
+            },
+          ],
+        });
+      } else if (content.startsWith("data:image/")) {
+        // FALLBACK: Raw base64 result (backward compatibility)
+        logger.info("Creating HumanMessage with image content for read_image result (fallback)", {
+          imageDataUrlLength: content.length,
+        });
+        imageMessage = new HumanMessage({
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: content },
+            },
+            {
+              type: "text",
+              text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning.",
+            },
+          ],
+        });
+      }
     }
     // CACHED READ: No image message needed - the text description is in the tool message content
 
-    return { toolMessage, imageMessage, stateUpdates };
+    return { toolMessage, imageMessage, stateUpdates, pendingImageDescription };
   });
 
   let toolCallResultsWithUpdates;
@@ -315,6 +332,62 @@ export async function takeActions(
       },
       { documentCache: {} } as { documentCache: Record<string, string> },
     );
+
+  // =======================================================================
+  // HYBRID IMAGE ANALYSIS: Generate descriptions for first-time image reads
+  // =======================================================================
+  const pendingImageDescriptions = toolCallResultsWithUpdates
+    .map((item) => item.pendingImageDescription)
+    .filter((pd): pd is { imagePath: string; base64DataUrl: string } => pd !== undefined);
+
+  // Generate image descriptions synchronously and add to state updates
+  // This ensures the cache is properly persisted for subsequent reads
+  let imageDescriptionCacheUpdate: Record<string, any> = {};
+  if (pendingImageDescriptions.length > 0) {
+    logger.info("Generating image descriptions for caching in planner", {
+      count: pendingImageDescriptions.length,
+      paths: pendingImageDescriptions.map(pd => pd.imagePath),
+    });
+
+    // Generate all descriptions in parallel but await completion
+    const descriptionPromises = pendingImageDescriptions.map(async (pd) => {
+      try {
+        const cache = await generateAndCacheImageDescription(
+          pd.imagePath,
+          pd.base64DataUrl,
+          config,
+          (state as any).imageDescriptionCache ?? {},
+        );
+        logger.info("Image description generated and cached", {
+          imagePath: pd.imagePath,
+        });
+        return cache;
+      } catch (err) {
+        logger.error("Failed to generate image description", {
+          imagePath: pd.imagePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    });
+
+    const results = await Promise.all(descriptionPromises);
+
+    // Merge all successfully generated descriptions
+    for (const cache of results) {
+      if (cache) {
+        imageDescriptionCacheUpdate = { ...imageDescriptionCacheUpdate, ...cache };
+      }
+    }
+  }
+
+  // Merge imageDescriptionCache into allStateUpdates
+  if (Object.keys(imageDescriptionCacheUpdate).length > 0) {
+    (allStateUpdates as any).imageDescriptionCache = {
+      ...((state as any).imageDescriptionCache ?? {}),
+      ...imageDescriptionCacheUpdate,
+    };
+  }
 
   if (!isLocalMode(config)) {
     const repoPath = isLocalMode(config)

@@ -19,31 +19,9 @@ import {
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
-import { truncateOutput } from "../../../utils/truncate-outputs.js";
+import { processToolCallContent, generateAndCacheImageDescription } from "../../../utils/tool-output-processing.js";
 import { createGrepTool } from "../../../tools/grep.js";
 
-// Tools that read file content and need higher context limits
-const FILE_READ_TOOL_NAMES = ["view", "str_replace_based_edit_tool"];
-
-/**
- * Get appropriate truncation options based on tool type
- */
-function getTruncationOptions(toolName: string, toolArgs?: Record<string, any>): { numStartCharacters: number; numEndCharacters: number } | undefined {
-  // File read tools need higher limits to allow AI to read full file content
-  if (FILE_READ_TOOL_NAMES.includes(toolName)) {
-    const isViewCommand = toolName === "view" ||
-      (toolName === "str_replace_based_edit_tool" && toolArgs?.command === "view");
-
-    if (isViewCommand) {
-      return {
-        numStartCharacters: 20000,
-        numEndCharacters: 20000,
-      };
-    }
-  }
-  // Return undefined to use default truncation
-  return undefined;
-}
 import {
   checkoutBranchAndCommitWithInstance,
   getChangedFilesStatusWithInstance,
@@ -129,7 +107,7 @@ export async function takeReviewerActions(
     );
 
   // Helper function to execute a single tool call
-  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<{ toolMessage: ToolMessage; imageMessage?: HumanMessage }> => {
+  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<{ toolMessage: ToolMessage; imageMessage?: HumanMessage; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }> => {
     const tool = toolsMap[toolCall.name];
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
@@ -193,10 +171,16 @@ export async function takeReviewerActions(
       }
     }
 
-    // For read_image, we must NOT truncate the base64 data as it would corrupt the image
-    const toolMessageContent = toolCall.name === "read_image"
-      ? result
-      : truncateOutput(result, getTruncationOptions(toolCall.name, toolCall.args));
+    // Process tool output with hybrid image analysis support
+    const { content: toolMessageContent, pendingImageDescription } = await processToolCallContent(
+      toolCall,
+      result,
+      {
+        higherContextLimitToolNames: [], // Reviewer doesn't use MCP tools
+        state: { documentCache: {}, imageDescriptionCache: (state as any).imageDescriptionCache ?? {} },
+        config,
+      },
+    );
 
     const toolMessage = new ToolMessage({
       id: uuidv4(),
@@ -214,30 +198,47 @@ export async function takeReviewerActions(
     // The image must be re-introduced as new input in a HumanMessage
     // For CACHED READS (description instead of base64), we skip the image message
     let imageMessage: HumanMessage | undefined;
-    if (
-      toolCall.name === "read_image" &&
-      toolCallStatus === "success" &&
-      result.startsWith("data:image/")  // Only for first-read (base64), not cached descriptions
-    ) {
-      logger.info("Creating HumanMessage with image content for read_image result in reviewer", {
-        imageDataUrlLength: result.length,
-      });
-      imageMessage = new HumanMessage({
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: result },
-          },
-          {
-            type: "text",
-            text: "Above is the image you requested via read_image tool. Use it as visual reference for your review. A text description will be cached for subsequent references.",
-          },
-        ],
-      });
+    if (toolCall.name === "read_image" && toolCallStatus === "success") {
+      if (pendingImageDescription) {
+        // FIRST READ: Create HumanMessage with actual image for visual analysis
+        logger.info("Creating HumanMessage with image content for first read_image result in reviewer", {
+          imagePath: pendingImageDescription.imagePath,
+          base64Length: pendingImageDescription.base64DataUrl.length,
+        });
+        imageMessage = new HumanMessage({
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: pendingImageDescription.base64DataUrl },
+            },
+            {
+              type: "text",
+              text: "Above is the image you requested via read_image tool. Use it as visual reference for your review. A text description will be cached for subsequent references.",
+            },
+          ],
+        });
+      } else if (toolMessageContent.startsWith("data:image/")) {
+        // FALLBACK: Raw base64 result (backward compatibility)
+        logger.info("Creating HumanMessage with image content for read_image result (fallback)", {
+          imageDataUrlLength: toolMessageContent.length,
+        });
+        imageMessage = new HumanMessage({
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: toolMessageContent },
+            },
+            {
+              type: "text",
+              text: "Above is the image you requested via read_image tool. Use it as visual reference for your review.",
+            },
+          ],
+        });
+      }
     }
     // CACHED READ: No image message needed - the text description is in the tool message content
 
-    return { toolMessage, imageMessage };
+    return { toolMessage, imageMessage, pendingImageDescription };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -255,7 +256,7 @@ export async function takeReviewerActions(
   });
 
   // Execute sequential tools one at a time (shell commands that may consume lots of memory)
-  const sequentialResults: { toolMessage: ToolMessage; imageMessage?: HumanMessage }[] = [];
+  const sequentialResults: { toolMessage: ToolMessage; imageMessage?: HumanMessage; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }[] = [];
   for (const toolCall of sequentialCalls) {
     if (await isRunCancelled(config)) {
       break;
@@ -268,7 +269,7 @@ export async function takeReviewerActions(
   const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
 
   // Combine results in original order
-  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage }[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
@@ -284,6 +285,50 @@ export async function takeReviewerActions(
   const imageMessages = toolCallResultsWithUpdates
     .map((item) => item.imageMessage)
     .filter((msg): msg is HumanMessage => msg !== undefined);
+
+  // =======================================================================
+  // HYBRID IMAGE ANALYSIS: Generate descriptions for first-time image reads
+  // =======================================================================
+  const pendingImageDescriptions = toolCallResultsWithUpdates
+    .map((item) => item.pendingImageDescription)
+    .filter((pd): pd is { imagePath: string; base64DataUrl: string } => pd !== undefined);
+
+  // Generate image descriptions synchronously and add to state updates
+  let imageDescriptionCacheUpdate: Record<string, any> = {};
+  if (pendingImageDescriptions.length > 0) {
+    logger.info("Generating image descriptions for caching in reviewer", {
+      count: pendingImageDescriptions.length,
+      paths: pendingImageDescriptions.map(pd => pd.imagePath),
+    });
+
+    const descriptionPromises = pendingImageDescriptions.map(async (pd) => {
+      try {
+        const cache = await generateAndCacheImageDescription(
+          pd.imagePath,
+          pd.base64DataUrl,
+          config,
+          (state as any).imageDescriptionCache ?? {},
+        );
+        logger.info("Image description generated and cached", {
+          imagePath: pd.imagePath,
+        });
+        return cache;
+      } catch (err) {
+        logger.error("Failed to generate image description", {
+          imagePath: pd.imagePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    });
+
+    const results = await Promise.all(descriptionPromises);
+    for (const cache of results) {
+      if (cache) {
+        imageDescriptionCacheUpdate = { ...imageDescriptionCacheUpdate, ...cache };
+      }
+    }
+  }
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
