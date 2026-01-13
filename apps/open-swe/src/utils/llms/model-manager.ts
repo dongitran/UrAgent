@@ -88,7 +88,7 @@ export const DEFAULT_MODEL_MANAGER_CONFIG: ModelManagerConfig = {
 };
 
 const MAX_RETRIES = 3;
-const THINKING_BUDGET_TOKENS = 5000;
+const THINKING_BUDGET_TOKENS = 10000;
 
 const providerToApiKey = (
   providerName: string,
@@ -209,13 +209,13 @@ export class ModelManager {
       // Determine if this is a Gemini 3 model that supports thinkingConfig
       const isGemini3 = modelName.includes("gemini-3");
       const isGemini25 = modelName.includes("gemini-2.5") || modelName.includes("gemini-2-5");
-      
+
       // Build thinkingConfig for Gemini 3 and 2.5 models
       // - includeThoughts: true - to see reasoning/thought summaries in response
       // - thinkingLevel: for Gemini 3 models (minimal, low, medium, high)
       // - thinkingBudget: for Gemini 2.5 models (number of tokens)
       let thinkingConfig: ThinkingConfig | undefined;
-      
+
       if (isGemini3) {
         // Gemini 3 uses thinkingLevel (default is "high" for dynamic thinking)
         // Set includeThoughts: true to see thought summaries
@@ -273,27 +273,38 @@ export class ModelManager {
       ...(provider === "openai" && process.env.OPENAI_BASE_URL
         ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } }
         : {}),
+      // Support custom base URL for Anthropic (proxy gateway)
+      ...(provider === "anthropic" && process.env.ANTHROPIC_BASE_URL
+        ? { clientOptions: { baseURL: process.env.ANTHROPIC_BASE_URL } }
+        : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {
-            thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
-            maxTokens: thinkingMaxTokens,
-          }
+          thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
+          maxTokens: thinkingMaxTokens,
+        }
         : modelName.includes("gpt-5")
           ? {
-              max_completion_tokens: finalMaxTokens,
-              temperature: 1,
-            }
+            max_completion_tokens: finalMaxTokens,
+            temperature: 1,
+          }
           : {
-              maxTokens: finalMaxTokens,
-              temperature: thinkingModel ? undefined : temperature,
-            }),
+            maxTokens: finalMaxTokens,
+            temperature: thinkingModel ? undefined : temperature,
+          }),
     };
 
     logger.debug("Initializing model", {
       provider,
       modelName,
-      hasCustomBaseUrl: provider === "openai" && !!process.env.OPENAI_BASE_URL,
-      baseUrl: provider === "openai" ? process.env.OPENAI_BASE_URL : undefined,
+      hasCustomBaseUrl:
+        (provider === "openai" && !!process.env.OPENAI_BASE_URL) ||
+        (provider === "anthropic" && !!process.env.ANTHROPIC_BASE_URL),
+      baseUrl:
+        provider === "openai"
+          ? process.env.OPENAI_BASE_URL
+          : provider === "anthropic"
+            ? process.env.ANTHROPIC_BASE_URL
+            : undefined,
     });
 
     return await initChatModel(modelName, modelOptions);
@@ -321,20 +332,20 @@ export class ModelManager {
           modelName,
           ...(modelName.includes("gpt-5")
             ? {
-                max_completion_tokens:
-                  defaultConfig.maxTokens ?? baseConfig.maxTokens,
-                temperature: 1,
-              }
+              max_completion_tokens:
+                defaultConfig.maxTokens ?? baseConfig.maxTokens,
+              temperature: 1,
+            }
             : {
-                maxTokens: defaultConfig.maxTokens ?? baseConfig.maxTokens,
-                temperature:
-                  defaultConfig.temperature ?? baseConfig.temperature,
-              }),
+              maxTokens: defaultConfig.maxTokens ?? baseConfig.maxTokens,
+              temperature:
+                defaultConfig.temperature ?? baseConfig.temperature,
+            }),
           ...(isThinkingModel
             ? {
-                thinkingModel: true,
-                thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
-              }
+              thinkingModel: true,
+              thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
+            }
             : {}),
         };
         configs.push(selectedModelConfig);
@@ -358,20 +369,20 @@ export class ModelManager {
           ...fallbackModel,
           ...(fallbackModel.modelName.includes("gpt-5")
             ? {
-                max_completion_tokens: baseConfig.maxTokens,
-                temperature: 1,
-              }
+              max_completion_tokens: baseConfig.maxTokens,
+              temperature: 1,
+            }
             : {
-                maxTokens: baseConfig.maxTokens,
-                temperature: isThinkingModel
-                  ? undefined
-                  : baseConfig.temperature,
-              }),
+              maxTokens: baseConfig.maxTokens,
+              temperature: isThinkingModel
+                ? undefined
+                : baseConfig.temperature,
+            }),
           ...(isThinkingModel
             ? {
-                thinkingModel: true,
-                thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
-              }
+              thinkingModel: true,
+              thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
+            }
             : {}),
         };
         configs.push(fallbackConfig);
@@ -426,7 +437,7 @@ export class ModelManager {
           config.configurable?.[`${task}Temperature`] ??
           this.getDefaultTemperature(
             config.configurable?.[`${task}ModelName`] ??
-              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
           ),
       },
       [LLMTask.PROGRAMMER]: {
@@ -437,7 +448,7 @@ export class ModelManager {
           config.configurable?.[`${task}Temperature`] ??
           this.getDefaultTemperature(
             config.configurable?.[`${task}ModelName`] ??
-              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
           ),
       },
       [LLMTask.REVIEWER]: {
@@ -448,7 +459,7 @@ export class ModelManager {
           config.configurable?.[`${task}Temperature`] ??
           this.getDefaultTemperature(
             config.configurable?.[`${task}ModelName`] ??
-              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
           ),
       },
       [LLMTask.ROUTER]: {
@@ -459,7 +470,7 @@ export class ModelManager {
           config.configurable?.[`${task}Temperature`] ??
           this.getDefaultTemperature(
             config.configurable?.[`${task}ModelName`] ??
-              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
           ),
       },
       [LLMTask.SUMMARIZER]: {
@@ -470,7 +481,7 @@ export class ModelManager {
           config.configurable?.[`${task}Temperature`] ??
           this.getDefaultTemperature(
             config.configurable?.[`${task}ModelName`] ??
-              TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
+            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
           ),
       },
     };
@@ -489,6 +500,10 @@ export class ModelManager {
     if (modelProvider === "openai" && modelName.startsWith("o")) {
       thinkingModel = true;
     }
+    // Detect Anthropic models with -thinking suffix (e.g., claude-opus-4-5-thinking)
+    if (modelProvider === "anthropic" && modelName.endsWith("-thinking")) {
+      thinkingModel = true;
+    }
 
     const thinkingBudgetTokens = THINKING_BUDGET_TOKENS;
 
@@ -497,13 +512,13 @@ export class ModelManager {
       provider: modelProvider as Provider,
       ...(modelName.includes("gpt-5")
         ? {
-            max_completion_tokens: config.configurable?.maxTokens ?? 10_000,
-            temperature: 1,
-          }
+          max_completion_tokens: config.configurable?.maxTokens ?? 10_000,
+          temperature: 1,
+        }
         : {
-            maxTokens: config.configurable?.maxTokens ?? 10_000,
-            temperature: taskConfig.temperature,
-          }),
+          maxTokens: config.configurable?.maxTokens ?? 10_000,
+          temperature: taskConfig.temperature,
+        }),
       thinkingModel,
       thinkingBudgetTokens,
     };
