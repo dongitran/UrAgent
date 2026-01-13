@@ -223,6 +223,19 @@ ${CORE_BEHAVIOR_PROMPT}
         {DEV_SERVER_PROMPT}
     </tool_usage>
 
+    <error_recovery>
+    When a tool call fails with "Invalid arguments" or "Missing keys" error:
+    1. **READ** the expected schema in the error message carefully
+    2. **IDENTIFY** which parameter name you used incorrectly  
+    3. **CORRECT** by using the exact parameter names from the schema
+    4. **DO NOT** repeat the same failed call - fix it first
+
+    Common mistakes to avoid:
+    - grep tool: Use "query" NOT "pattern", there is no "path" parameter
+    - view tool: Use "path" for the file path
+    - str_replace_based_edit_tool: Use "path" for the file path
+    </error_recovery>
+
     ${TOOL_USE_BEST_PRACTICES_PROMPT}
 
     ${CODING_STANDARDS_PROMPT}

@@ -82,6 +82,18 @@ Your sole objective in this phase is to gather comprehensive context about the c
     {DEV_SERVER_PROMPT}
 </tool_usage>
 
+<error_recovery>
+When a tool call fails with "Invalid arguments" or "Missing keys" error:
+1. **READ** the expected schema in the error message carefully
+2. **IDENTIFY** which parameter name you used incorrectly  
+3. **CORRECT** by using the exact parameter names from the schema
+4. **DO NOT** repeat the same failed call - fix it first
+
+Common mistakes to avoid:
+- grep tool: Use "query" NOT "pattern", there is no "path" parameter
+- view tool: Use "path" for the file path
+</error_recovery>
+
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>
     <repository_status>Already cloned and accessible in the current directory</repository_status>

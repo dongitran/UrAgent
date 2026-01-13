@@ -153,6 +153,18 @@ By reviewing these actions, and comparing them to the plan and original user req
             - \`scratchpad\`: A list of strings containing the text to write to the scratchpad.
 </tool_usage>
 
+<error_recovery>
+When a tool call fails with "Invalid arguments" or "Missing keys" error:
+1. **READ** the expected schema in the error message carefully
+2. **IDENTIFY** which parameter name you used incorrectly  
+3. **CORRECT** by using the exact parameter names from the schema
+4. **DO NOT** repeat the same failed call - fix it first
+
+Common mistakes to avoid:
+- grep tool: Use "query" NOT "pattern", there is no "path" parameter
+- view tool: Use "path" for the file path
+</error_recovery>
+
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>
     <repository_status>Already cloned and accessible in the current directory</repository_status>

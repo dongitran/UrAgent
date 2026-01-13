@@ -177,7 +177,14 @@ export function createGrepToolFields(targetRepository: TargetRepository, provide
   return {
     name: "grep",
     schema: searchSchema,
-    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The default working directory is \`${repoRoot}\`, but you can specify a different directory using the 'workdir' parameter when searching in subdirectories.`,
+    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The default working directory is \`${repoRoot}\`, but you can specify a different directory using the 'workdir' parameter when searching in subdirectories.
+
+**IMPORTANT - Correct Usage Examples:**
+- Search for a string: {"query": "SidebarLabel", "match_string": true}
+- Search with file filter: {"query": "useState", "include_files": "**/*.jsx"}
+- Regex search: {"query": "import.*React", "match_string": false}
+
+**WRONG (do NOT use):** {"pattern": "...", "path": "..."} - These parameters do not exist!`,
   };
 }
 
