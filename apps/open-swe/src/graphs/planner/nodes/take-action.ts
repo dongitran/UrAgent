@@ -243,14 +243,18 @@ export async function takeActions(
       status: toolCallStatus,
     });
 
+    // =======================================================================
+    // HYBRID IMAGE ANALYSIS: Handle image messages based on first-read status
+    // =======================================================================
     // If this is read_image tool with successful image result, create HumanMessage with image content
     // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
     // The image must be re-introduced as new input in a HumanMessage
+    // For CACHED READS (description instead of base64), we skip the image message
     let imageMessage: HumanMessage | undefined;
     if (
       toolCall.name === "read_image" &&
       toolCallStatus === "success" &&
-      result.startsWith("data:image/")
+      result.startsWith("data:image/")  // Only for first-read (base64), not cached descriptions
     ) {
       logger.info("Creating HumanMessage with image content for read_image result in planner", {
         imageDataUrlLength: result.length,
@@ -263,11 +267,12 @@ export async function takeActions(
           },
           {
             type: "text",
-            text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning.",
+            text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning. A text description will be cached for subsequent references.",
           },
         ],
       });
     }
+    // CACHED READ: No image message needed - the text description is in the tool message content
 
     return { toolMessage, imageMessage, stateUpdates };
   });

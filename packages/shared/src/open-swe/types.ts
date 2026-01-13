@@ -154,6 +154,19 @@ export type CustomRules = {
   pullRequestFormatting?: string;
 };
 
+/**
+ * Cached image description for hybrid image analysis optimization.
+ * First read returns base64 for visual analysis, subsequent reads return cached description.
+ */
+export interface ImageDescription {
+  /** Generated text description of the image */
+  description: string;
+  /** Original image path */
+  imagePath: string;
+  /** Timestamp when description was generated */
+  generatedAt: number;
+}
+
 export const GraphAnnotation = MessagesZodState.extend({
   /**
    * The internal messages. These are the messages which are
@@ -308,6 +321,18 @@ export const GraphAnnotation = MessagesZodState.extend({
   documentCache: withLangGraph(z.custom<Record<string, string>>(), {
     reducer: {
       schema: z.custom<Record<string, string>>(),
+      fn: (state, update) => ({ ...state, ...update }),
+    },
+    default: () => ({}),
+  }),
+  /**
+   * Cache of generated image descriptions keyed by image path.
+   * Used for hybrid image analysis - first turn returns base64,
+   * subsequent turns return cached text description to reduce context size.
+   */
+  imageDescriptionCache: withLangGraph(z.custom<Record<string, ImageDescription>>(), {
+    reducer: {
+      schema: z.custom<Record<string, ImageDescription>>(),
       fn: (state, update) => ({ ...state, ...update }),
     },
     default: () => ({}),

@@ -39,7 +39,7 @@ import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { processToolCallContent } from "../../../utils/tool-output-processing.js";
+import { processToolCallContent, generateAndCacheImageDescription } from "../../../utils/tool-output-processing.js";
 import { getActiveTask } from "@openswe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
@@ -236,7 +236,7 @@ export async function takeAction(
       }
     }
 
-    const { content, stateUpdates } = await processToolCallContent(
+    const { content, stateUpdates, pendingImageDescription } = await processToolCallContent(
       toolCall,
       result,
       {
@@ -254,33 +254,53 @@ export async function takeAction(
       status: toolCallStatus,
     });
 
-    // If this is read_image tool with successful image result, create HumanMessage with image content
-    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
-    // The image must be re-introduced as new input in a HumanMessage
+    // =======================================================================
+    // HYBRID IMAGE ANALYSIS: Handle image messages based on first-read status
+    // =======================================================================
     let imageMessage: HumanMessage | undefined;
-    if (
-      toolCall.name === "read_image" &&
-      toolCallStatus === "success" &&
-      result.startsWith("data:image/")
-    ) {
-      logger.info("Creating HumanMessage with image content for read_image result", {
-        imageDataUrlLength: result.length,
-      });
-      imageMessage = new HumanMessage({
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: result },
-          },
-          {
-            type: "text",
-            text: "Above is the image you requested via read_image tool. Use it as visual reference for your task.",
-          },
-        ],
-      });
+    if (toolCall.name === "read_image" && toolCallStatus === "success") {
+      if (pendingImageDescription) {
+        // FIRST READ: Create HumanMessage with actual image for visual analysis
+        // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
+        // The image must be re-introduced as new input in a HumanMessage
+        logger.info("Creating HumanMessage with image content for first read_image result", {
+          imagePath: pendingImageDescription.imagePath,
+          base64Length: pendingImageDescription.base64DataUrl.length,
+        });
+        imageMessage = new HumanMessage({
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: pendingImageDescription.base64DataUrl },
+            },
+            {
+              type: "text",
+              text: "Above is the image you requested via read_image tool. Use it as visual reference for your task. A text description will be cached for subsequent references.",
+            },
+          ],
+        });
+      } else if (content.startsWith("data:image/")) {
+        // FALLBACK: Raw base64 result (backward compatibility)
+        logger.info("Creating HumanMessage with image content for read_image result (fallback)", {
+          imageDataUrlLength: content.length,
+        });
+        imageMessage = new HumanMessage({
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: content },
+            },
+            {
+              type: "text",
+              text: "Above is the image you requested via read_image tool. Use it as visual reference for your task.",
+            },
+          ],
+        });
+      }
+      // CACHED READ: No image message needed - the text description is in the tool message content
     }
 
-    return { toolMessage, imageMessage, stateUpdates };
+    return { toolMessage, imageMessage, stateUpdates, pendingImageDescription };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -326,7 +346,7 @@ export async function takeAction(
   }
 
   // Combine results in original order
-  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; stateUpdates: any }[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; stateUpdates: any; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
@@ -359,6 +379,43 @@ export async function takeAction(
       },
       { documentCache: {} } as { documentCache: Record<string, string> },
     );
+
+  // =======================================================================
+  // HYBRID IMAGE ANALYSIS: Generate descriptions for first-time image reads
+  // =======================================================================
+  const pendingImageDescriptions = toolCallResultsWithUpdates
+    .map((item) => item.pendingImageDescription)
+    .filter((pd): pd is { imagePath: string; base64DataUrl: string } => pd !== undefined);
+
+  // Generate and cache image descriptions asynchronously
+  // This runs in the background and updates will be available for subsequent reads
+  if (pendingImageDescriptions.length > 0) {
+    logger.info("Scheduling async image description generation", {
+      count: pendingImageDescriptions.length,
+      paths: pendingImageDescriptions.map(pd => pd.imagePath),
+    });
+
+    // Fire-and-forget async generation - don't block the response
+    for (const pd of pendingImageDescriptions) {
+      generateAndCacheImageDescription(
+        pd.imagePath,
+        pd.base64DataUrl,
+        config,
+        state.imageDescriptionCache ?? {},
+      ).then((_cache) => {
+        // Note: This runs async, so we can't directly update state here
+        // The cache will be persisted when the next image read happens
+        logger.info("Image description generated and ready for caching", {
+          imagePath: pd.imagePath,
+        });
+      }).catch(err => {
+        logger.error("Failed to generate image description", {
+          imagePath: pd.imagePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  }
 
   let wereDependenciesInstalled: boolean | null = null;
   toolCallResults.forEach((toolCallResult) => {
