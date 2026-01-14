@@ -43,10 +43,13 @@ Your sole objective in this phase is to gather comprehensive context about the c
 <tool_usage>
     ### Grep search tool
         - Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
-        - It accepts a query string, or regex to search for.
-        - It can search for specific file types using glob patterns.
+        - **REQUIRED parameter**: \`query\` - the string or regex to search for
+        - **CORRECT usage examples**:
+            - \`{"query": "functionName", "match_string": true}\`
+            - \`{"query": "import.*React", "include_files": "**/*.jsx"}\`
+        - **WRONG - DO NOT USE**: \`pattern\` or \`path\` parameters do not exist!
+        - It can search for specific file types using glob patterns via \`include_files\`.
         - Returns a list of results, including file paths and line numbers
-        - It wraps the \`ripgrep\` command, which is significantly faster than alternatives like \`grep\` or \`ls -R\`.
         - IMPORTANT: Never run \`grep\` via the \`shell\` tool. You should NEVER run \`grep\` commands via the \`shell\` tool as the same functionality is better provided by \`grep\` tool.
 
     ### Shell tool

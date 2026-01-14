@@ -115,7 +115,7 @@ export function createGrepToolFields(targetRepository: TargetRepository, provide
     query: z
       .string()
       .describe(
-        "The string or regex to search the codebase for. If passing a plain string, ensure to also set the 'match_string' field to true. If passing a regex, ensure to also set the 'match_string' field to false.",
+        "REQUIRED: The search string or regex. Use this field (NOT 'pattern'). Example: {\"query\": \"myFunction\", \"match_string\": true}. If passing a regex, set 'match_string' to false.",
       ),
 
     match_string: z
