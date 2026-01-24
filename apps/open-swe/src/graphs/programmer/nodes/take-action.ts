@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { isAIMessage, ToolMessage, AIMessage, HumanMessage } from "@langchain/core/messages";
+import { isAIMessage, ToolMessage, AIMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   createApplyPatchTool,
@@ -39,11 +39,12 @@ import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { processToolCallContent, generateAndCacheImageDescription } from "../../../utils/tool-output-processing.js";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { getActiveTask } from "@openswe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { normalizeToolCallArgs } from "../../../utils/normalize-tool-args.js";
 import {
   createReplyToCommentTool,
   createReplyToReviewCommentTool,
@@ -193,10 +194,13 @@ export async function takeAction(
     let result = "";
     let toolCallStatus: "success" | "error" = "success";
     try {
+      // Normalize tool args before invoke to handle common AI model mistakes
+      // (e.g., using 'pattern' instead of 'query' for grep tool)
+      const normalizedArgs = normalizeToolCallArgs(toolCall.name, toolCall.args);
       const toolResult: { result: string; status: "success" | "error" } =
         // @ts-expect-error tool.invoke types are weird here...
         await tool.invoke({
-          ...toolCall.args,
+          ...normalizedArgs,
           // Only pass sandbox session ID in sandbox mode, not local mode
           ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         });
@@ -236,7 +240,7 @@ export async function takeAction(
       }
     }
 
-    const { content, stateUpdates, pendingImageDescription } = await processToolCallContent(
+    const { content, stateUpdates, imageDescriptionToCache } = await processToolCallContent(
       toolCall,
       result,
       {
@@ -255,52 +259,12 @@ export async function takeAction(
     });
 
     // =======================================================================
-    // HYBRID IMAGE ANALYSIS: Handle image messages based on first-read status
+    // IMAGE DESCRIPTION: No longer inject images - description is in ToolMessage
     // =======================================================================
-    let imageMessage: HumanMessage | undefined;
-    if (toolCall.name === "read_image" && toolCallStatus === "success") {
-      if (pendingImageDescription) {
-        // FIRST READ: Create HumanMessage with actual image for visual analysis
-        // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
-        // The image must be re-introduced as new input in a HumanMessage
-        logger.info("Creating HumanMessage with image content for first read_image result", {
-          imagePath: pendingImageDescription.imagePath,
-          base64Length: pendingImageDescription.base64DataUrl.length,
-        });
-        imageMessage = new HumanMessage({
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: pendingImageDescription.base64DataUrl },
-            },
-            {
-              type: "text",
-              text: "Above is the image you requested via read_image tool. Use it as visual reference for your task. A text description will be cached for subsequent references.",
-            },
-          ],
-        });
-      } else if (content.startsWith("data:image/")) {
-        // FALLBACK: Raw base64 result (backward compatibility)
-        logger.info("Creating HumanMessage with image content for read_image result (fallback)", {
-          imageDataUrlLength: content.length,
-        });
-        imageMessage = new HumanMessage({
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: content },
-            },
-            {
-              type: "text",
-              text: "Above is the image you requested via read_image tool. Use it as visual reference for your task.",
-            },
-          ],
-        });
-      }
-      // CACHED READ: No image message needed - the text description is in the tool message content
-    }
+    // The image description is now generated synchronously in processToolCallContent
+    // and returned as text in the ToolMessage content. No HumanMessage needed.
 
-    return { toolMessage, imageMessage, stateUpdates, pendingImageDescription };
+    return { toolMessage, stateUpdates, imageDescriptionToCache };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -346,7 +310,7 @@ export async function takeAction(
   }
 
   // Combine results in original order
-  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; stateUpdates: any; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; stateUpdates: any; imageDescriptionToCache?: { imagePath: string; description: any } }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
@@ -361,10 +325,11 @@ export async function takeAction(
     (item) => item.toolMessage,
   );
 
-  // Collect image messages from read_image tool calls
-  const imageMessages = toolCallResultsWithUpdates
-    .map((item) => item.imageMessage)
-    .filter((msg): msg is HumanMessage => msg !== undefined);
+  // Image descriptions are now generated synchronously in processToolCallContent
+  // Collect them for caching
+  const imageDescriptionsToCache = toolCallResultsWithUpdates
+    .map((item) => item.imageDescriptionToCache)
+    .filter((desc): desc is { imagePath: string; description: any } => desc !== undefined);
 
   // merging document cache updates from tool calls
   const allStateUpdates = toolCallResultsWithUpdates
@@ -381,55 +346,19 @@ export async function takeAction(
     );
 
   // =======================================================================
-  // HYBRID IMAGE ANALYSIS: Generate descriptions for first-time image reads
+  // Image descriptions are already generated - just add to cache
   // =======================================================================
-  const pendingImageDescriptions = toolCallResultsWithUpdates
-    .map((item) => item.pendingImageDescription)
-    .filter((pd): pd is { imagePath: string; base64DataUrl: string } => pd !== undefined);
-
-  // Generate image descriptions synchronously and add to state updates
-  // This ensures the cache is properly persisted for subsequent reads
-  let imageDescriptionCacheUpdate: Record<string, any> = {};
-  if (pendingImageDescriptions.length > 0) {
-    logger.info("Generating image descriptions for caching", {
-      count: pendingImageDescriptions.length,
-      paths: pendingImageDescriptions.map(pd => pd.imagePath),
+  if (imageDescriptionsToCache.length > 0) {
+    logger.info("Caching image descriptions", {
+      count: imageDescriptionsToCache.length,
+      paths: imageDescriptionsToCache.map(d => d.imagePath),
     });
 
-    // Generate all descriptions in parallel but await completion
-    const descriptionPromises = pendingImageDescriptions.map(async (pd) => {
-      try {
-        const cache = await generateAndCacheImageDescription(
-          pd.imagePath,
-          pd.base64DataUrl,
-          config,
-          state.imageDescriptionCache ?? {},
-        );
-        logger.info("Image description generated and cached", {
-          imagePath: pd.imagePath,
-        });
-        return cache;
-      } catch (err) {
-        logger.error("Failed to generate image description", {
-          imagePath: pd.imagePath,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return null;
-      }
-    });
-
-    const results = await Promise.all(descriptionPromises);
-
-    // Merge all successfully generated descriptions
-    for (const cache of results) {
-      if (cache) {
-        imageDescriptionCacheUpdate = { ...imageDescriptionCacheUpdate, ...cache };
-      }
+    const imageDescriptionCacheUpdate: Record<string, any> = {};
+    for (const desc of imageDescriptionsToCache) {
+      imageDescriptionCacheUpdate[desc.imagePath] = desc.description;
     }
-  }
 
-  // Merge imageDescriptionCache into allStateUpdates
-  if (Object.keys(imageDescriptionCacheUpdate).length > 0) {
     (allStateUpdates as any).imageDescriptionCache = {
       ...(state.imageDescriptionCache ?? {}),
       ...imageDescriptionCacheUpdate,
@@ -558,11 +487,11 @@ export async function takeAction(
   ];
 
   // Include the modified message if it was filtered
-  // Also include image messages for multimodal processing
+  // Image descriptions are now text in ToolMessage - no HumanMessage images
   const internalMessagesUpdate =
     wasFiltered && modifiedMessage
-      ? [modifiedMessage, ...toolCallResults, ...imageMessages]
-      : [...toolCallResults, ...imageMessages];
+      ? [modifiedMessage, ...toolCallResults]
+      : [...toolCallResults];
 
   const commandUpdate: GraphUpdate = {
     messages: userFacingMessagesUpdate,
@@ -611,7 +540,7 @@ export async function takeAction(
   }
 
   return new Command({
-    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "generate-action",
+    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "check-context-size",
     update: commandUpdate,
   });
 }

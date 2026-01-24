@@ -8,9 +8,10 @@ import {
 import { createLogger, LogLevel } from "../logger.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { ChatOpenAI } from "@langchain/openai";
-import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatAnthropicFiltered } from "../llms/anthropic/chat-anthropic-filtered.js";
 import { HumanMessage } from "@langchain/core/messages";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { logAIMessage, summarizeResponse, extractTokenUsage } from "@openswe/shared/logger-hub-client";
 
 const logger = createLogger(LogLevel.INFO, "GitHubPlan");
 
@@ -36,21 +37,21 @@ function getSummarizerModelConfig(): { provider: string; modelName: string } {
   const providerPrefix = provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
   const taskEnvKey = `${providerPrefix}_SUMMARIZER_MODEL`;
   const taskEnvValue = process.env[taskEnvKey];
-  
+
   if (taskEnvValue) {
     return { provider, modelName: taskEnvValue };
   }
-  
+
   // Fallback defaults based on provider
   const defaultModels: Record<string, string> = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
     "google-genai": "gemini-2.0-flash",
   };
-  
-  return { 
-    provider, 
-    modelName: defaultModels[provider] || "gpt-4o-mini" 
+
+  return {
+    provider,
+    modelName: defaultModels[provider] || "gpt-4o-mini"
   };
 }
 
@@ -76,7 +77,7 @@ function getApiKeyForProvider(provider: string): string | undefined {
 async function callGoogleGenAI(modelName: string, apiKey: string, prompt: string): Promise<string> {
   const client = new GoogleGenerativeAI(apiKey);
   const model = client.getGenerativeModel({ model: modelName });
-  
+
   const result = await model.generateContent(prompt);
   const text = result.response.text();
   return text.trim();
@@ -89,45 +90,118 @@ async function callGoogleGenAI(modelName: string, apiKey: string, prompt: string
 async function callLLM(prompt: string): Promise<string> {
   const { provider, modelName } = getSummarizerModelConfig();
   const apiKey = getApiKeyForProvider(provider);
-  
+
   if (!apiKey) {
     throw new Error(`API key not set for provider ${provider}`);
   }
 
-  if (provider === "google-genai") {
-    // Use Google Generative AI SDK directly to avoid LangChain wrapper issues
-    return await callGoogleGenAI(modelName, apiKey, prompt);
-  } else if (provider === "openai") {
-    const model = new ChatOpenAI({
+  const startTime = Date.now();
+
+  try {
+    let text: string;
+    let response: any;
+
+    if (provider === "google-genai") {
+      // Use Google Generative AI SDK directly to avoid LangChain wrapper issues
+      text = await callGoogleGenAI(modelName, apiKey, prompt);
+
+      // Log to Logger Hub (fire and forget)
+      const durationMs = Date.now() - startTime;
+      logAIMessage({
+        threadId: 'github-plan-generator',
+        provider,
+        modelName,
+        task: 'PLAN_GENERATOR',
+        status: 'success',
+        requestMessages: [{ role: 'human', content: prompt }],
+        response: { content: text },
+        durationMs,
+        timestamp: Date.now(),
+      });
+
+      return text;
+    } else if (provider === "openai") {
+      const model = new ChatOpenAI({
+        modelName,
+        apiKey,
+        temperature: 0.8,
+        maxTokens: 5000,
+        ...(process.env.OPENAI_BASE_URL ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } } : {}),
+      });
+      response = await model.invoke([new HumanMessage(prompt)]);
+      text = typeof response.content === 'string'
+        ? response.content.trim()
+        : Array.isArray(response.content)
+          ? response.content.map((c: unknown) => typeof c === 'string' ? c : '').join('').trim()
+          : '';
+
+      // Log to Logger Hub (fire and forget)
+      const durationMs = Date.now() - startTime;
+      logAIMessage({
+        threadId: 'github-plan-generator',
+        provider,
+        modelName,
+        task: 'PLAN_GENERATOR',
+        status: 'success',
+        requestMessages: [{ role: 'human', content: prompt }],
+        response: summarizeResponse(response),
+        durationMs,
+        tokenUsage: extractTokenUsage(response),
+        timestamp: Date.now(),
+      });
+
+      return text;
+    } else if (provider === "anthropic") {
+      const model = new ChatAnthropicFiltered({
+        modelName,
+        apiKey,
+        temperature: 0.8,
+        maxTokens: 5000,
+      });
+      response = await model.invoke([new HumanMessage(prompt)]);
+      text = typeof response.content === 'string'
+        ? response.content.trim()
+        : Array.isArray(response.content)
+          ? response.content.map((c: unknown) => typeof c === 'string' ? c : '').join('').trim()
+          : '';
+
+      // Log to Logger Hub (fire and forget)
+      const durationMs = Date.now() - startTime;
+      logAIMessage({
+        threadId: 'github-plan-generator',
+        provider,
+        modelName,
+        task: 'PLAN_GENERATOR',
+        status: 'success',
+        requestMessages: [{ role: 'human', content: prompt }],
+        response: summarizeResponse(response),
+        durationMs,
+        tokenUsage: extractTokenUsage(response),
+        timestamp: Date.now(),
+      });
+
+      return text;
+    } else {
+      throw new Error(`Unsupported provider: ${provider}`);
+    }
+  } catch (error) {
+    // Log error to Logger Hub (fire and forget)
+    const durationMs = Date.now() - startTime;
+    const errorDetails = error instanceof Error
+      ? { message: error.message, name: error.name }
+      : { message: String(error) };
+    logAIMessage({
+      threadId: 'github-plan-generator',
+      provider,
       modelName,
-      apiKey,
-      temperature: 0.8,
-      maxTokens: 5000,
-      ...(process.env.OPENAI_BASE_URL ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } } : {}),
+      task: 'PLAN_GENERATOR',
+      status: 'error',
+      requestMessages: [{ role: 'human', content: prompt }],
+      durationMs,
+      error: errorDetails,
+      timestamp: Date.now(),
     });
-    const response = await model.invoke([new HumanMessage(prompt)]);
-    const text = typeof response.content === 'string'
-      ? response.content.trim()
-      : Array.isArray(response.content)
-        ? response.content.map(c => typeof c === 'string' ? c : '').join('').trim()
-        : '';
-    return text;
-  } else if (provider === "anthropic") {
-    const model = new ChatAnthropic({
-      modelName,
-      apiKey,
-      temperature: 0.8,
-      maxTokens: 5000,
-    });
-    const response = await model.invoke([new HumanMessage(prompt)]);
-    const text = typeof response.content === 'string'
-      ? response.content.trim()
-      : Array.isArray(response.content)
-        ? response.content.map(c => typeof c === 'string' ? c : '').join('').trim()
-        : '';
-    return text;
-  } else {
-    throw new Error(`Unsupported provider: ${provider}`);
+    throw error;
   }
 }
 
@@ -138,30 +212,30 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     const name = error.name.toLowerCase();
-    
+
     // Network/timeout errors
-    if (message.includes('timeout') || 
-        message.includes('network') || 
-        message.includes('econnreset') ||
-        message.includes('econnrefused') ||
-        message.includes('socket') ||
-        message.includes('fetch failed') ||
-        name.includes('timeout') ||
-        name.includes('abort')) {
+    if (message.includes('timeout') ||
+      message.includes('network') ||
+      message.includes('econnreset') ||
+      message.includes('econnrefused') ||
+      message.includes('socket') ||
+      message.includes('fetch failed') ||
+      name.includes('timeout') ||
+      name.includes('abort')) {
       return true;
     }
-    
+
     // Rate limit or server errors (check for status codes in message)
-    if (message.includes('429') || 
-        message.includes('500') || 
-        message.includes('502') || 
-        message.includes('503') || 
-        message.includes('504') ||
-        message.includes('rate limit')) {
+    if (message.includes('429') ||
+      message.includes('500') ||
+      message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504') ||
+      message.includes('rate limit')) {
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -186,7 +260,7 @@ export function cleanTaskItems(taskItem: string): string {
 /**
  * Message types for generating natural GitHub comments
  */
-export type GitHubCommentType = 
+export type GitHubCommentType =
   | "plan_generated_auto_accept"
   | "plan_ready_for_approval"
   | "plan_accepted"
@@ -386,7 +460,7 @@ Respond with ONLY the comment text.`,
       if (trimmedMessage && trimmedMessage.length > 0) {
         return trimmedMessage;
       }
-      
+
       lastError = new Error("Empty response from LLM");
       logger.warn("[generateNaturalComment] Empty response, will retry", {
         attempt: attempt + 1,
@@ -394,7 +468,7 @@ Respond with ONLY the comment text.`,
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
       logger.warn(`[generateNaturalComment] Attempt ${attempt + 1}/${MAX_RETRIES} failed`, {
         error: lastError.message,
         errorName: lastError.name,
@@ -412,15 +486,15 @@ Respond with ONLY the comment text.`,
         await sleep(delay);
         continue;
       }
-      
-      logger.warn("Failed to generate natural comment with LLM, using fallback", { 
-        error: lastError.message, 
+
+      logger.warn("Failed to generate natural comment with LLM, using fallback", {
+        error: lastError.message,
         type: context.type,
         attempt: attempt + 1,
       });
       return fallbackMessages[context.type];
     }
-    
+
     // Wait before retry for empty response
     if (attempt < MAX_RETRIES - 1) {
       const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
@@ -428,8 +502,8 @@ Respond with ONLY the comment text.`,
     }
   }
 
-  logger.warn("Failed to generate natural comment after all retries, using fallback", { 
-    error: lastError?.message, 
+  logger.warn("Failed to generate natural comment after all retries, using fallback", {
+    error: lastError?.message,
     type: context.type,
     provider,
     modelName,
@@ -507,7 +581,7 @@ export async function postGitHubIssueComment(input: {
       return;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
       if (isRetryableError(error) && attempt < MAX_RETRIES - 1) {
         const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
         logger.warn(`postGitHubIssueComment attempt ${attempt + 1}/${MAX_RETRIES} failed, retrying in ${delay}ms`, {
@@ -517,7 +591,7 @@ export async function postGitHubIssueComment(input: {
         await sleep(delay);
         continue;
       }
-      
+
       logger.error("Failed to post GitHub comment:", {
         error: lastError.message,
         githubIssueId,

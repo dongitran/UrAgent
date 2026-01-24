@@ -3,7 +3,7 @@ import { truncateOutput } from "./truncate-outputs.js";
 import { handleMcpDocumentationOutput } from "./mcp-output/index.js";
 import { parseUrl } from "./url-parser.js";
 import { ReadImageResult } from "../tools/read-image.js";
-import { generateImageDescriptionAsync } from "./image-description-generator.js";
+import { generateImageDescription, formatCachedImageDescription } from "./image-description-generator.js";
 import { createLogger, LogLevel } from "./logger.js";
 
 const logger = createLogger(LogLevel.INFO, "ToolOutputProcessing");
@@ -36,10 +36,10 @@ export async function processToolCallContent(
 ): Promise<{
   content: string;
   stateUpdates?: Partial<Pick<GraphState, "documentCache">>;
-  /** Pending image description to be added to cache after async generation */
-  pendingImageDescription?: {
+  /** Image description to add to cache (first read - description already generated) */
+  imageDescriptionToCache?: {
     imagePath: string;
-    base64DataUrl: string;
+    description: ImageDescription;
   };
 }> {
   const { higherContextLimitToolNames, state, config } = options;
@@ -70,20 +70,41 @@ export async function processToolCallContent(
     // If we got a parsed result with isFirstRead metadata
     if (imageResult && typeof imageResult.isFirstRead === "boolean") {
       if (imageResult.isFirstRead && imageResult.base64DataUrl && imageResult.imagePath) {
-        // FIRST READ: Return base64 for visual analysis
-        // Also schedule async description generation for caching
-        logger.info("Processing first-time image read, scheduling description generation", {
+        // FIRST READ: Generate description SYNCHRONOUSLY via vision AI
+        // This eliminates base64 from context entirely (~99% context reduction)
+        logger.info("Processing first-time image read, generating description synchronously", {
           imagePath: imageResult.imagePath,
           base64Length: imageResult.base64DataUrl.length,
         });
 
-        return {
-          content: imageResult.base64DataUrl,
-          pendingImageDescription: {
+        try {
+          const description = await generateImageDescription(
+            imageResult.base64DataUrl,
+            imageResult.imagePath,
+            config
+          );
+
+          logger.info("Image description generated successfully", {
             imagePath: imageResult.imagePath,
-            base64DataUrl: imageResult.base64DataUrl,
-          },
-        };
+            descriptionLength: description.description.length,
+          });
+
+          return {
+            content: formatCachedImageDescription(description),
+            imageDescriptionToCache: {
+              imagePath: imageResult.imagePath,
+              description,
+            },
+          };
+        } catch (error) {
+          logger.error("Failed to generate image description, returning error", {
+            imagePath: imageResult.imagePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return {
+            content: `[Image analysis failed: ${imageResult.imagePath}]\nError: ${error instanceof Error ? error.message : String(error)}\nPlease try read_image again or use force_reload=true.`,
+          };
+        }
       } else {
         // CACHED READ: Return the cached description
         logger.info("Processing cached image read", {
@@ -159,42 +180,4 @@ export async function processToolCallContent(
       content: truncateOutput(result),
     };
   }
-}
-
-/**
- * Generate image description asynchronously and update state.
- * Call this after processing tool output to cache the description for future reads.
- * 
- * @param imagePath - Path to the image file (cache key)
- * @param base64DataUrl - The base64 data URL of the image
- * @param config - GraphConfig
- * @param currentCache - Current imageDescriptionCache from state
- * @returns Updated imageDescriptionCache with the new description
- */
-export async function generateAndCacheImageDescription(
-  imagePath: string,
-  base64DataUrl: string,
-  config: GraphConfig,
-  currentCache: Record<string, ImageDescription> = {},
-): Promise<Record<string, ImageDescription>> {
-  return new Promise((resolve) => {
-    generateImageDescriptionAsync(
-      base64DataUrl,
-      imagePath,
-      config,
-      (description) => {
-        resolve({
-          ...currentCache,
-          [imagePath]: description,
-        });
-      }
-    ).catch((error) => {
-      logger.error("Failed to generate image description", {
-        imagePath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Return unchanged cache on error
-      resolve(currentCache);
-    });
-  });
 }

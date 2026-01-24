@@ -6,12 +6,13 @@ import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../logger.js";
 import {
   LLMTask,
-  TASK_TO_CONFIG_DEFAULTS_MAP,
+  getTaskConfigDefaults,
 } from "@openswe/shared/open-swe/llm-task";
 import { isAllowedUser } from "@openswe/shared/github/allowed-users";
 import { decryptSecret } from "@openswe/shared/crypto";
 import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
 import { ChatGoogleGenAI, ThinkingConfig } from "./google-genai/index.js";
+import { ChatAnthropicFiltered } from "./anthropic/chat-anthropic-filtered.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -51,21 +52,49 @@ export const PROVIDER_FALLBACK_ORDER = [
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
+// Default fallback order if LLM_FALLBACK_ORDER env is not set
+const DEFAULT_FALLBACK_ORDER: Provider[] = ["anthropic", "google-genai"];
+
+/**
+ * Parse LLM_FALLBACK_ORDER from environment variable
+ * Format: comma-separated provider names, e.g., "anthropic,google-genai"
+ */
+function parseActiveFallbackOrder(): Provider[] {
+  const envValue = process.env.LLM_FALLBACK_ORDER;
+  if (!envValue) {
+    return DEFAULT_FALLBACK_ORDER;
+  }
+
+  const providers = envValue.split(",").map(p => p.trim()) as Provider[];
+  // Validate providers
+  const validProviders = providers.filter(p =>
+    PROVIDER_FALLBACK_ORDER.includes(p as typeof PROVIDER_FALLBACK_ORDER[number])
+  );
+
+  if (validProviders.length === 0) {
+    logger.warn(`Invalid LLM_FALLBACK_ORDER: ${envValue}, using default`);
+    return DEFAULT_FALLBACK_ORDER;
+  }
+
+  return validProviders;
+}
+
 /**
  * Get fallback order based on LLM_MULTI_PROVIDER_ENABLED
  * When disabled, only use the configured LLM_PROVIDER (no fallback to other providers)
+ * When enabled, uses LLM_FALLBACK_ORDER env (default: anthropic -> google-genai)
  */
 function getFallbackOrder(): Provider[] {
   const multiProviderEnabled =
     process.env.LLM_MULTI_PROVIDER_ENABLED === "true";
 
   if (multiProviderEnabled) {
-    // Multi-provider mode: fallback to other providers when one fails
-    return [...PROVIDER_FALLBACK_ORDER];
+    // Multi-provider mode: use configured fallback order
+    return parseActiveFallbackOrder();
   }
 
   // Single provider mode: only use the configured provider
-  const provider = (process.env.LLM_PROVIDER || "openai") as Provider;
+  const provider = (process.env.LLM_PROVIDER || "anthropic") as Provider;
   return [provider];
 }
 
@@ -121,10 +150,11 @@ export class ModelManager {
 
   /**
    * Load a single model (no fallback during loading)
+   * Uses per-task provider configuration via getBaseConfigForTask
    */
   async loadModel(graphConfig: GraphConfig, task: LLMTask) {
     const baseConfig = this.getBaseConfigForTask(graphConfig, task);
-    const model = await this.initializeModel(baseConfig, graphConfig);
+    const model = await this.initializeModel(baseConfig, graphConfig, task);
     return model;
   }
 
@@ -174,12 +204,41 @@ export class ModelManager {
   }
 
   /**
+   * Get per-task specific configuration from environment variables
+   * Supports: {TASK}_PROVIDER, {TASK}_API_KEY, {TASK}_BASE_URL
+   * 
+   * Example: PLANNER_PROVIDER=anthropic, PLANNER_API_KEY=sk-xxx, PLANNER_BASE_URL=https://...
+   * 
+   * @returns null if no per-task override is configured
+   */
+  private getTaskSpecificConfig(task: LLMTask): {
+    provider: Provider;
+    apiKey?: string;
+    baseUrl?: string;
+  } | null {
+    const taskUpper = task.toUpperCase();
+    const taskProvider = process.env[`${taskUpper}_PROVIDER`] as Provider | undefined;
+
+    if (!taskProvider) return null;
+
+    return {
+      provider: taskProvider,
+      apiKey: process.env[`${taskUpper}_API_KEY`],
+      baseUrl: process.env[`${taskUpper}_BASE_URL`],
+    };
+  }
+
+  /**
    * Initialize the model instance
    * For google-genai provider, uses custom ChatGoogleGenAI with thought signature support
+   * 
+   * @param task - Optional task parameter for checking notetaker override
+   *               (override only applies when task === SUMMARIZER)
    */
   public async initializeModel(
     config: ModelLoadConfig,
     graphConfig: GraphConfig,
+    task?: LLMTask,
   ) {
     const {
       provider,
@@ -200,6 +259,21 @@ export class ModelManager {
     }
 
     const apiKey = this.getUserApiKey(graphConfig, provider);
+
+    // =========================================================================
+    // Get per-task specific configuration (API key, base URL)
+    // This allows different tasks to use different credentials
+    // =========================================================================
+    const taskConfig = task ? this.getTaskSpecificConfig(task) : null;
+
+    if (taskConfig) {
+      logger.info("Using per-task provider configuration", {
+        task,
+        provider: taskConfig.provider,
+        hasApiKey: !!taskConfig.apiKey,
+        hasBaseUrl: !!taskConfig.baseUrl,
+      });
+    }
 
     // =========================================================================
     // Use custom ChatGoogleGenAI for google-genai provider
@@ -242,17 +316,23 @@ export class ModelManager {
         });
       }
 
+      // Use per-task API key if available, otherwise fall back to global
+      const googleApiKey = (taskConfig?.provider === "google-genai" ? taskConfig.apiKey : null)
+        || apiKey
+        || process.env.GOOGLE_API_KEY;
+
       logger.info("Using custom ChatGoogleGenAI with thought signature support", {
         modelName,
-        hasApiKey: !!apiKey,
+        hasApiKey: !!googleApiKey,
         isGemini3,
         isGemini25,
         hasThinkingConfig: !!thinkingConfig,
+        usingTaskConfig: taskConfig?.provider === "google-genai",
       });
 
       const googleModel = new ChatGoogleGenAI({
         model: modelName,
-        apiKey: apiKey || process.env.GOOGLE_API_KEY,
+        apiKey: googleApiKey,
         temperature: thinkingModel ? undefined : temperature,
         maxOutputTokens: finalMaxTokens,
         thinkingConfig: thinkingConfig,
@@ -261,50 +341,68 @@ export class ModelManager {
       return googleModel as unknown as ConfigurableModel;
     }
 
-    // For other providers, use initChatModel as before
+    // =========================================================================
+    // Use custom ChatAnthropicFiltered for Anthropic provider
+    // This properly filters out top_k: -1 and top_p: -1 sentinel values
+    // that cause "invalid value: integer -1, expected u32" API errors
+    // =========================================================================
+    if (provider === "anthropic") {
+      // Use per-task API key and base URL if available, otherwise fall back to global
+      const anthropicApiKey = (taskConfig?.provider === "anthropic" ? taskConfig.apiKey : null)
+        || apiKey
+        || process.env.ANTHROPIC_API_KEY;
+      const anthropicBaseUrl = (taskConfig?.provider === "anthropic" ? taskConfig.baseUrl : null)
+        || process.env.ANTHROPIC_BASE_URL;
+
+      const anthropicModel = new ChatAnthropicFiltered({
+        model: modelName,
+        apiKey: anthropicApiKey,
+        maxTokens: thinkingModel ? thinkingMaxTokens : finalMaxTokens,
+        temperature: thinkingModel ? undefined : temperature,
+        ...(anthropicBaseUrl
+          ? { clientOptions: { baseURL: anthropicBaseUrl } }
+          : {}),
+        ...(thinkingModel && thinkingBudgetTokens
+          ? { thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" as const } }
+          : {}),
+      });
+
+      logger.info("Using custom ChatAnthropicFiltered with top_k/top_p filtering", {
+        modelName,
+        hasApiKey: !!anthropicApiKey,
+        hasCustomBaseUrl: !!anthropicBaseUrl,
+        thinkingModel,
+        usingTaskConfig: taskConfig?.provider === "anthropic",
+      });
+
+      return anthropicModel as unknown as ConfigurableModel;
+    }
+
+    // For other providers (OpenAI), use initChatModel as before
     const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
       max_retries: MAX_RETRIES,
-      // Explicitly set topP to undefined to avoid Anthropic API error with Claude 4.5 models
-      // See: https://github.com/langchain-ai/langchainjs/issues/9205
-      topP: undefined,
       ...(apiKey ? { apiKey } : {}),
       // Support custom base URL for OpenAI (LiteLLM gateway)
       ...(provider === "openai" && process.env.OPENAI_BASE_URL
         ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } }
         : {}),
-      // Support custom base URL for Anthropic (proxy gateway)
-      ...(provider === "anthropic" && process.env.ANTHROPIC_BASE_URL
-        ? { clientOptions: { baseURL: process.env.ANTHROPIC_BASE_URL } }
-        : {}),
-      ...(thinkingModel && provider === "anthropic"
+      ...(modelName.includes("gpt-5")
         ? {
-          thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
-          maxTokens: thinkingMaxTokens,
+          max_completion_tokens: finalMaxTokens,
+          temperature: 1,
         }
-        : modelName.includes("gpt-5")
-          ? {
-            max_completion_tokens: finalMaxTokens,
-            temperature: 1,
-          }
-          : {
-            maxTokens: finalMaxTokens,
-            temperature: thinkingModel ? undefined : temperature,
-          }),
+        : {
+          maxTokens: finalMaxTokens,
+          temperature: temperature,
+        }),
     };
 
     logger.debug("Initializing model", {
       provider,
       modelName,
-      hasCustomBaseUrl:
-        (provider === "openai" && !!process.env.OPENAI_BASE_URL) ||
-        (provider === "anthropic" && !!process.env.ANTHROPIC_BASE_URL),
-      baseUrl:
-        provider === "openai"
-          ? process.env.OPENAI_BASE_URL
-          : provider === "anthropic"
-            ? process.env.ANTHROPIC_BASE_URL
-            : undefined,
+      hasCustomBaseUrl: provider === "openai" && !!process.env.OPENAI_BASE_URL,
+      baseUrl: provider === "openai" ? process.env.OPENAI_BASE_URL : undefined,
     });
 
     return await initChatModel(modelName, modelOptions);
@@ -350,6 +448,29 @@ export class ModelManager {
         };
         configs.push(selectedModelConfig);
       }
+    } else {
+      // Handle ChatAnthropicFiltered, ChatGoogleGenAI and other models without _defaultConfig
+      // Create selectedModelConfig from baseConfig to ensure primary model is used first
+      selectedModelConfig = {
+        provider: baseConfig.provider,
+        modelName: baseConfig.modelName,
+        ...(baseConfig.modelName.includes("gpt-5")
+          ? {
+            max_completion_tokens: baseConfig.maxTokens,
+            temperature: 1,
+          }
+          : {
+            maxTokens: baseConfig.maxTokens,
+            temperature: baseConfig.temperature,
+          }),
+        ...(baseConfig.thinkingModel
+          ? {
+            thinkingModel: true,
+            thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
+          }
+          : {}),
+      };
+      configs.push(selectedModelConfig);
     }
 
     // Add fallback models
@@ -428,66 +549,16 @@ export class ModelManager {
     config: GraphConfig,
     task: LLMTask,
   ): ModelLoadConfig {
-    const taskMap = {
-      [LLMTask.PLANNER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature:
-          config.configurable?.[`${task}Temperature`] ??
-          this.getDefaultTemperature(
-            config.configurable?.[`${task}ModelName`] ??
-            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-          ),
-      },
-      [LLMTask.PROGRAMMER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature:
-          config.configurable?.[`${task}Temperature`] ??
-          this.getDefaultTemperature(
-            config.configurable?.[`${task}ModelName`] ??
-            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-          ),
-      },
-      [LLMTask.REVIEWER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature:
-          config.configurable?.[`${task}Temperature`] ??
-          this.getDefaultTemperature(
-            config.configurable?.[`${task}ModelName`] ??
-            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-          ),
-      },
-      [LLMTask.ROUTER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature:
-          config.configurable?.[`${task}Temperature`] ??
-          this.getDefaultTemperature(
-            config.configurable?.[`${task}ModelName`] ??
-            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-          ),
-      },
-      [LLMTask.SUMMARIZER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature:
-          config.configurable?.[`${task}Temperature`] ??
-          this.getDefaultTemperature(
-            config.configurable?.[`${task}ModelName`] ??
-            TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-          ),
-      },
-    };
+    // Use dynamic getter to ensure env vars are read at runtime
+    const taskDefaults = getTaskConfigDefaults(task);
 
-    const taskConfig = taskMap[task];
-    const modelStr = taskConfig.modelName;
+    const configuredModelName =
+      config.configurable?.[`${task}ModelName`] ?? taskDefaults.modelName;
+    const temperature =
+      config.configurable?.[`${task}Temperature`] ??
+      this.getDefaultTemperature(configuredModelName);
+
+    const modelStr = configuredModelName;
     const [modelProvider, ...modelNameParts] = modelStr.split(":");
 
     let thinkingModel = false;
@@ -517,7 +588,7 @@ export class ModelManager {
         }
         : {
           maxTokens: config.configurable?.maxTokens ?? 10_000,
-          temperature: taskConfig.temperature,
+          temperature,
         }),
       thinkingModel,
       thinkingBudgetTokens,

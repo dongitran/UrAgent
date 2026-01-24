@@ -15,8 +15,7 @@ const CURRENT_TASK_OVERVIEW_PROMPT = `<current_task_overview>
 const CORE_BEHAVIOR_PROMPT = `<core_behavior>
     - Persistence: Keep working until the current task is completely resolved. Only terminate when you are certain the task is complete.
     - Accuracy: Never guess or make up information. Always use tools to gather accurate data about files and codebase structure.
-    - Planning: Leverage the plan context and task summaries heavily - they contain critical information about completed work and the overall strategy.
-    - Skills: Check the \`.skills/\` directory for project-specific implementation patterns and documentation to ensure consistency with the codebase.
+    - Planning: Leverage the plan context and task summaries heavily - they contain critical information about completed work and the overall strategy.{SKILLS_REPO_FIRST_STEP}
 </core_behavior>`;
 
 const TASK_EXECUTION_GUIDELINES = `<task_execution_guidelines>

@@ -75,13 +75,13 @@ function validateAndFixThoughtSignature(signature: string): string | undefined {
   // Check for concatenated signatures - look for '=' followed by more Base64 chars
   // Valid Base64 ends with 0-2 '=' padding, so '=E' or '=A' etc in middle means concatenation
   const concatenationPattern = /=+[A-Za-z0-9+/]/;
-  
+
   if (concatenationPattern.test(signature)) {
     debugLog(`DETECTED CONCATENATED SIGNATURES!`, {
       signatureLength: signature.length,
       signaturePreview: signature.slice(0, 100) + '...',
     });
-    
+
     // Split by '=' padding followed by uppercase letter (start of new signature)
     // Take the LAST signature (most recent one)
     const parts = signature.split(/(?<==)(?=[A-Z])/);
@@ -93,7 +93,7 @@ function validateAndFixThoughtSignature(signature: string): string | undefined {
       return lastSignature;
     }
   }
-  
+
   return signature;
 }
 
@@ -193,7 +193,7 @@ export function convertGoogleStreamChunkToLangChainChunk(
   }
 
   const parts = candidate.content?.parts as PartWithThoughtSignature[] | undefined;
-  
+
   // Debug: Log if any part has thoughtSignature
   const partsWithSignature = parts?.filter(p => p.thoughtSignature) ?? [];
   if (partsWithSignature.length > 0) {
@@ -208,7 +208,7 @@ export function convertGoogleStreamChunkToLangChainChunk(
   // Convert parts to chunks, but handle thoughtSignature specially
   // We need to ensure only ONE signature survives (the last one from this response)
   let lastSignatureFromParts: string | undefined;
-  
+
   const chunk = parts?.reduce(
     (acc: AIMessageChunk | null, part, index) => {
       // Capture the signature before converting (we'll handle it separately)
@@ -218,14 +218,14 @@ export function convertGoogleStreamChunkToLangChainChunk(
           lastSignatureFromParts = validated;
         }
       }
-      
+
       const nextChunk = convertPartToChunk(part, index);
-      
+
       if (!acc) return nextChunk;
-      
+
       // Custom concat that preserves the LAST thoughtSignature instead of concatenating
       const concatenated = acc.concat(nextChunk);
-      
+
       return concatenated;
     },
     null
@@ -233,26 +233,33 @@ export function convertGoogleStreamChunkToLangChainChunk(
 
   if (!chunk) return null;
 
+  // CRITICAL: Extract usage metadata FIRST, before any early returns
+  // This ensures usage_metadata is available in both code paths (with/without thoughtSignature)
+  const extractedUsageMetadata = response.usageMetadata
+    ? extractUsageMetadata(response.usageMetadata)
+    : chunk.usage_metadata;
+
   // CRITICAL: Override the response_metadata.thoughtSignature with the validated last signature
   // This prevents concatenation issues from LangChain's default merge behavior
   if (lastSignatureFromParts) {
     // Create new response_metadata with the correct signature
     const newMetadata = { ...chunk.response_metadata };
     newMetadata["thoughtSignature"] = lastSignatureFromParts;
-    
+
     // We need to create a new chunk with the corrected metadata
     // because AIMessageChunk is immutable
     const correctedChunk = new AIMessageChunk({
       content: chunk.content,
       tool_call_chunks: chunk.tool_call_chunks,
       response_metadata: newMetadata,
-      usage_metadata: chunk.usage_metadata,
+      usage_metadata: extractedUsageMetadata,  // Use extracted usage metadata
     });
-    
+
     debugLog(`Chunk response_metadata has thoughtSignature (corrected)`, {
       signaturePreview: lastSignatureFromParts.slice(0, 50) + '...',
       hasToolCalls: (correctedChunk.tool_call_chunks?.length ?? 0) > 0,
       toolCallNames: correctedChunk.tool_call_chunks?.map(tc => tc.name) ?? [],
+      hasUsageMetadata: !!extractedUsageMetadata,
     });
 
     // Determine text content for the chunk
@@ -272,9 +279,9 @@ export function convertGoogleStreamChunkToLangChainChunk(
     });
   }
 
-  // Attach usage metadata if present in this chunk
-  if (response.usageMetadata) {
-    chunk.usage_metadata = extractUsageMetadata(response.usageMetadata);
+  // Attach usage metadata if present in this chunk (fallback path)
+  if (extractedUsageMetadata) {
+    chunk.usage_metadata = extractedUsageMetadata;
   }
 
   // Debug: Log if chunk has thoughtSignature in response_metadata
@@ -282,7 +289,7 @@ export function convertGoogleStreamChunkToLangChainChunk(
     // Validate and fix any concatenated signatures
     const existingSignature = chunk.response_metadata.thoughtSignature as string;
     const validatedSignature = validateAndFixThoughtSignature(existingSignature);
-    
+
     if (validatedSignature && validatedSignature !== existingSignature) {
       debugLog(`Fixed concatenated signature in chunk`, {
         originalLength: existingSignature.length,
@@ -290,7 +297,7 @@ export function convertGoogleStreamChunkToLangChainChunk(
       });
       chunk.response_metadata["thoughtSignature"] = validatedSignature;
     }
-    
+
     debugLog(`Chunk response_metadata has thoughtSignature`, {
       signaturePreview: (chunk.response_metadata.thoughtSignature as string).slice(0, 50) + '...',
       hasToolCalls: (chunk.tool_call_chunks?.length ?? 0) > 0,

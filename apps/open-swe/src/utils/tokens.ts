@@ -7,8 +7,53 @@ import {
 import { getMessageContentString } from "@openswe/shared/messages";
 import { traceable } from "langsmith/traceable";
 
-// After 80k tokens, summarize the conversation history.
-export const MAX_INTERNAL_TOKENS = 80_000;
+// Summarize conversation history when token count exceeds this threshold
+// Configurable via MAX_INTERNAL_TOKENS env variable, default 40k
+export const MAX_INTERNAL_TOKENS = parseInt(
+  process.env.MAX_INTERNAL_TOKENS || "40000",
+  10
+);
+
+/**
+ * Get max internal tokens threshold for a specific task
+ * Supports per-task override: {TASK}_MAX_INTERNAL_TOKENS
+ * Falls back to global MAX_INTERNAL_TOKENS
+ * 
+ * @param task - Task name (e.g., "planner", "programmer", "summarizer")
+ */
+export function getMaxInternalTokens(task?: string): number {
+  if (task) {
+    const taskUpper = task.toUpperCase();
+    const perTaskValue = process.env[`${taskUpper}_MAX_INTERNAL_TOKENS`];
+    if (perTaskValue) {
+      return parseInt(perTaskValue, 10);
+    }
+  }
+  return MAX_INTERNAL_TOKENS;
+}
+
+/**
+ * Get context size threshold for a specific task
+ * Supports per-task override: {TASK}_CHECK_CONTEXT_SIZE_TOKENS
+ * Falls back to global CHECK_CONTEXT_SIZE_TOKENS
+ * 
+ * @param task - Task name (e.g., "planner", "programmer", "summarizer")
+ */
+export function getCheckContextSizeTokens(task?: string): number {
+  const globalValue = parseInt(
+    process.env.CHECK_CONTEXT_SIZE_TOKENS || "60000",
+    10
+  );
+
+  if (task) {
+    const taskUpper = task.toUpperCase();
+    const perTaskValue = process.env[`${taskUpper}_CHECK_CONTEXT_SIZE_TOKENS`];
+    if (perTaskValue) {
+      return parseInt(perTaskValue, 10);
+    }
+  }
+  return globalValue;
+}
 
 export function calculateConversationHistoryTokenCount(
   messages: BaseMessage[],

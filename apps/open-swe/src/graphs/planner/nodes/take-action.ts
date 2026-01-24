@@ -3,7 +3,6 @@ import {
   isAIMessage,
   isToolMessage,
   ToolMessage,
-  HumanMessage,
 } from "@langchain/core/messages";
 import {
   isLocalMode,
@@ -33,15 +32,17 @@ import {
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
+import { createReadyToPlanTool, READY_TO_PLAN_TOOL_NAME } from "../../../tools/ready-to-plan.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command, END } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
-import { processToolCallContent, generateAndCacheImageDescription } from "../../../utils/tool-output-processing.js";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { isRunCancelled } from "../../../utils/run-cancellation.js";
+import { normalizeToolCallArgs } from "../../../utils/normalize-tool-args.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -120,6 +121,7 @@ export async function takeActions(
   const shellTool = createShellTool(state, config);
   const searchTool = createGrepTool(state, config);
   const scratchpadTool = createScratchpadTool("");
+  const readyToPlanTool = createReadyToPlanTool();
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
@@ -135,6 +137,7 @@ export async function takeActions(
     shellTool,
     searchTool,
     scratchpadTool,
+    readyToPlanTool,
     getURLContentTool,
     searchDocumentForTool,
     createReadImageTool(state, config),
@@ -179,10 +182,13 @@ export async function takeActions(
     let result = "";
     let toolCallStatus: "success" | "error" = "success";
     try {
+      // Normalize tool args before invoke to handle common AI model mistakes
+      // (e.g., using 'pattern' instead of 'query' for grep tool)
+      const normalizedArgs = normalizeToolCallArgs(toolCall.name, toolCall.args);
       const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
         (await tool.invoke({
-          ...toolCall.args,
+          ...normalizedArgs,
           // Only pass sandbox session ID in sandbox mode, not local mode
           ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         })) as {
@@ -225,7 +231,7 @@ export async function takeActions(
       }
     }
 
-    const { content, stateUpdates, pendingImageDescription } = await processToolCallContent(
+    const { content, stateUpdates, imageDescriptionToCache } = await processToolCallContent(
       toolCall,
       result,
       {
@@ -244,54 +250,11 @@ export async function takeActions(
     });
 
     // =======================================================================
-    // HYBRID IMAGE ANALYSIS: Handle image messages based on first-read status
+    // IMAGE DESCRIPTION: No longer inject images - description is in ToolMessage
     // =======================================================================
-    // If this is read_image tool with successful image result, create HumanMessage with image content
-    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
-    // The image must be re-introduced as new input in a HumanMessage
-    // For CACHED READS (description instead of base64), we skip the image message
-    let imageMessage: HumanMessage | undefined;
-    if (toolCall.name === "read_image" && toolCallStatus === "success") {
-      if (pendingImageDescription) {
-        // FIRST READ: Create HumanMessage with actual image for visual analysis
-        logger.info("Creating HumanMessage with image content for first read_image result in planner", {
-          imagePath: pendingImageDescription.imagePath,
-          base64Length: pendingImageDescription.base64DataUrl.length,
-        });
-        imageMessage = new HumanMessage({
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: pendingImageDescription.base64DataUrl },
-            },
-            {
-              type: "text",
-              text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning. A text description will be cached for subsequent references.",
-            },
-          ],
-        });
-      } else if (content.startsWith("data:image/")) {
-        // FALLBACK: Raw base64 result (backward compatibility)
-        logger.info("Creating HumanMessage with image content for read_image result (fallback)", {
-          imageDataUrlLength: content.length,
-        });
-        imageMessage = new HumanMessage({
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: content },
-            },
-            {
-              type: "text",
-              text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning.",
-            },
-          ],
-        });
-      }
-    }
-    // CACHED READ: No image message needed - the text description is in the tool message content
+    // Image description is now generated synchronously in processToolCallContent
 
-    return { toolMessage, imageMessage, stateUpdates, pendingImageDescription };
+    return { toolMessage, stateUpdates, imageDescriptionToCache };
   });
 
   let toolCallResultsWithUpdates;
@@ -314,10 +277,10 @@ export async function takeActions(
     (item) => item.toolMessage,
   );
 
-  // Collect image messages from read_image tool calls
-  const imageMessages = toolCallResultsWithUpdates
-    .map((item) => item.imageMessage)
-    .filter((msg): msg is HumanMessage => msg !== undefined);
+  // Collect image descriptions for caching
+  const imageDescriptionsToCache = toolCallResultsWithUpdates
+    .map((item) => item.imageDescriptionToCache)
+    .filter((desc): desc is { imagePath: string; description: any } => desc !== undefined);
 
   // merging document cache updates from tool calls
   const allStateUpdates = toolCallResultsWithUpdates
@@ -334,55 +297,19 @@ export async function takeActions(
     );
 
   // =======================================================================
-  // HYBRID IMAGE ANALYSIS: Generate descriptions for first-time image reads
+  // Image descriptions are already generated - just add to cache
   // =======================================================================
-  const pendingImageDescriptions = toolCallResultsWithUpdates
-    .map((item) => item.pendingImageDescription)
-    .filter((pd): pd is { imagePath: string; base64DataUrl: string } => pd !== undefined);
-
-  // Generate image descriptions synchronously and add to state updates
-  // This ensures the cache is properly persisted for subsequent reads
-  let imageDescriptionCacheUpdate: Record<string, any> = {};
-  if (pendingImageDescriptions.length > 0) {
-    logger.info("Generating image descriptions for caching in planner", {
-      count: pendingImageDescriptions.length,
-      paths: pendingImageDescriptions.map(pd => pd.imagePath),
+  if (imageDescriptionsToCache.length > 0) {
+    logger.info("Caching image descriptions in planner", {
+      count: imageDescriptionsToCache.length,
+      paths: imageDescriptionsToCache.map(d => d.imagePath),
     });
 
-    // Generate all descriptions in parallel but await completion
-    const descriptionPromises = pendingImageDescriptions.map(async (pd) => {
-      try {
-        const cache = await generateAndCacheImageDescription(
-          pd.imagePath,
-          pd.base64DataUrl,
-          config,
-          (state as any).imageDescriptionCache ?? {},
-        );
-        logger.info("Image description generated and cached", {
-          imagePath: pd.imagePath,
-        });
-        return cache;
-      } catch (err) {
-        logger.error("Failed to generate image description", {
-          imagePath: pd.imagePath,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return null;
-      }
-    });
-
-    const results = await Promise.all(descriptionPromises);
-
-    // Merge all successfully generated descriptions
-    for (const cache of results) {
-      if (cache) {
-        imageDescriptionCacheUpdate = { ...imageDescriptionCacheUpdate, ...cache };
-      }
+    const imageDescriptionCacheUpdate: Record<string, any> = {};
+    for (const desc of imageDescriptionsToCache) {
+      imageDescriptionCacheUpdate[desc.imagePath] = desc.description;
     }
-  }
 
-  // Merge imageDescriptionCache into allStateUpdates
-  if (Object.keys(imageDescriptionCacheUpdate).length > 0) {
     (allStateUpdates as any).imageDescriptionCache = {
       ...((state as any).imageDescriptionCache ?? {}),
       ...imageDescriptionCacheUpdate,
@@ -458,7 +385,7 @@ export async function takeActions(
   });
 
   const commandUpdate: PlannerGraphUpdate = {
-    messages: [...toolCallResults, ...imageMessages],
+    messages: [...toolCallResults],
     sandboxSessionId: sandboxInstance.id,
     ...(sandboxProviderType && { sandboxProviderType }),
     ...(codebaseTree && { codebaseTree }),
@@ -466,7 +393,12 @@ export async function takeActions(
     ...allStateUpdates,
   };
 
-  const maxContextActions = config.configurable?.maxContextActions ?? 75;
+  // Priority: ENV var > config > default (75)
+  // ENV var allows runtime adjustment without recompilation
+  const envMaxContextActions = process.env.MAX_CONTEXT_ACTIONS
+    ? parseInt(process.env.MAX_CONTEXT_ACTIONS, 10)
+    : undefined;
+  const maxContextActions = envMaxContextActions ?? config.configurable?.maxContextActions ?? 75;
   const maxActionsCount = maxContextActions * 2;
   // Exclude hidden messages, and messages that are not AI messages or tool messages.
   const filteredMessages = filterHiddenMessages([
@@ -479,6 +411,18 @@ export async function takeActions(
       maxActionsCount,
       filteredMessages,
     });
+    return new Command({
+      goto: "generate-plan",
+      update: commandUpdate,
+    });
+  }
+
+  // Check if AI called ready_to_plan tool - this signals AI wants to generate plan
+  const readyToPlanCalled = toolCalls.some(
+    (tc) => tc.name === READY_TO_PLAN_TOOL_NAME
+  );
+  if (readyToPlanCalled) {
+    logger.info("AI signaled ready to plan via ready_to_plan tool, transitioning to generate-plan");
     return new Command({
       goto: "generate-plan",
       update: commandUpdate,

@@ -3,6 +3,11 @@ import { getModelManager } from "./llms/model-manager.js";
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { HumanMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "./logger.js";
+import {
+    logAIMessage,
+    summarizeResponse,
+    extractTokenUsage,
+} from "@openswe/shared/logger-hub-client";
 
 const logger = createLogger(LogLevel.INFO, "ImageDescriptionGenerator");
 
@@ -71,6 +76,25 @@ export async function generateImageDescription(
 
         // Invoke the model
         const response = await model.invoke([message]);
+        const durationMs = Date.now() - startTime;
+
+        // Log to Logger Hub (fire and forget)
+        const provider = process.env.LLM_PROVIDER || 'unknown';
+        const providerPrefix = provider === 'google-genai' ? 'GOOGLE' : provider.toUpperCase();
+        const modelName = process.env[`${providerPrefix}_ROUTER_MODEL`] || 'unknown';
+        logAIMessage({
+            threadId: config.configurable?.thread_id || 'unknown',
+            runId: config.configurable?.run_id,
+            provider,
+            modelName,
+            task: LLMTask.ROUTER,
+            status: 'success',
+            requestMessages: [{ role: 'human', content: { imagePath, prompt: IMAGE_DESCRIPTION_PROMPT } }],
+            response: summarizeResponse(response),
+            durationMs,
+            tokenUsage: extractTokenUsage(response),
+            timestamp: Date.now(),
+        });
 
         // Extract the text content from response
         const description = typeof response.content === "string"
@@ -98,6 +122,26 @@ export async function generateImageDescription(
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorName = error instanceof Error ? error.name : 'Error';
+        const durationMs = Date.now() - startTime;
+
+        // Log error to Logger Hub
+        const provider = process.env.LLM_PROVIDER || 'unknown';
+        const providerPrefix = provider === 'google-genai' ? 'GOOGLE' : provider.toUpperCase();
+        const modelName = process.env[`${providerPrefix}_ROUTER_MODEL`] || 'unknown';
+        logAIMessage({
+            threadId: config.configurable?.thread_id || 'unknown',
+            runId: config.configurable?.run_id,
+            provider,
+            modelName,
+            task: LLMTask.ROUTER,
+            status: 'error',
+            requestMessages: [{ role: 'human', content: { imagePath, prompt: IMAGE_DESCRIPTION_PROMPT } }],
+            durationMs,
+            error: { message: errorMessage, name: errorName },
+            timestamp: Date.now(),
+        });
+
         logger.error("Failed to generate image description", {
             imagePath,
             error: errorMessage,

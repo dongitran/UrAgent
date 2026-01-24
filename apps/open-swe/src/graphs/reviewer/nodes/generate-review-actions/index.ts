@@ -33,8 +33,8 @@ import {
   formatCodeReviewPrompt,
   getCodeReviewFields,
 } from "../../../../utils/review.js";
-import { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
-import { getMessageString } from "../../../../utils/message/content.js";
+import { AIMessage, BaseMessage, BaseMessageLike } from "@langchain/core/messages";
+import { getMessageString, mergeConsecutiveSameRoleMessages } from "../../../../utils/message/content.js";
 import {
   CacheablePromptSegment,
   convertMessagesToCacheControlledMessages,
@@ -171,6 +171,11 @@ function createToolsAndPrompt(
   } as any;
   const nonAnthropicTools = tools;
 
+  // Merge consecutive same-role messages in reviewerMessages for Anthropic API compliance
+  const reviewerMessagesProcessed = mergeConsecutiveSameRoleMessages(
+    convertMessagesToCacheControlledMessages(state.reviewerMessages)
+  );
+
   const anthropicMessages = [
     {
       role: "system",
@@ -184,7 +189,7 @@ function createToolsAndPrompt(
         excludeCacheControl: false,
       }),
     },
-    ...convertMessagesToCacheControlledMessages(state.reviewerMessages),
+    ...reviewerMessagesProcessed,
   ];
   const nonAnthropicMessages = [
     {
@@ -202,6 +207,31 @@ function createToolsAndPrompt(
     ...state.reviewerMessages,
   ];
 
+  // CRITICAL FIX: Filter orphan AIMessages for Gemini fallback compatibility
+  // Remove AIMessages with tool_calls that don't have ToolMessage responses
+  const cleanedReviewerMessages: BaseMessage[] = [];
+  for (let idx = 0; idx < state.reviewerMessages.length; idx++) {
+    const msg = state.reviewerMessages[idx];
+    const isAI = msg.constructor.name === "AIMessage" || msg.constructor.name === "AIMessageChunk";
+    const aiToolCalls = (msg as AIMessage).tool_calls;
+    const hasToolCalls = isAI && aiToolCalls && aiToolCalls.length > 0;
+
+    if (hasToolCalls) {
+      const nextMsg = state.reviewerMessages[idx + 1];
+      const nextIsToolMsg = nextMsg && nextMsg.constructor.name === "ToolMessage";
+
+      if (!nextIsToolMsg) {
+        debugLog("[Gemini Debug] Reviewer: Removing orphan AIMessage with tool_calls", {
+          index: idx,
+          toolCallsCount: aiToolCalls.length,
+          toolCallNames: aiToolCalls.map((tc: any) => tc.name),
+        });
+        continue;
+      }
+    }
+    cleanedReviewerMessages.push(msg);
+  }
+
   const geminiMessages = [
     {
       role: "system",
@@ -215,7 +245,7 @@ function createToolsAndPrompt(
         excludeCacheControl: true,
       }),
     },
-    ...state.reviewerMessages,
+    ...cleanedReviewerMessages,
   ];
 
   debugLog("[Gemini Debug] Reviewer message structure prepared", {

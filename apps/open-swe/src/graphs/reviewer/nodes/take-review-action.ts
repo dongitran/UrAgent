@@ -4,7 +4,6 @@ import {
   isToolMessage,
   ToolMessage,
   AIMessage,
-  HumanMessage,
 } from "@langchain/core/messages";
 import {
   createInstallDependenciesTool,
@@ -19,7 +18,7 @@ import {
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
-import { processToolCallContent, generateAndCacheImageDescription } from "../../../utils/tool-output-processing.js";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { createGrepTool } from "../../../tools/grep.js";
 
 import {
@@ -38,6 +37,7 @@ import { createPullRequestToolCallMessage } from "../../../utils/message/create-
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { normalizeToolCallArgs } from "../../../utils/normalize-tool-args.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 import { isRunCancelled } from "../../../utils/run-cancellation.js";
@@ -107,7 +107,7 @@ export async function takeReviewerActions(
     );
 
   // Helper function to execute a single tool call
-  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<{ toolMessage: ToolMessage; imageMessage?: HumanMessage; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }> => {
+  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<{ toolMessage: ToolMessage; imageDescriptionToCache?: { imagePath: string; description: any } }> => {
     const tool = toolsMap[toolCall.name];
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
@@ -129,10 +129,13 @@ export async function takeReviewerActions(
     let result = "";
     let toolCallStatus: "success" | "error" = "success";
     try {
+      // Normalize tool args before invoke to handle common AI model mistakes
+      // (e.g., using 'pattern' instead of 'query' for grep tool)
+      const normalizedArgs = normalizeToolCallArgs(toolCall.name, toolCall.args);
       const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
         (await tool.invoke({
-          ...toolCall.args,
+          ...normalizedArgs,
           // Only pass sandbox session ID in sandbox mode, not local mode
           ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         })) as {
@@ -172,7 +175,7 @@ export async function takeReviewerActions(
     }
 
     // Process tool output with hybrid image analysis support
-    const { content: toolMessageContent, pendingImageDescription } = await processToolCallContent(
+    const { content: toolMessageContent, imageDescriptionToCache } = await processToolCallContent(
       toolCall,
       result,
       {
@@ -191,54 +194,11 @@ export async function takeReviewerActions(
     });
 
     // =======================================================================
-    // HYBRID IMAGE ANALYSIS: Handle image messages based on first-read status
+    // IMAGE DESCRIPTION: No longer inject images - description is in ToolMessage
     // =======================================================================
-    // If this is read_image tool with successful image result, create HumanMessage with image content
-    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
-    // The image must be re-introduced as new input in a HumanMessage
-    // For CACHED READS (description instead of base64), we skip the image message
-    let imageMessage: HumanMessage | undefined;
-    if (toolCall.name === "read_image" && toolCallStatus === "success") {
-      if (pendingImageDescription) {
-        // FIRST READ: Create HumanMessage with actual image for visual analysis
-        logger.info("Creating HumanMessage with image content for first read_image result in reviewer", {
-          imagePath: pendingImageDescription.imagePath,
-          base64Length: pendingImageDescription.base64DataUrl.length,
-        });
-        imageMessage = new HumanMessage({
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: pendingImageDescription.base64DataUrl },
-            },
-            {
-              type: "text",
-              text: "Above is the image you requested via read_image tool. Use it as visual reference for your review. A text description will be cached for subsequent references.",
-            },
-          ],
-        });
-      } else if (toolMessageContent.startsWith("data:image/")) {
-        // FALLBACK: Raw base64 result (backward compatibility)
-        logger.info("Creating HumanMessage with image content for read_image result (fallback)", {
-          imageDataUrlLength: toolMessageContent.length,
-        });
-        imageMessage = new HumanMessage({
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: toolMessageContent },
-            },
-            {
-              type: "text",
-              text: "Above is the image you requested via read_image tool. Use it as visual reference for your review.",
-            },
-          ],
-        });
-      }
-    }
-    // CACHED READ: No image message needed - the text description is in the tool message content
+    // Image description is now generated synchronously in processToolCallContent
 
-    return { toolMessage, imageMessage, pendingImageDescription };
+    return { toolMessage, imageDescriptionToCache };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -256,7 +216,7 @@ export async function takeReviewerActions(
   });
 
   // Execute sequential tools one at a time (shell commands that may consume lots of memory)
-  const sequentialResults: { toolMessage: ToolMessage; imageMessage?: HumanMessage; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }[] = [];
+  const sequentialResults: { toolMessage: ToolMessage; imageDescriptionToCache?: { imagePath: string; description: any } }[] = [];
   for (const toolCall of sequentialCalls) {
     if (await isRunCancelled(config)) {
       break;
@@ -269,7 +229,7 @@ export async function takeReviewerActions(
   const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
 
   // Combine results in original order
-  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; pendingImageDescription?: { imagePath: string; base64DataUrl: string } }[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageDescriptionToCache?: { imagePath: string; description: any } }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
@@ -281,52 +241,24 @@ export async function takeReviewerActions(
   }
 
   const toolCallResults = toolCallResultsWithUpdates.map(item => item.toolMessage);
-  // Collect image messages from read_image tool calls
-  const imageMessages = toolCallResultsWithUpdates
-    .map((item) => item.imageMessage)
-    .filter((msg): msg is HumanMessage => msg !== undefined);
+
+  // Collect image descriptions for caching
+  const imageDescriptionsToCache = toolCallResultsWithUpdates
+    .map((item) => item.imageDescriptionToCache)
+    .filter((desc): desc is { imagePath: string; description: any } => desc !== undefined);
 
   // =======================================================================
-  // HYBRID IMAGE ANALYSIS: Generate descriptions for first-time image reads
+  // Image descriptions are already generated - just add to cache
   // =======================================================================
-  const pendingImageDescriptions = toolCallResultsWithUpdates
-    .map((item) => item.pendingImageDescription)
-    .filter((pd): pd is { imagePath: string; base64DataUrl: string } => pd !== undefined);
-
-  // Generate image descriptions synchronously and add to state updates
   let imageDescriptionCacheUpdate: Record<string, any> = {};
-  if (pendingImageDescriptions.length > 0) {
-    logger.info("Generating image descriptions for caching in reviewer", {
-      count: pendingImageDescriptions.length,
-      paths: pendingImageDescriptions.map(pd => pd.imagePath),
+  if (imageDescriptionsToCache.length > 0) {
+    logger.info("Caching image descriptions in reviewer", {
+      count: imageDescriptionsToCache.length,
+      paths: imageDescriptionsToCache.map(d => d.imagePath),
     });
 
-    const descriptionPromises = pendingImageDescriptions.map(async (pd) => {
-      try {
-        const cache = await generateAndCacheImageDescription(
-          pd.imagePath,
-          pd.base64DataUrl,
-          config,
-          (state as any).imageDescriptionCache ?? {},
-        );
-        logger.info("Image description generated and cached", {
-          imagePath: pd.imagePath,
-        });
-        return cache;
-      } catch (err) {
-        logger.error("Failed to generate image description", {
-          imagePath: pd.imagePath,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return null;
-      }
-    });
-
-    const results = await Promise.all(descriptionPromises);
-    for (const cache of results) {
-      if (cache) {
-        imageDescriptionCacheUpdate = { ...imageDescriptionCacheUpdate, ...cache };
-      }
+    for (const desc of imageDescriptionsToCache) {
+      imageDescriptionCacheUpdate[desc.imagePath] = desc.description;
     }
   }
 
@@ -398,11 +330,11 @@ export async function takeReviewerActions(
   ];
 
   // Include the modified message if it was filtered
-  // Also include image messages for multimodal processing
+  // Image descriptions are now text in ToolMessage - no HumanMessage images
   const reviewerMessagesUpdate =
     wasFiltered && modifiedMessage
-      ? [modifiedMessage, ...toolCallResults, ...imageMessages]
-      : [...toolCallResults, ...imageMessages];
+      ? [modifiedMessage, ...toolCallResults]
+      : [...toolCallResults];
 
   const commandUpdate: ReviewerGraphUpdate = {
     messages: userFacingMessagesUpdate,
