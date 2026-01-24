@@ -38,8 +38,9 @@ import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createScratchpadTool } from "../../../../tools/scratchpad.js";
+import { createReadyToPlanTool } from "../../../../tools/ready-to-plan.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
-import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import { filterMessagesWithoutContent, mergeConsecutiveSameRoleMessages } from "../../../../utils/message/content.js";
 import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
@@ -148,6 +149,7 @@ export async function generateAction(
     createScratchpadTool(
       "when generating a final plan, after all context gathering is complete",
     ),
+    createReadyToPlanTool(),
     createGetURLContentTool(state),
     createSearchDocumentForTool(state, config),
     createReadImageTool(state, config),
@@ -188,8 +190,10 @@ export async function generateAction(
     throw new Error("No messages to process.");
   }
 
-  const inputMessagesWithCache =
-    convertMessagesToCacheControlledMessages(inputMessages);
+  // Merge consecutive same-role messages for Anthropic API compliance
+  const inputMessagesWithCache = mergeConsecutiveSameRoleMessages(
+    convertMessagesToCacheControlledMessages(inputMessages)
+  );
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([

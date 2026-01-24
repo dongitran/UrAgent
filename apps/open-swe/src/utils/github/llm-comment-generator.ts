@@ -1,8 +1,9 @@
 import { ChatOpenAI } from "@langchain/openai";
-import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatAnthropicFiltered } from "../llms/anthropic/chat-anthropic-filtered.js";
 import { HumanMessage } from "@langchain/core/messages";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createLogger, LogLevel } from "../logger.js";
+import { logAIMessage, summarizeResponse, extractTokenUsage } from "@openswe/shared/logger-hub-client";
 
 const logger = createLogger(LogLevel.INFO, "LLMCommentGenerator");
 
@@ -25,21 +26,21 @@ export function getSummarizerModelConfig(): { provider: string; modelName: strin
   const providerPrefix = provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
   const taskEnvKey = `${providerPrefix}_SUMMARIZER_MODEL`;
   const taskEnvValue = process.env[taskEnvKey];
-  
+
   if (taskEnvValue) {
     return { provider, modelName: taskEnvValue };
   }
-  
+
   // Fallback defaults based on provider
   const defaultModels: Record<string, string> = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
     "google-genai": "gemini-2.0-flash",
   };
-  
-  return { 
-    provider, 
-    modelName: defaultModels[provider] || "gpt-4o-mini" 
+
+  return {
+    provider,
+    modelName: defaultModels[provider] || "gpt-4o-mini"
   };
 }
 
@@ -65,7 +66,7 @@ export function getApiKeyForProvider(provider: string): string | undefined {
 async function callGoogleGenAI(modelName: string, apiKey: string, prompt: string): Promise<string> {
   const client = new GoogleGenerativeAI(apiKey);
   const model = client.getGenerativeModel({ model: modelName });
-  
+
   const result = await model.generateContent(prompt);
   const text = result.response.text();
   return text.trim();
@@ -88,21 +89,38 @@ export async function generateCommentWithLLM(
 ): Promise<string> {
   const { provider, modelName } = getSummarizerModelConfig();
   const apiKey = getApiKeyForProvider(provider);
-  
+
   if (!apiKey) {
     logger.warn(`API key not set for provider ${provider}, using fallback message`, context);
     return fallbackMessage;
   }
 
   let lastError: Error | undefined;
-  
+
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const startTime = Date.now();
+
     try {
       let generatedText: string;
+      let response: any;
 
       if (provider === "google-genai") {
         // Use Google Generative AI SDK directly to avoid LangChain wrapper issues
         generatedText = await callGoogleGenAI(modelName, apiKey, prompt);
+
+        // Log to Logger Hub (fire and forget)
+        const durationMs = Date.now() - startTime;
+        logAIMessage({
+          threadId: 'github-comment-generator',
+          provider,
+          modelName,
+          task: 'COMMENT_GENERATOR',
+          status: 'success',
+          requestMessages: [{ role: 'human', content: prompt }],
+          response: { content: generatedText },
+          durationMs,
+          timestamp: Date.now(),
+        });
       } else if (provider === "openai") {
         const model = new ChatOpenAI({
           modelName,
@@ -111,31 +129,61 @@ export async function generateCommentWithLLM(
           maxTokens: 5000,
           ...(process.env.OPENAI_BASE_URL ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } } : {}),
         });
-        const response = await model.invoke([new HumanMessage(prompt)]);
+        response = await model.invoke([new HumanMessage(prompt)]);
         generatedText = typeof response.content === 'string'
           ? response.content.trim()
           : Array.isArray(response.content)
-            ? response.content.map(c => typeof c === 'string' ? c : '').join('').trim()
+            ? response.content.map((c: unknown) => typeof c === 'string' ? c : '').join('').trim()
             : '';
+
+        // Log to Logger Hub (fire and forget)
+        const durationMs = Date.now() - startTime;
+        logAIMessage({
+          threadId: 'github-comment-generator',
+          provider,
+          modelName,
+          task: 'COMMENT_GENERATOR',
+          status: 'success',
+          requestMessages: [{ role: 'human', content: prompt }],
+          response: summarizeResponse(response),
+          durationMs,
+          tokenUsage: extractTokenUsage(response),
+          timestamp: Date.now(),
+        });
       } else if (provider === "anthropic") {
-        const model = new ChatAnthropic({
+        const model = new ChatAnthropicFiltered({
           modelName,
           apiKey,
           temperature: 0.8,
           maxTokens: 5000,
         });
-        const response = await model.invoke([new HumanMessage(prompt)]);
+        response = await model.invoke([new HumanMessage(prompt)]);
         generatedText = typeof response.content === 'string'
           ? response.content.trim()
           : Array.isArray(response.content)
-            ? response.content.map(c => typeof c === 'string' ? c : '').join('').trim()
+            ? response.content.map((c: unknown) => typeof c === 'string' ? c : '').join('').trim()
             : '';
+
+        // Log to Logger Hub (fire and forget)
+        const durationMs = Date.now() - startTime;
+        logAIMessage({
+          threadId: 'github-comment-generator',
+          provider,
+          modelName,
+          task: 'COMMENT_GENERATOR',
+          status: 'success',
+          requestMessages: [{ role: 'human', content: prompt }],
+          response: summarizeResponse(response),
+          durationMs,
+          tokenUsage: extractTokenUsage(response),
+          timestamp: Date.now(),
+        });
       } else {
         throw new Error(`Unsupported provider: ${provider}`);
       }
-      
+
       if (generatedText && generatedText.length > 0) {
-        logger.info("Generated comment with LLM", { 
+        logger.info("Generated comment with LLM", {
           ...context,
           generatedLength: generatedText.length,
           attempt: attempt + 1,
@@ -144,13 +192,28 @@ export async function generateCommentWithLLM(
         });
         return generatedText;
       }
-      
+
       logger.warn("Generated text invalid, will retry", { ...context, generatedText, attempt: attempt + 1 });
       lastError = new Error("Invalid generated text");
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       const delay = attempt < MAX_RETRIES - 1 ? INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt) : 0;
-      logger.warn(`Attempt ${attempt + 1}/${MAX_RETRIES} failed${delay > 0 ? `, retrying in ${delay}ms` : ''}`, { 
+
+      // Log error to Logger Hub (fire and forget)
+      const durationMs = Date.now() - startTime;
+      logAIMessage({
+        threadId: 'github-comment-generator',
+        provider,
+        modelName,
+        task: 'COMMENT_GENERATOR',
+        status: 'error',
+        requestMessages: [{ role: 'human', content: prompt }],
+        durationMs,
+        error: { message: lastError.message, name: lastError.name },
+        timestamp: Date.now(),
+      });
+
+      logger.warn(`Attempt ${attempt + 1}/${MAX_RETRIES} failed${delay > 0 ? `, retrying in ${delay}ms` : ''}`, {
         ...context,
         error: lastError.message,
         errorName: lastError.name,
@@ -158,15 +221,15 @@ export async function generateCommentWithLLM(
         model: modelName,
       });
     }
-    
+
     // Wait before retry (exponential backoff)
     if (attempt < MAX_RETRIES - 1) {
       const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
       await sleep(delay);
     }
   }
-  
-  logger.error("Failed to generate comment after all retries, using fallback", { 
+
+  logger.error("Failed to generate comment after all retries, using fallback", {
     ...context,
     error: lastError?.message,
     errorName: lastError?.name,
@@ -177,3 +240,4 @@ export async function generateCommentWithLLM(
   });
   return fallbackMessage;
 }
+

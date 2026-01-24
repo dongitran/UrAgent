@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { isAIMessage, ToolMessage, AIMessage, HumanMessage } from "@langchain/core/messages";
+import { isAIMessage, ToolMessage, AIMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   createApplyPatchTool,
@@ -44,6 +44,7 @@ import { getActiveTask } from "@openswe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { normalizeToolCallArgs } from "../../../utils/normalize-tool-args.js";
 import {
   createReplyToCommentTool,
   createReplyToReviewCommentTool,
@@ -193,10 +194,13 @@ export async function takeAction(
     let result = "";
     let toolCallStatus: "success" | "error" = "success";
     try {
+      // Normalize tool args before invoke to handle common AI model mistakes
+      // (e.g., using 'pattern' instead of 'query' for grep tool)
+      const normalizedArgs = normalizeToolCallArgs(toolCall.name, toolCall.args);
       const toolResult: { result: string; status: "success" | "error" } =
         // @ts-expect-error tool.invoke types are weird here...
         await tool.invoke({
-          ...toolCall.args,
+          ...normalizedArgs,
           // Only pass sandbox session ID in sandbox mode, not local mode
           ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         });
@@ -236,7 +240,7 @@ export async function takeAction(
       }
     }
 
-    const { content, stateUpdates } = await processToolCallContent(
+    const { content, stateUpdates, imageDescriptionToCache } = await processToolCallContent(
       toolCall,
       result,
       {
@@ -254,33 +258,13 @@ export async function takeAction(
       status: toolCallStatus,
     });
 
-    // If this is read_image tool with successful image result, create HumanMessage with image content
-    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
-    // The image must be re-introduced as new input in a HumanMessage
-    let imageMessage: HumanMessage | undefined;
-    if (
-      toolCall.name === "read_image" &&
-      toolCallStatus === "success" &&
-      result.startsWith("data:image/")
-    ) {
-      logger.info("Creating HumanMessage with image content for read_image result", {
-        imageDataUrlLength: result.length,
-      });
-      imageMessage = new HumanMessage({
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: result },
-          },
-          {
-            type: "text",
-            text: "Above is the image you requested via read_image tool. Use it as visual reference for your task.",
-          },
-        ],
-      });
-    }
+    // =======================================================================
+    // IMAGE DESCRIPTION: No longer inject images - description is in ToolMessage
+    // =======================================================================
+    // The image description is now generated synchronously in processToolCallContent
+    // and returned as text in the ToolMessage content. No HumanMessage needed.
 
-    return { toolMessage, imageMessage, stateUpdates };
+    return { toolMessage, stateUpdates, imageDescriptionToCache };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -326,7 +310,7 @@ export async function takeAction(
   }
 
   // Combine results in original order
-  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage; stateUpdates: any }[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; stateUpdates: any; imageDescriptionToCache?: { imagePath: string; description: any } }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
@@ -341,10 +325,11 @@ export async function takeAction(
     (item) => item.toolMessage,
   );
 
-  // Collect image messages from read_image tool calls
-  const imageMessages = toolCallResultsWithUpdates
-    .map((item) => item.imageMessage)
-    .filter((msg): msg is HumanMessage => msg !== undefined);
+  // Image descriptions are now generated synchronously in processToolCallContent
+  // Collect them for caching
+  const imageDescriptionsToCache = toolCallResultsWithUpdates
+    .map((item) => item.imageDescriptionToCache)
+    .filter((desc): desc is { imagePath: string; description: any } => desc !== undefined);
 
   // merging document cache updates from tool calls
   const allStateUpdates = toolCallResultsWithUpdates
@@ -359,6 +344,26 @@ export async function takeAction(
       },
       { documentCache: {} } as { documentCache: Record<string, string> },
     );
+
+  // =======================================================================
+  // Image descriptions are already generated - just add to cache
+  // =======================================================================
+  if (imageDescriptionsToCache.length > 0) {
+    logger.info("Caching image descriptions", {
+      count: imageDescriptionsToCache.length,
+      paths: imageDescriptionsToCache.map(d => d.imagePath),
+    });
+
+    const imageDescriptionCacheUpdate: Record<string, any> = {};
+    for (const desc of imageDescriptionsToCache) {
+      imageDescriptionCacheUpdate[desc.imagePath] = desc.description;
+    }
+
+    (allStateUpdates as any).imageDescriptionCache = {
+      ...(state.imageDescriptionCache ?? {}),
+      ...imageDescriptionCacheUpdate,
+    };
+  }
 
   let wereDependenciesInstalled: boolean | null = null;
   toolCallResults.forEach((toolCallResult) => {
@@ -482,11 +487,11 @@ export async function takeAction(
   ];
 
   // Include the modified message if it was filtered
-  // Also include image messages for multimodal processing
+  // Image descriptions are now text in ToolMessage - no HumanMessage images
   const internalMessagesUpdate =
     wasFiltered && modifiedMessage
-      ? [modifiedMessage, ...toolCallResults, ...imageMessages]
-      : [...toolCallResults, ...imageMessages];
+      ? [modifiedMessage, ...toolCallResults]
+      : [...toolCallResults];
 
   const commandUpdate: GraphUpdate = {
     messages: userFacingMessagesUpdate,
@@ -535,7 +540,7 @@ export async function takeAction(
   }
 
   return new Command({
-    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "generate-action",
+    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "check-context-size",
     update: commandUpdate,
   });
 }

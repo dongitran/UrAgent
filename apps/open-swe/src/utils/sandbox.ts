@@ -136,6 +136,65 @@ export async function ensureSkillsRepository(
         throw cloneResult;
       }
 
+      // Apply sparse checkout if SKILLS_REPOSITORY_PATH is set to keep only needed subfolder
+      const skillsSubPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+      if (skillsSubPath) {
+        try {
+          logger.info("SKILLS REPO: Applying sparse checkout", { path: skillsSubPath });
+
+          // Initialize sparse checkout in cone mode
+          const initResult = await sandboxInstance.executeCommand({
+            command: `git sparse-checkout init --cone`,
+            workdir: skillsRepoDir,
+          });
+
+          if (initResult.exitCode !== 0) {
+            logger.warn("SKILLS REPO: Failed to init sparse checkout", {
+              result: initResult.result,
+              exitCode: initResult.exitCode,
+            });
+          } else {
+            // Set the sparse checkout path to only keep the needed subfolder
+            const setResult = await sandboxInstance.executeCommand({
+              command: `git sparse-checkout set "${skillsSubPath}"`,
+              workdir: skillsRepoDir,
+            });
+
+            if (setResult.exitCode !== 0) {
+              logger.warn("SKILLS REPO: Failed to set sparse checkout path", {
+                result: setResult.result,
+                exitCode: setResult.exitCode,
+                path: skillsSubPath,
+              });
+            } else {
+              logger.info("SKILLS REPO: Sparse checkout applied successfully", { path: skillsSubPath });
+
+              // Cone mode keeps root-level files (siblings of path ancestors)
+              // Clean up by removing all items except the target path's root folder
+              // Also remove .git since we don't need git history for skills
+              const targetRootFolder = skillsSubPath.split("/")[0]; // e.g., "AI" from "AI/Skills/UrTest"
+              const cleanupResult = await sandboxInstance.executeCommand({
+                command: `find . -maxdepth 1 ! -name '.' ! -name '${targetRootFolder}' -exec rm -rf {} +`,
+                workdir: skillsRepoDir,
+              });
+
+              if (cleanupResult.exitCode === 0) {
+                logger.info("SKILLS REPO: Cleaned up root-level files", { keptFolder: targetRootFolder });
+              } else {
+                logger.warn("SKILLS REPO: Failed to cleanup root-level files", {
+                  result: cleanupResult.result,
+                });
+              }
+            }
+          }
+        } catch (sparseError) {
+          // Non-fatal: if sparse checkout fails, we still have the full repo
+          logger.warn("SKILLS REPO: Sparse checkout failed, keeping full repo", {
+            error: sparseError instanceof Error ? sparseError.message : String(sparseError),
+          });
+        }
+      }
+
       // Add .skills to .git/info/exclude to prevent accidental commits
       try {
         const gitDirExists = await sandboxInstance.exists(`${absoluteRepoDir}/.git`);

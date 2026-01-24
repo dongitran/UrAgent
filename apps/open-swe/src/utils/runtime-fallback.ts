@@ -20,6 +20,14 @@ import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { getMessageContentString } from "@openswe/shared/messages";
 import { getConfig } from "@langchain/langgraph";
 import { MODELS_NO_PARALLEL_TOOL_CALLING } from "./llms/load-model.js";
+import {
+  logAIMessage,
+  serializeMessages,
+  serializeResponse,
+  extractToolCalls,
+  extractTokenUsage,
+  createErrorDetails,
+} from "@openswe/shared/logger-hub-client";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
@@ -359,6 +367,7 @@ export class FallbackRunnable<
           if (await isRunCancelled(this.config)) {
             throw new Error("Run cancelled");
           }
+          const invokeStartTime = Date.now();
           try {
             const result = await runnableToUse.invoke(messagesToInvoke, options);
 
@@ -369,9 +378,60 @@ export class FallbackRunnable<
             });
 
             this.modelManager.recordSuccess(modelKey);
+
+            // Log successful AI message to Logger Hub (fire and forget)
+            const durationMs = Date.now() - invokeStartTime;
+            const currentGraphConfig = getConfig() as GraphConfig & { metadata?: Record<string, unknown> };
+            // Extract graph node/step from LangGraph metadata if available
+            const graphNode = currentGraphConfig.metadata?.langgraph_node as string | undefined;
+            const graphStep = currentGraphConfig.metadata?.langgraph_step as number | undefined;
+            logAIMessage({
+              threadId: currentGraphConfig.configurable?.thread_id || 'unknown',
+              runId: currentGraphConfig.configurable?.run_id,
+              provider: modelConfig.provider,
+              modelName: modelConfig.modelName,
+              task: this.task,
+              status: 'success',
+              graphNode,
+              graphStep,
+              requestMessages: serializeMessages(
+                Array.isArray(messagesToInvoke) ? messagesToInvoke : [messagesToInvoke]
+              ),
+              response: result ? serializeResponse(result) : undefined,
+              responseToolCalls: result ? extractToolCalls(result) : undefined,
+              durationMs,
+              tokenUsage: result ? extractTokenUsage(result) : undefined,
+              timestamp: Date.now(),
+              retryAttempt,
+            });
+
             return result;
           } catch (invokeError) {
             modelLastError = invokeError instanceof Error ? invokeError : new Error(String(invokeError));
+
+            // Log failed AI message to Logger Hub (fire and forget)
+            const durationMs = Date.now() - invokeStartTime;
+            const currentGraphConfig = getConfig() as GraphConfig & { metadata?: Record<string, unknown> };
+            // Extract graph node/step from LangGraph metadata if available
+            const graphNode = currentGraphConfig.metadata?.langgraph_node as string | undefined;
+            const graphStep = currentGraphConfig.metadata?.langgraph_step as number | undefined;
+            logAIMessage({
+              threadId: currentGraphConfig.configurable?.thread_id || 'unknown',
+              runId: currentGraphConfig.configurable?.run_id,
+              provider: modelConfig.provider,
+              modelName: modelConfig.modelName,
+              task: this.task,
+              status: 'error',
+              graphNode,
+              graphStep,
+              requestMessages: serializeMessages(
+                Array.isArray(messagesToInvoke) ? messagesToInvoke : [messagesToInvoke]
+              ),
+              durationMs,
+              error: createErrorDetails(invokeError),
+              timestamp: Date.now(),
+              retryAttempt,
+            });
 
             // Check if error is retryable and we have retries left
             if (isRetryableError(invokeError) && retryAttempt < FALLBACK_MAX_RETRIES - 1) {

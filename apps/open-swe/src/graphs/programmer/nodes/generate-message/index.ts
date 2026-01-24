@@ -50,7 +50,7 @@ import {
   formatCodeReviewPrompt,
   getCodeReviewFields,
 } from "../../../../utils/review.js";
-import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import { filterMessagesWithoutContent, mergeConsecutiveSameRoleMessages } from "../../../../utils/message/content.js";
 import {
   CacheablePromptSegment,
   convertMessagesToCacheControlledMessages,
@@ -343,6 +343,15 @@ async function createToolsAndPrompt(
     inputMessagesCount: inputMessages.length,
   });
 
+  const anthropicMessagesRaw = [
+    ...convertMessagesToCacheControlledMessages(inputMessages),
+    formatSpecificPlanPrompt(effectiveTaskPlan, loopWarning),
+  ];
+
+  // Merge consecutive same-role messages for Anthropic API compliance
+  // Anthropic requires messages to alternate between "user" and "assistant" roles
+  const anthropicMessagesProcessed = mergeConsecutiveSameRoleMessages(anthropicMessagesRaw);
+
   const anthropicMessages = [
     {
       role: "system",
@@ -358,8 +367,7 @@ async function createToolsAndPrompt(
         },
       ),
     },
-    ...convertMessagesToCacheControlledMessages(inputMessages),
-    formatSpecificPlanPrompt(effectiveTaskPlan, loopWarning),
+    ...anthropicMessagesProcessed,
   ];
 
   const nonAnthropicMessages = [
@@ -516,6 +524,40 @@ async function createToolsAndPrompt(
     }
   }
 
+  // CRITICAL FIX: Remove orphan AIMessages with tool_calls that don't have ToolMessage responses
+  // This can happen when conversation history from Anthropic contains incomplete tool call sequences
+  // Gemini strictly requires: every AIMessage with function calls MUST be followed by ToolMessage(s)
+  const cleanedMessages: BaseMessage[] = [];
+  for (let idx = 0; idx < processedMessages.length; idx++) {
+    const msg = processedMessages[idx];
+    const isAI = msg.constructor.name === "AIMessage" || msg.constructor.name === "AIMessageChunk";
+    const aiToolCalls = (msg as AIMessage).tool_calls;
+    const hasToolCalls = isAI && aiToolCalls && aiToolCalls.length > 0;
+
+    if (hasToolCalls) {
+      // Check if next message is a ToolMessage/User message (function response)
+      const nextMsg = processedMessages[idx + 1];
+      const nextIsToolMsg = nextMsg && nextMsg.constructor.name === "ToolMessage";
+
+      if (!nextIsToolMsg) {
+        // Orphan AIMessage with tool_calls - skip it
+        debugLog("[Gemini Debug] Removing orphan AIMessage with tool_calls (no ToolMessage follows)", {
+          index: idx,
+          toolCallsCount: aiToolCalls.length,
+          toolCallNames: aiToolCalls.map((tc: any) => tc.name),
+        });
+        continue;
+      }
+    }
+    cleanedMessages.push(msg);
+  }
+
+  debugLog("[Gemini Debug] Cleaned messages for Gemini", {
+    before: processedMessages.length,
+    after: cleanedMessages.length,
+    removed: processedMessages.length - cleanedMessages.length,
+  });
+
   const geminiMessages = [
     {
       role: "system",
@@ -531,7 +573,7 @@ async function createToolsAndPrompt(
         },
       ),
     },
-    ...processedMessages,
+    ...cleanedMessages,
     formatSpecificPlanPrompt(effectiveTaskPlan, loopWarning),
   ];
 

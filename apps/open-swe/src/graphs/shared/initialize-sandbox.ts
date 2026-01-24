@@ -484,15 +484,27 @@ export async function initializeSandbox(
   };
 
   // Emit "Creating sandbox" immediately so user sees feedback right away
+  logger.warn("[DEBUG] Emitting 'Creating sandbox' event immediately", {
+    action: baseCreateSandboxAction.action,
+    actionId: createSandboxActionId,
+  });
   emitStepEvent(baseCreateSandboxAction, "pending");
 
   // Acquire concurrency slot before creating sandbox (blocks if at capacity)
   // This ensures we don't exceed MAX_CONCURRENT_SANDBOXES limit
   if (sandboxConcurrencyManager.isEnabled()) {
+    logger.warn("[DEBUG] Concurrency manager is enabled, checking for slot", {
+      active: sandboxConcurrencyManager.getActiveCount(),
+      max: sandboxConcurrencyManager.getMaxConcurrent(),
+    });
     try {
       await sandboxConcurrencyManager.acquireSlot({
         onWaiting: () => {
           // Update the "Creating sandbox" event to show we're waiting for a slot
+          logger.warn("[DEBUG] At capacity - emitting 'waiting for slot' event", {
+            active: sandboxConcurrencyManager.getActiveCount(),
+            max: sandboxConcurrencyManager.getMaxConcurrent(),
+          });
           emitStepEvent(
             {
               ...baseCreateSandboxAction,

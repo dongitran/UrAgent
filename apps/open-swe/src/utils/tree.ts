@@ -31,6 +31,19 @@ function getExcludePaths(): string[] {
 }
 
 /**
+ * Get files to exclude from codebase tree from environment variable
+ * CODEBASE_TREE_EXCLUDE_FILES: comma-separated list of file paths to exclude (at root level)
+ * Example: "package.json,yarn.lock,.gitignore"
+ */
+function getExcludeFiles(): string[] {
+  const excludeFilesEnv = process.env.CODEBASE_TREE_EXCLUDE_FILES?.trim();
+  if (!excludeFilesEnv) {
+    return [];
+  }
+  return excludeFilesEnv.split(',').map(f => f.trim()).filter(f => f);
+}
+
+/**
  * Generate the fallback tree command with exclusion patterns
  * 
  * Output: Flat file paths (one per line), sorted alphabetically
@@ -46,8 +59,9 @@ function getExcludePaths(): string[] {
  */
 function getFallbackTreeCommand(skipFiles: boolean): string {
   const excludePaths = getExcludePaths();
+  const excludeFiles = getExcludeFiles();
 
-  // Build grep -v patterns for excluded paths
+  // Build grep -v patterns for excluded paths (folders)
   // e.g. grep -v '^applications/kpi-tool-api/' | grep -v '^applications/kpi-tool-web/'
   let excludeGrepChain = '';
   if (excludePaths.length > 0) {
@@ -71,6 +85,24 @@ function getFallbackTreeCommand(skipFiles: boolean): string {
     excludeGrepChain = ' | ' + excludeGrepChain;
   }
 
+  // Build grep -v patterns for excluded files (at root level)
+  // e.g. grep -v '^package.json$' | grep -v '^yarn.lock$'
+  let excludeFilesGrepChain = '';
+  if (excludeFiles.length > 0) {
+    excludeFilesGrepChain = excludeFiles
+      .map(f => {
+        // Escape special regex chars in filename
+        const escapedFile = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Match exact file at root level (^filename$)
+        return `grep -v '^${escapedFile}$'`;
+      })
+      .join(' | ');
+    excludeFilesGrepChain = ' | ' + excludeFilesGrepChain;
+  }
+
+  // Combine both exclusion chains
+  const allExclusions = excludeGrepChain + excludeFilesGrepChain;
+
   if (skipFiles) {
     // NOTE: For .skills, always use -type f (files) instead of -type d (directories)
     // This ensures .skills folder shows files even when skipFiles=true
@@ -78,9 +110,9 @@ function getFallbackTreeCommand(skipFiles: boolean): string {
   if [ -d .skills ]; then 
     find .skills -maxdepth 6 -type f 2>/dev/null; 
   fi; 
-  git ls-files 2>/dev/null | grep '/' | sed 's|/[^/]*$||' | grep -v '^.skills/'${excludeGrepChain}; 
+  git ls-files 2>/dev/null | grep '/' | sed 's|/[^/]*$||' | grep -v '^.skills/'${allExclusions}; 
   if [ ! -d .git ]; then 
-    find . -maxdepth 6 -type d -not -path '*/.*' 2>/dev/null | sed 's|^./||' | grep -v '^$'${excludeGrepChain}; 
+    find . -maxdepth 6 -type d -not -path '*/.*' 2>/dev/null | sed 's|^./||' | grep -v '^$'${allExclusions}; 
   fi; 
 } | sort -u | head -8000`;
   }
@@ -89,9 +121,9 @@ function getFallbackTreeCommand(skipFiles: boolean): string {
   if [ -d .skills ]; then 
     find .skills -maxdepth 6 -type f 2>/dev/null; 
   fi; 
-  git ls-files 2>/dev/null | grep -v '^.skills/'${excludeGrepChain}; 
+  git ls-files 2>/dev/null | grep -v '^.skills/'${allExclusions}; 
   if [ ! -d .git ]; then 
-    find . -maxdepth 6 -type f -not -path '*/.*' 2>/dev/null | sed 's|^./||'${excludeGrepChain}; 
+    find . -maxdepth 6 -type f -not -path '*/.*' 2>/dev/null | sed 's|^./||'${allExclusions}; 
   fi; 
 } | sort -u | head -8000`;
 }

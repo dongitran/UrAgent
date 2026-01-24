@@ -1,7 +1,7 @@
 import { join, isAbsolute, extname } from "path";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
+import { GraphState, GraphConfig, ImageDescription } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getSandboxInstanceOrThrow } from "./utils/get-sandbox-id.js";
@@ -10,6 +10,7 @@ import {
     getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
 import * as fs from "fs/promises";
+import { formatCachedImageDescription } from "../utils/image-description-generator.js";
 
 const logger = createLogger(LogLevel.INFO, "ReadImageTool");
 
@@ -46,8 +47,28 @@ function isSupportedImage(filePath: string): boolean {
 }
 
 /**
+ * Return type for read_image tool with hybrid analysis support.
+ * Contains additional metadata for caching and processing.
+ */
+export interface ReadImageResult {
+    /** The result content - either base64 data URL or cached description */
+    result: string;
+    /** Status of the operation */
+    status: "success" | "error";
+    /** Whether this is the first time reading this image (cache miss) */
+    isFirstRead?: boolean;
+    /** The normalized path used as cache key */
+    imagePath?: string;
+    /** The base64 data URL (only present on first read for caching) */
+    base64DataUrl?: string;
+}
+
+/**
  * Creates a tool for reading images from the sandbox/local filesystem.
- * Returns image content as base64 data URL that can be used in multimodal prompts.
+ * 
+ * **Hybrid Image Analysis**:
+ * - First read: Returns base64 data URL for visual analysis + triggers background description generation
+ * - Subsequent reads: Returns cached text description to reduce context size (~99% reduction)
  * 
  * Supported formats: PNG, JPG, JPEG, GIF, WEBP, HEIC, HEIF, SVG, BMP, ICO
  * (Note: HEIC/HEIF support varies by AI model)
@@ -56,22 +77,27 @@ function isSupportedImage(filePath: string): boolean {
  * Agent can use this tool to read UI reference images:
  * ```
  * read_image({ path: "designs/login-page.png" })
- * // Returns: "data:image/png;base64,iVBORw0KGgo..."
+ * // First read returns: "data:image/png;base64,iVBORw0KGgo..." (~500KB)
+ * // Subsequent reads return: "[Previously analyzed image...]" (~1-2KB)
  * ```
  * 
  * The returned base64 data URL can be included in HumanMessage content
  * as an image_url block for multimodal models like Gemini.
  */
 export function createReadImageTool(
-    state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & { sandboxProviderType?: string },
+    state: Pick<GraphState, "sandboxSessionId" | "targetRepository"> & {
+        sandboxProviderType?: string;
+        imageDescriptionCache?: Record<string, ImageDescription>;
+    },
     config: GraphConfig,
 ) {
     const readImageTool = tool(
-        async (input): Promise<{ result: string; status: "success" | "error" }> => {
+        async (input): Promise<ReadImageResult> => {
             try {
-                const { path: inputPath, workdir: inputWorkdir } = input as {
+                const { path: inputPath, workdir: inputWorkdir, force_reload: forceReload } = input as {
                     path: string;
                     workdir?: string;
+                    force_reload?: boolean;
                 };
 
                 // Validate it's an image file
@@ -93,33 +119,64 @@ export function createReadImageTool(
                         : join(repoRoot, inputWorkdir);
                 }
 
-                // Build full path
+                // Build full path - used as cache key
                 const fullPath = isAbsolute(inputPath)
                     ? inputPath
                     : join(workDir, inputPath);
 
-                logger.info("Reading image file", {
+                // ===============================================================
+                // HYBRID IMAGE ANALYSIS: Check cache first (unless force_reload)
+                // ===============================================================
+                const cachedDescription: ImageDescription | undefined =
+                    state.imageDescriptionCache?.[fullPath];
+
+                if (cachedDescription && !forceReload) {
+                    logger.info("Using cached image description (hybrid mode)", {
+                        imagePath: fullPath,
+                        cachedAt: new Date(cachedDescription.generatedAt).toISOString(),
+                        descriptionLength: cachedDescription.description.length,
+                        contextSavings: "~99% reduction",
+                    });
+
+                    // Serialize as JSON so processToolCallContent can parse it
+                    const cacheHitResult: ReadImageResult = {
+                        result: formatCachedImageDescription(cachedDescription),
+                        status: "success",
+                        isFirstRead: false,
+                        imagePath: fullPath,
+                    };
+
+                    return {
+                        result: JSON.stringify(cacheHitResult),
+                        status: "success",
+                    };
+                }
+
+                // ===============================================================
+                // CACHE MISS: Read actual image from filesystem/sandbox
+                // ===============================================================
+                logger.info("Reading image file (first read - will cache description)", {
                     inputPath,
                     fullPath,
                     workDir,
                     isLocalMode: isLocalMode(config),
+                    forceReload,
                 });
 
+                let dataUrl: string;
 
                 if (isLocalMode(config)) {
                     // Read from local filesystem
                     const imageData = await fs.readFile(fullPath);
                     const mimeType = getMimeType(fullPath);
                     const base64 = imageData.toString("base64");
-                    const dataUrl = `data:${mimeType};base64,${base64}`;
+                    dataUrl = `data:${mimeType};base64,${base64}`;
 
                     logger.info("Image read successfully from local filesystem", {
                         path: fullPath,
                         mimeType,
                         dataUrlLength: dataUrl.length,
                     });
-
-                    return { result: dataUrl, status: "success" };
                 } else {
                     // Read from sandbox
                     const sandboxInstance = await getSandboxInstanceOrThrow({
@@ -143,16 +200,29 @@ export function createReadImageTool(
 
                     // Result is already base64 encoded
                     const mimeType = getMimeType(fullPath);
-                    const dataUrl = `data:${mimeType};base64,${result.result.trim()}`;
+                    dataUrl = `data:${mimeType};base64,${result.result.trim()}`;
 
                     logger.info("Image read successfully from sandbox", {
                         path: fullPath,
                         mimeType,
                         dataUrlLength: dataUrl.length,
                     });
-
-                    return { result: dataUrl, status: "success" };
                 }
+
+                // Serialize as JSON so processToolCallContent can parse it
+                // The full ReadImageResult with metadata is stored in .result field
+                const firstReadResult: ReadImageResult = {
+                    result: dataUrl,
+                    status: "success",
+                    isFirstRead: true,
+                    imagePath: fullPath,
+                    base64DataUrl: dataUrl,
+                };
+
+                return {
+                    result: JSON.stringify(firstReadResult),
+                    status: "success",
+                };
             } catch (error) {
                 const errorMessage =
                     error instanceof Error ? error.message : String(error);
@@ -165,13 +235,16 @@ export function createReadImageTool(
         },
         {
             name: "read_image",
-            description: `Read an image file from the repository and return it as base64 data URL.
+            description: `Read an image file from the repository and return it for visual analysis.
+
+**Hybrid Mode**: First read returns the actual image (base64), subsequent reads return a cached text description to save context space (~99% reduction in context size).
+
 Use this tool when you need to:
 - View UI mockups or design references to implement UI components
 - Analyze screenshots or diagrams in the codebase
 - Reference existing image assets
 
-The returned base64 data URL can be processed by vision-capable AI models.
+The returned content can be processed by vision-capable AI models.
 
 Supported formats: PNG, JPG, JPEG, GIF, WEBP, HEIC, HEIF, SVG, BMP, ICO
 
@@ -182,6 +255,7 @@ Example paths:
             schema: z.object({
                 path: z.string().describe("Path to the image file (relative to workdir or absolute)"),
                 workdir: z.string().optional().describe("Working directory (defaults to repository root)"),
+                force_reload: z.boolean().optional().describe("Force reload the actual image instead of using cached description (use when you need fresh visual analysis)"),
             }),
         }
     );

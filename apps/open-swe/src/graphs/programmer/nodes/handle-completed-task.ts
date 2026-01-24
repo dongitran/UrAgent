@@ -22,7 +22,7 @@ import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tool
 import {
   calculateConversationHistoryTokenCount,
   getMessagesSinceLastSummary,
-  MAX_INTERNAL_TOKENS,
+  getMaxInternalTokens,
 } from "../../../utils/tokens.js";
 import { z } from "zod";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
@@ -230,12 +230,12 @@ export async function handleCompletedTask(
     });
   }
 
-  if (totalInternalTokenCount >= MAX_INTERNAL_TOKENS) {
+  if (totalInternalTokenCount >= getMaxInternalTokens("programmer")) {
     logger.info(
       "Internal messages list is at or above the max token limit. Routing to summarize history step.",
       {
         totalInternalTokenCount,
-        maxInternalTokenCount: MAX_INTERNAL_TOKENS,
+        maxInternalTokenCount: getMaxInternalTokens("programmer"),
       },
     );
 
@@ -246,7 +246,7 @@ export async function handleCompletedTask(
   }
 
   return new Command({
-    goto: "generate-action",
+    goto: "check-context-size",
     update: commandUpdate,
   });
 }

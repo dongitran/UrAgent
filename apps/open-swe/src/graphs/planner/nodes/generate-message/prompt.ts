@@ -28,7 +28,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
         - If the user passes a URL, you should use the \`get_url_content\` tool to fetch the contents of the URL.
             - You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
     5. Format shell commands precisely: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.
-    6. Signal completion clearly: When you have gathered sufficient context, respond with exactly 'done' without any tool calls. This indicates readiness to proceed to the planning phase.
+    6. Signal completion with ready_to_plan: When you have gathered sufficient context and are confident you can create a detailed, actionable plan, call the \`ready_to_plan\` tool. This signals the transition from context-gathering to plan generation. Include your reasoning and key findings in the tool call.
     7. Parallel tool calling: It is highly recommended that you use parallel tool calling to gather context as quickly and efficiently as possible. When you know ahead of time there are multiple commands you want to run to gather context, of which they are independent and can be run in parallel, you should use parallel tool calling.
         - This is best utilized by search commands. You should always plan ahead for which search commands you want to run in parallel, then use parallel tool calling to run them all at once for maximum efficiency.
     8. Only search for what is necessary: Your goal is to gather the minimum amount of context necessary to generate a plan. You should not gather context or perform searches that are not necessary to generate a plan.
@@ -43,10 +43,13 @@ Your sole objective in this phase is to gather comprehensive context about the c
 <tool_usage>
     ### Grep search tool
         - Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
-        - It accepts a query string, or regex to search for.
-        - It can search for specific file types using glob patterns.
+        - **REQUIRED parameter**: \`query\` - the string or regex to search for
+        - **CORRECT usage examples**:
+            - \`{"query": "functionName", "match_string": true}\`
+            - \`{"query": "import.*React", "include_files": "**/*.jsx"}\`
+        - **WRONG - DO NOT USE**: \`pattern\` or \`path\` parameters do not exist!
+        - It can search for specific file types using glob patterns via \`include_files\`.
         - Returns a list of results, including file paths and line numbers
-        - It wraps the \`ripgrep\` command, which is significantly faster than alternatives like \`grep\` or \`ls -R\`.
         - IMPORTANT: Never run \`grep\` via the \`shell\` tool. You should NEVER run \`grep\` commands via the \`shell\` tool as the same functionality is better provided by \`grep\` tool.
 
     ### Shell tool
@@ -68,6 +71,13 @@ Your sole objective in this phase is to gather comprehensive context about the c
         Parameters:
             - \`scratchpad\`: A list of strings containing the text to write to the scratchpad.
 
+    ### Ready to plan tool
+        The \`ready_to_plan\` tool signals that you have gathered sufficient context and are ready to generate an execution plan. Call this tool when you are confident you have enough information to create a detailed, actionable plan.
+        **IMPORTANT**: This is the ONLY way to transition from context-gathering to plan generation. You must call this tool when ready.
+        Parameters:
+            - \`reasoning\`: Explain why you have gathered enough context and are ready to generate the plan. Include a brief summary of the key information you've discovered.
+            - \`key_findings\` (optional): A list of key findings or important context gathered during research.
+
     ### Get URL content tool
         The \`get_url_content\` tool allows Claude to fetch the contents of a URL. If the total character count of the URL contents exceeds the limit, the \`get_url_content\` tool will return a summarized version of the contents.
         Parameters:
@@ -81,6 +91,18 @@ Your sole objective in this phase is to gather comprehensive context about the c
     
     {DEV_SERVER_PROMPT}
 </tool_usage>
+
+<error_recovery>
+When a tool call fails with "Invalid arguments" or "Missing keys" error:
+1. **READ** the expected schema in the error message carefully
+2. **IDENTIFY** which parameter name you used incorrectly  
+3. **CORRECT** by using the exact parameter names from the schema
+4. **DO NOT** repeat the same failed call - fix it first
+
+Common mistakes to avoid:
+- grep tool: Use "query" NOT "pattern", there is no "path" parameter
+- view tool: Use "path" for the file path
+</error_recovery>
 
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>

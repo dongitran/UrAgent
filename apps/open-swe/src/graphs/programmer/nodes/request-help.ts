@@ -175,7 +175,7 @@ Please check the UrAgent interface to respond to this request.`;
       ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     };
     return new Command({
-      goto: "generate-action",
+      goto: "check-context-size",
       update: commandUpdate,
     });
   }

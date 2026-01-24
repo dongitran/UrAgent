@@ -120,10 +120,13 @@ By reviewing these actions, and comparing them to the plan and original user req
 <tool_usage>
     ### Grep search tool
         - Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
-        - It accepts a query string, or regex to search for.
-        - It can search for specific file types using glob patterns.
+        - **REQUIRED parameter**: \`query\` - the string or regex to search for
+        - **CORRECT usage examples**:
+            - \`{"query": "functionName", "match_string": true}\`
+            - \`{"query": "import.*React", "include_files": "**/*.jsx"}\`
+        - **WRONG - DO NOT USE**: \`pattern\` or \`path\` parameters do not exist!
+        - It can search for specific file types using glob patterns via \`include_files\`.
         - Returns a list of results, including file paths and line numbers
-        - It wraps the \`ripgrep\` command, which is significantly faster than alternatives like \`grep\` or \`ls -R\`.
         - IMPORTANT: Never run \`grep\` via the \`shell\` tool. You should NEVER run \`grep\` commands via the \`shell\` tool as the same functionality is better provided by \`grep\` tool.
 
     ### Shell tool
@@ -152,6 +155,18 @@ By reviewing these actions, and comparing them to the plan and original user req
         Parameters:
             - \`scratchpad\`: A list of strings containing the text to write to the scratchpad.
 </tool_usage>
+
+<error_recovery>
+When a tool call fails with "Invalid arguments" or "Missing keys" error:
+1. **READ** the expected schema in the error message carefully
+2. **IDENTIFY** which parameter name you used incorrectly  
+3. **CORRECT** by using the exact parameter names from the schema
+4. **DO NOT** repeat the same failed call - fix it first
+
+Common mistakes to avoid:
+- grep tool: Use "query" NOT "pattern", there is no "path" parameter
+- view tool: Use "path" for the file path
+</error_recovery>
 
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>

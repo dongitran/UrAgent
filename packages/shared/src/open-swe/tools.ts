@@ -60,6 +60,36 @@ export function createSessionPlanToolFields() {
   };
 }
 
+/**
+ * Tool for AI to signal when it has gathered enough context and is ready to generate a plan.
+ * This allows the AI to proactively decide when context gathering is complete.
+ */
+export function createReadyToPlanToolFields() {
+  const readyToPlanSchema = z.object({
+    reasoning: z
+      .string()
+      .describe(
+        "Explain why you have gathered enough context and are ready to generate the plan. " +
+        "Include a brief summary of the key information you've discovered that will inform the plan.",
+      ),
+    key_findings: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Optional list of key findings or important context gathered during research. " +
+        "These will be preserved for use in plan generation.",
+      ),
+  });
+  return {
+    name: "ready_to_plan",
+    description:
+      "Call this tool when you have gathered sufficient context about the codebase and are ready to generate " +
+      "an execution plan. This signals the transition from context-gathering phase to plan generation phase. " +
+      "You should call this ONLY when you are confident you have enough information to create a detailed, actionable plan.",
+    schema: readyToPlanSchema,
+  };
+}
+
 export function createShellToolFields(targetRepository: TargetRepository, providerType?: string) {
   const repoRoot = getRepoAbsolutePath(targetRepository, undefined, providerType);
   const shellToolSchema = z.object({
@@ -115,7 +145,7 @@ export function createGrepToolFields(targetRepository: TargetRepository, provide
     query: z
       .string()
       .describe(
-        "The string or regex to search the codebase for. If passing a plain string, ensure to also set the 'match_string' field to true. If passing a regex, ensure to also set the 'match_string' field to false.",
+        "REQUIRED: The search string or regex. Use this field (NOT 'pattern'). Example: {\"query\": \"myFunction\", \"match_string\": true}. If passing a regex, set 'match_string' to false.",
       ),
 
     match_string: z
@@ -177,7 +207,14 @@ export function createGrepToolFields(targetRepository: TargetRepository, provide
   return {
     name: "grep",
     schema: searchSchema,
-    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The default working directory is \`${repoRoot}\`, but you can specify a different directory using the 'workdir' parameter when searching in subdirectories.`,
+    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The default working directory is \`${repoRoot}\`, but you can specify a different directory using the 'workdir' parameter when searching in subdirectories.
+
+**IMPORTANT - Correct Usage Examples:**
+- Search for a string: {"query": "SidebarLabel", "match_string": true}
+- Search with file filter: {"query": "useState", "include_files": "**/*.jsx"}
+- Regex search: {"query": "import.*React", "match_string": false}
+
+**WRONG (do NOT use):** {"pattern": "...", "path": "..."} - These parameters do not exist!`,
   };
 }
 

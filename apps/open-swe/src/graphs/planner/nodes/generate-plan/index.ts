@@ -30,7 +30,7 @@ import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-fr
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
-import { trackCachePerformance } from "../../../../utils/caching.js";
+import { trackCachePerformance, convertMessagesToThinkingAwareMessages } from "../../../../utils/caching.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { isRunCancelled } from "../../../../utils/run-cancellation.js";
 import { Command, END } from "@langchain/langgraph";
@@ -152,41 +152,94 @@ export async function generatePlan(
     modelName,
   });
 
-  const response = await modelWithTools
-    .withConfig({ tags: ["nostream"] })
-    .invoke([
-      {
-        role: "system",
-        content: formatSystemPrompt(state, config),
-      },
-      ...inputMessages,
-    ]);
+  // Retry configuration for missing tool_calls
+  const MAX_RETRIES = 3;
+  const INITIAL_DELAY_MS = 1000;
 
-  config.writer?.({
-    type: "planner_model_response",
-    timestamp: Date.now(),
-    hasToolCalls: !!response.tool_calls?.length,
-  });
+  const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
-  // Filter out empty plans
-  response.tool_calls = response.tool_calls?.map((tc) => {
-    if (tc.id === sessionPlanTool.name) {
-      return {
-        ...tc,
-        args: {
-          ...tc.args,
-          plan: (tc.args as z.infer<typeof sessionPlanTool.schema>).plan.filter(
-            (p) => p.length > 0,
-          ),
-        },
-      };
+  let response;
+  let toolCall;
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // Check if run was cancelled before retry attempt
+    if (attempt > 0 && await isRunCancelled(config)) {
+      logger.warn("Stopping planner retry because run has been cancelled by user");
+      return new Command({ goto: END });
     }
-    return tc;
-  });
 
-  const toolCall = response.tool_calls?.[0];
+    if (attempt > 0) {
+      const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+      logger.warn(`Retrying plan generation (attempt ${attempt + 1}/${MAX_RETRIES}) after ${delay}ms`, {
+        modelName,
+        previousError: lastError?.message,
+      });
+      await sleep(delay);
+    }
+
+    response = await modelWithTools
+      .withConfig({ tags: ["nostream"] })
+      .invoke([
+        {
+          role: "system",
+          content: formatSystemPrompt(state, config),
+        },
+        // Sanitize messages to remove cache_control from thinking blocks
+        // Anthropic API rejects cache_control on thinking blocks
+        ...convertMessagesToThinkingAwareMessages(inputMessages, { thinkingMode: true }),
+      ]);
+
+    config.writer?.({
+      type: "planner_model_response",
+      timestamp: Date.now(),
+      hasToolCalls: !!response.tool_calls?.length,
+      retryAttempt: attempt,
+    });
+
+    // Filter out empty plans
+    response.tool_calls = response.tool_calls?.map((tc) => {
+      if (tc.id === sessionPlanTool.name) {
+        return {
+          ...tc,
+          args: {
+            ...tc.args,
+            plan: (tc.args as z.infer<typeof sessionPlanTool.schema>).plan.filter(
+              (p) => p.length > 0,
+            ),
+          },
+        };
+      }
+      return tc;
+    });
+
+    toolCall = response.tool_calls?.[0];
+    if (toolCall) {
+      // Success - break out of retry loop
+      if (attempt > 0) {
+        logger.info(`Plan generation succeeded on attempt ${attempt + 1}`, { modelName });
+      }
+      break;
+    }
+
+    // Log the failure and prepare for retry
+    lastError = new Error("LLM response missing tool_calls");
+    logger.warn(`Plan generation attempt ${attempt + 1} failed - no tool_calls in response`, {
+      modelName,
+      responseContent: typeof response.content === 'string'
+        ? response.content.substring(0, 200)
+        : JSON.stringify(response.content).substring(0, 200),
+      hasToolCalls: !!response.tool_calls,
+      toolCallsLength: response.tool_calls?.length ?? 0,
+    });
+  }
+
   if (!toolCall) {
-    throw new Error("Failed to generate plan");
+    logger.error("Failed to generate plan after all retries", {
+      modelName,
+      maxRetries: MAX_RETRIES,
+    });
+    throw new Error("Failed to generate plan: LLM did not return expected tool call after retries");
   }
 
   let newSessionId: string | undefined;
@@ -217,10 +270,10 @@ export async function generatePlan(
   });
 
   return {
-    messages: [response, toolResponse],
+    messages: [response!, toolResponse],
     proposedPlanTitle: proposedPlanArgs.title,
     proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
-    tokenData: trackCachePerformance(response, modelName),
+    tokenData: trackCachePerformance(response!, modelName),
   };
 }

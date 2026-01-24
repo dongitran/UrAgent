@@ -15,6 +15,7 @@ import {
   updatePlan,
   summarizeHistory,
   handleCompletedTask,
+  checkContextSize,
 } from "./nodes/index.js";
 import { BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
@@ -55,7 +56,7 @@ function routeGeneratedAction(
   | "route-to-review-or-conclusion"
   | "take-action"
   | "request-help"
-  | "generate-action"
+  | "check-context-size"
   | "handle-completed-task"
   | Send {
   const { internalMessages } = state;
@@ -101,7 +102,7 @@ function routeGeneratedAction(
   // If the model did not generate a tool call, but there are remaining tasks, we should route back to the generate action step.
   // Also add a check ensuring that the last two messages generated have tool calls. Otherwise we can end.
   if (hasRemainingTasks && !lastMessagesMissingToolCalls(internalMessages, 2)) {
-    return "generate-action";
+    return "check-context-size";
   }
 
   // No tool calls and either no remaining tasks or we've hit a loop of no tool calls, route to reviewer
@@ -114,7 +115,7 @@ function routeGeneratedAction(
  */
 function routeGenerateActionsOrEnd(
   state: GraphState,
-): "generate-conclusion" | "generate-action" {
+): "generate-conclusion" | "check-context-size" {
   // Safe access for taskPlan - may be undefined when calling programmer directly
   const activePlanItems = state.taskPlan
     ? getActivePlanItems(state.taskPlan)
@@ -125,7 +126,7 @@ function routeGenerateActionsOrEnd(
     return "generate-conclusion";
   }
 
-  return "generate-action";
+  return "check-context-size";
 }
 
 /**
@@ -165,15 +166,18 @@ function routeToReviewOrConclusion(
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initializeSandbox)
+  .addNode("check-context-size", checkContextSize, {
+    ends: ["summarize-history", "generate-action"],
+  })
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction, {
-    ends: ["generate-action", "diagnose-error", END],
+    ends: ["check-context-size", "diagnose-error", END],
   })
   .addNode("update-plan", updatePlan)
   .addNode("handle-completed-task", handleCompletedTask, {
     ends: [
       "summarize-history",
-      "generate-action",
+      "check-context-size",
       "route-to-review-or-conclusion",
     ],
   })
@@ -181,7 +185,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     ends: ["open-pr", END],
   })
   .addNode("request-help", requestHelp, {
-    ends: ["generate-action", END],
+    ends: ["check-context-size", END],
   })
   .addNode("route-to-review-or-conclusion", routeToReviewOrConclusion, {
     ends: ["generate-conclusion", "initialize-review"],
@@ -197,17 +201,17 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("diagnose-error", diagnoseError)
   .addNode("summarize-history", summarizeHistory)
   .addEdge(START, "initialize")
-  .addEdge("initialize", "generate-action")
+  .addEdge("initialize", "check-context-size")
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",
     "route-to-review-or-conclusion",
     "update-plan",
-    "generate-action",
+    "check-context-size",
     "handle-completed-task",
   ])
-  .addEdge("update-plan", "generate-action")
-  .addEdge("diagnose-error", "generate-action")
+  .addEdge("update-plan", "check-context-size")
+  .addEdge("diagnose-error", "check-context-size")
   .addEdge("initialize-review", "generate-review-actions")
   .addConditionalEdges(
     "generate-review-actions",
@@ -217,7 +221,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addEdge("diagnose-reviewer-error", "generate-review-actions")
   .addConditionalEdges("final-review", routeGenerateActionsOrEnd, [
     "generate-conclusion",
-    "generate-action",
+    "check-context-size",
   ])
   .addEdge("summarize-history", "generate-action")
   .addEdge("open-pr", END);

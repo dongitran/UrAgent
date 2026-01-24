@@ -3,7 +3,6 @@ import {
   isAIMessage,
   isToolMessage,
   ToolMessage,
-  HumanMessage,
 } from "@langchain/core/messages";
 import {
   isLocalMode,
@@ -33,6 +32,7 @@ import {
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
+import { createReadyToPlanTool, READY_TO_PLAN_TOOL_NAME } from "../../../tools/ready-to-plan.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { getSandboxInstanceWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
@@ -42,6 +42,7 @@ import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { isRunCancelled } from "../../../utils/run-cancellation.js";
+import { normalizeToolCallArgs } from "../../../utils/normalize-tool-args.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -120,6 +121,7 @@ export async function takeActions(
   const shellTool = createShellTool(state, config);
   const searchTool = createGrepTool(state, config);
   const scratchpadTool = createScratchpadTool("");
+  const readyToPlanTool = createReadyToPlanTool();
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
@@ -135,6 +137,7 @@ export async function takeActions(
     shellTool,
     searchTool,
     scratchpadTool,
+    readyToPlanTool,
     getURLContentTool,
     searchDocumentForTool,
     createReadImageTool(state, config),
@@ -179,10 +182,13 @@ export async function takeActions(
     let result = "";
     let toolCallStatus: "success" | "error" = "success";
     try {
+      // Normalize tool args before invoke to handle common AI model mistakes
+      // (e.g., using 'pattern' instead of 'query' for grep tool)
+      const normalizedArgs = normalizeToolCallArgs(toolCall.name, toolCall.args);
       const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
         (await tool.invoke({
-          ...toolCall.args,
+          ...normalizedArgs,
           // Only pass sandbox session ID in sandbox mode, not local mode
           ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         })) as {
@@ -225,7 +231,7 @@ export async function takeActions(
       }
     }
 
-    const { content, stateUpdates } = await processToolCallContent(
+    const { content, stateUpdates, imageDescriptionToCache } = await processToolCallContent(
       toolCall,
       result,
       {
@@ -243,33 +249,12 @@ export async function takeActions(
       status: toolCallStatus,
     });
 
-    // If this is read_image tool with successful image result, create HumanMessage with image content
-    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
-    // The image must be re-introduced as new input in a HumanMessage
-    let imageMessage: HumanMessage | undefined;
-    if (
-      toolCall.name === "read_image" &&
-      toolCallStatus === "success" &&
-      result.startsWith("data:image/")
-    ) {
-      logger.info("Creating HumanMessage with image content for read_image result in planner", {
-        imageDataUrlLength: result.length,
-      });
-      imageMessage = new HumanMessage({
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: result },
-          },
-          {
-            type: "text",
-            text: "Above is the image you requested via read_image tool. Use it as visual reference for your planning.",
-          },
-        ],
-      });
-    }
+    // =======================================================================
+    // IMAGE DESCRIPTION: No longer inject images - description is in ToolMessage
+    // =======================================================================
+    // Image description is now generated synchronously in processToolCallContent
 
-    return { toolMessage, imageMessage, stateUpdates };
+    return { toolMessage, stateUpdates, imageDescriptionToCache };
   });
 
   let toolCallResultsWithUpdates;
@@ -292,10 +277,10 @@ export async function takeActions(
     (item) => item.toolMessage,
   );
 
-  // Collect image messages from read_image tool calls
-  const imageMessages = toolCallResultsWithUpdates
-    .map((item) => item.imageMessage)
-    .filter((msg): msg is HumanMessage => msg !== undefined);
+  // Collect image descriptions for caching
+  const imageDescriptionsToCache = toolCallResultsWithUpdates
+    .map((item) => item.imageDescriptionToCache)
+    .filter((desc): desc is { imagePath: string; description: any } => desc !== undefined);
 
   // merging document cache updates from tool calls
   const allStateUpdates = toolCallResultsWithUpdates
@@ -310,6 +295,26 @@ export async function takeActions(
       },
       { documentCache: {} } as { documentCache: Record<string, string> },
     );
+
+  // =======================================================================
+  // Image descriptions are already generated - just add to cache
+  // =======================================================================
+  if (imageDescriptionsToCache.length > 0) {
+    logger.info("Caching image descriptions in planner", {
+      count: imageDescriptionsToCache.length,
+      paths: imageDescriptionsToCache.map(d => d.imagePath),
+    });
+
+    const imageDescriptionCacheUpdate: Record<string, any> = {};
+    for (const desc of imageDescriptionsToCache) {
+      imageDescriptionCacheUpdate[desc.imagePath] = desc.description;
+    }
+
+    (allStateUpdates as any).imageDescriptionCache = {
+      ...((state as any).imageDescriptionCache ?? {}),
+      ...imageDescriptionCacheUpdate,
+    };
+  }
 
   if (!isLocalMode(config)) {
     const repoPath = isLocalMode(config)
@@ -380,7 +385,7 @@ export async function takeActions(
   });
 
   const commandUpdate: PlannerGraphUpdate = {
-    messages: [...toolCallResults, ...imageMessages],
+    messages: [...toolCallResults],
     sandboxSessionId: sandboxInstance.id,
     ...(sandboxProviderType && { sandboxProviderType }),
     ...(codebaseTree && { codebaseTree }),
@@ -388,7 +393,12 @@ export async function takeActions(
     ...allStateUpdates,
   };
 
-  const maxContextActions = config.configurable?.maxContextActions ?? 75;
+  // Priority: ENV var > config > default (75)
+  // ENV var allows runtime adjustment without recompilation
+  const envMaxContextActions = process.env.MAX_CONTEXT_ACTIONS
+    ? parseInt(process.env.MAX_CONTEXT_ACTIONS, 10)
+    : undefined;
+  const maxContextActions = envMaxContextActions ?? config.configurable?.maxContextActions ?? 75;
   const maxActionsCount = maxContextActions * 2;
   // Exclude hidden messages, and messages that are not AI messages or tool messages.
   const filteredMessages = filterHiddenMessages([
@@ -401,6 +411,18 @@ export async function takeActions(
       maxActionsCount,
       filteredMessages,
     });
+    return new Command({
+      goto: "generate-plan",
+      update: commandUpdate,
+    });
+  }
+
+  // Check if AI called ready_to_plan tool - this signals AI wants to generate plan
+  const readyToPlanCalled = toolCalls.some(
+    (tc) => tc.name === READY_TO_PLAN_TOOL_NAME
+  );
+  if (readyToPlanCalled) {
+    logger.info("AI signaled ready to plan via ready_to_plan tool, transitioning to generate-plan");
     return new Command({
       goto: "generate-plan",
       update: commandUpdate,

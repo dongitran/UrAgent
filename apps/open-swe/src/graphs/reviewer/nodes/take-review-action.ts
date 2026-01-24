@@ -4,7 +4,6 @@ import {
   isToolMessage,
   ToolMessage,
   AIMessage,
-  HumanMessage,
 } from "@langchain/core/messages";
 import {
   createInstallDependenciesTool,
@@ -19,31 +18,9 @@ import {
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
-import { truncateOutput } from "../../../utils/truncate-outputs.js";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { createGrepTool } from "../../../tools/grep.js";
 
-// Tools that read file content and need higher context limits
-const FILE_READ_TOOL_NAMES = ["view", "str_replace_based_edit_tool"];
-
-/**
- * Get appropriate truncation options based on tool type
- */
-function getTruncationOptions(toolName: string, toolArgs?: Record<string, any>): { numStartCharacters: number; numEndCharacters: number } | undefined {
-  // File read tools need higher limits to allow AI to read full file content
-  if (FILE_READ_TOOL_NAMES.includes(toolName)) {
-    const isViewCommand = toolName === "view" ||
-      (toolName === "str_replace_based_edit_tool" && toolArgs?.command === "view");
-
-    if (isViewCommand) {
-      return {
-        numStartCharacters: 20000,
-        numEndCharacters: 20000,
-      };
-    }
-  }
-  // Return undefined to use default truncation
-  return undefined;
-}
 import {
   checkoutBranchAndCommitWithInstance,
   getChangedFilesStatusWithInstance,
@@ -60,6 +37,7 @@ import { createPullRequestToolCallMessage } from "../../../utils/message/create-
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { normalizeToolCallArgs } from "../../../utils/normalize-tool-args.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 import { isRunCancelled } from "../../../utils/run-cancellation.js";
@@ -129,7 +107,7 @@ export async function takeReviewerActions(
     );
 
   // Helper function to execute a single tool call
-  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<{ toolMessage: ToolMessage; imageMessage?: HumanMessage }> => {
+  const executeToolCall = async (toolCall: typeof toolCalls[0]): Promise<{ toolMessage: ToolMessage; imageDescriptionToCache?: { imagePath: string; description: any } }> => {
     const tool = toolsMap[toolCall.name];
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
@@ -151,10 +129,13 @@ export async function takeReviewerActions(
     let result = "";
     let toolCallStatus: "success" | "error" = "success";
     try {
+      // Normalize tool args before invoke to handle common AI model mistakes
+      // (e.g., using 'pattern' instead of 'query' for grep tool)
+      const normalizedArgs = normalizeToolCallArgs(toolCall.name, toolCall.args);
       const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
         (await tool.invoke({
-          ...toolCall.args,
+          ...normalizedArgs,
           // Only pass sandbox session ID in sandbox mode, not local mode
           ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandboxInstance.id }),
         })) as {
@@ -193,10 +174,16 @@ export async function takeReviewerActions(
       }
     }
 
-    // For read_image, we must NOT truncate the base64 data as it would corrupt the image
-    const toolMessageContent = toolCall.name === "read_image"
-      ? result
-      : truncateOutput(result, getTruncationOptions(toolCall.name, toolCall.args));
+    // Process tool output with hybrid image analysis support
+    const { content: toolMessageContent, imageDescriptionToCache } = await processToolCallContent(
+      toolCall,
+      result,
+      {
+        higherContextLimitToolNames: [], // Reviewer doesn't use MCP tools
+        state: { documentCache: {}, imageDescriptionCache: (state as any).imageDescriptionCache ?? {} },
+        config,
+      },
+    );
 
     const toolMessage = new ToolMessage({
       id: uuidv4(),
@@ -206,33 +193,12 @@ export async function takeReviewerActions(
       status: toolCallStatus,
     });
 
-    // If this is read_image tool with successful image result, create HumanMessage with image content
-    // This is needed because Gemini FunctionResponse is JSON-only and cannot contain inline images
-    // The image must be re-introduced as new input in a HumanMessage
-    let imageMessage: HumanMessage | undefined;
-    if (
-      toolCall.name === "read_image" &&
-      toolCallStatus === "success" &&
-      result.startsWith("data:image/")
-    ) {
-      logger.info("Creating HumanMessage with image content for read_image result in reviewer", {
-        imageDataUrlLength: result.length,
-      });
-      imageMessage = new HumanMessage({
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: result },
-          },
-          {
-            type: "text",
-            text: "Above is the image you requested via read_image tool. Use it as visual reference for your review.",
-          },
-        ],
-      });
-    }
+    // =======================================================================
+    // IMAGE DESCRIPTION: No longer inject images - description is in ToolMessage
+    // =======================================================================
+    // Image description is now generated synchronously in processToolCallContent
 
-    return { toolMessage, imageMessage };
+    return { toolMessage, imageDescriptionToCache };
   };
 
   // Separate shell/install commands (run sequentially to prevent OOM) from other tools (run in parallel)
@@ -250,7 +216,7 @@ export async function takeReviewerActions(
   });
 
   // Execute sequential tools one at a time (shell commands that may consume lots of memory)
-  const sequentialResults: { toolMessage: ToolMessage; imageMessage?: HumanMessage }[] = [];
+  const sequentialResults: { toolMessage: ToolMessage; imageDescriptionToCache?: { imagePath: string; description: any } }[] = [];
   for (const toolCall of sequentialCalls) {
     if (await isRunCancelled(config)) {
       break;
@@ -263,7 +229,7 @@ export async function takeReviewerActions(
   const parallelResults = await Promise.all(parallelCalls.map(executeToolCall));
 
   // Combine results in original order
-  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageMessage?: HumanMessage }[] = [];
+  const toolCallResultsWithUpdates: { toolMessage: ToolMessage; imageDescriptionToCache?: { imagePath: string; description: any } }[] = [];
   let seqIndex = 0;
   let parIndex = 0;
   for (const toolCall of toolCalls) {
@@ -275,10 +241,26 @@ export async function takeReviewerActions(
   }
 
   const toolCallResults = toolCallResultsWithUpdates.map(item => item.toolMessage);
-  // Collect image messages from read_image tool calls
-  const imageMessages = toolCallResultsWithUpdates
-    .map((item) => item.imageMessage)
-    .filter((msg): msg is HumanMessage => msg !== undefined);
+
+  // Collect image descriptions for caching
+  const imageDescriptionsToCache = toolCallResultsWithUpdates
+    .map((item) => item.imageDescriptionToCache)
+    .filter((desc): desc is { imagePath: string; description: any } => desc !== undefined);
+
+  // =======================================================================
+  // Image descriptions are already generated - just add to cache
+  // =======================================================================
+  let imageDescriptionCacheUpdate: Record<string, any> = {};
+  if (imageDescriptionsToCache.length > 0) {
+    logger.info("Caching image descriptions in reviewer", {
+      count: imageDescriptionsToCache.length,
+      paths: imageDescriptionsToCache.map(d => d.imagePath),
+    });
+
+    for (const desc of imageDescriptionsToCache) {
+      imageDescriptionCacheUpdate[desc.imagePath] = desc.description;
+    }
+  }
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
@@ -348,11 +330,11 @@ export async function takeReviewerActions(
   ];
 
   // Include the modified message if it was filtered
-  // Also include image messages for multimodal processing
+  // Image descriptions are now text in ToolMessage - no HumanMessage images
   const reviewerMessagesUpdate =
     wasFiltered && modifiedMessage
-      ? [modifiedMessage, ...toolCallResults, ...imageMessages]
-      : [...toolCallResults, ...imageMessages];
+      ? [modifiedMessage, ...toolCallResults]
+      : [...toolCallResults];
 
   const commandUpdate: ReviewerGraphUpdate = {
     messages: userFacingMessagesUpdate,
@@ -366,6 +348,13 @@ export async function takeReviewerActions(
     ...(codebaseTree ? { codebaseTree } : {}),
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
+    }),
+    // Merge imageDescriptionCache updates for hybrid image analysis
+    ...(Object.keys(imageDescriptionCacheUpdate).length > 0 && {
+      imageDescriptionCache: {
+        ...((state as any).imageDescriptionCache ?? {}),
+        ...imageDescriptionCacheUpdate,
+      },
     }),
   };
 

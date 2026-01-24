@@ -39,13 +39,13 @@ function validateAndFixThoughtSignature(signature: unknown): string | undefined 
   // Check for concatenated signatures - look for '=' followed by more Base64 chars
   // Valid Base64 ends with 0-2 '=' padding, so '=E' or '=A' etc in middle means concatenation
   const concatenationPattern = /=+[A-Za-z0-9+/]/;
-  
+
   if (concatenationPattern.test(signature)) {
     debugLog(`message-inputs: DETECTED CONCATENATED SIGNATURES!`, {
       signatureLength: signature.length,
       signaturePreview: signature.slice(0, 100) + '...',
     });
-    
+
     // Split by '=' padding followed by uppercase letter (start of new signature)
     // Take the LAST signature (most recent one)
     const parts = signature.split(/(?<==)(?=[A-Z])/);
@@ -57,7 +57,7 @@ function validateAndFixThoughtSignature(signature: unknown): string | undefined 
       return lastSignature;
     }
   }
-  
+
   return signature;
 }
 
@@ -74,6 +74,14 @@ function parseBase64Data(dataUrl: string): { mimeType: string; data: string } {
 
 /**
  * Converts a LangChain MessageContent (string or complex array) into Google Parts.
+ * 
+ * Handles both native Google formats and Anthropic-specific formats for fallback scenarios:
+ * - text -> Google text part
+ * - reasoning -> Google thought part
+ * - image_url -> Google inlineData/fileData
+ * - tool_use -> SKIP (tool calls should be handled via AIMessage.tool_calls)
+ * - thinking/redacted_thinking -> SKIP (Anthropic extended thinking, not supported by Gemini)
+ * - tool_result -> Convert to text representation
  */
 function convertContentToParts(content: MessageContent): PartWithThoughtSignature[] {
   if (typeof content === "string") {
@@ -81,19 +89,26 @@ function convertContentToParts(content: MessageContent): PartWithThoughtSignatur
     return [{ text: content }];
   }
 
-  return content.map((block): PartWithThoughtSignature => {
+  const parts: PartWithThoughtSignature[] = [];
+
+  for (const block of content) {
     const b = block as {
       type: string;
       text?: string;
       image_url?: string | { url: string };
       reasoning?: string;
+      thinking?: string;
+      content?: string | unknown;
+      tool_use_id?: string;
+      name?: string;
+      input?: unknown;
     };
 
     if (b.type === "text" && typeof b.text === "string") {
-      return { text: b.text };
+      parts.push({ text: b.text });
     } else if (b.type === "reasoning" && typeof b.reasoning === "string") {
       // Convert LangChain reasoning block back to Google thought part
-      return { text: b.reasoning, thought: true };
+      parts.push({ text: b.reasoning, thought: true });
     } else if (b.type === "image_url" && b.image_url) {
       let url: string;
       if (typeof b.image_url === "string") {
@@ -101,32 +116,59 @@ function convertContentToParts(content: MessageContent): PartWithThoughtSignatur
       } else if (typeof b.image_url === "object" && "url" in b.image_url) {
         url = b.image_url.url;
       } else {
-        throw new Error("Invalid image_url block format");
+        debugLog(`Skipping invalid image_url block format`, { block: b });
+        continue;
       }
 
       // Handle Base64
       if (url.startsWith("data:")) {
         const { mimeType, data } = parseBase64Data(url);
-        return {
+        parts.push({
           inlineData: {
             mimeType,
             data,
           },
-        };
+        });
       }
       // Handle File URI (Google Cloud Storage or File API)
       else if (url.startsWith("gs://") || url.startsWith("https://")) {
-        return {
+        parts.push({
           fileData: {
             mimeType: "image/jpeg", // Fallback, ideally should be inferred
             fileUri: url,
           },
-        };
+        });
       }
     }
-    // Skip unknown block types or throw error depending on strictness.
-    throw new Error(`Unsupported content block type: ${b.type}`);
-  });
+    // ==== ANTHROPIC-SPECIFIC BLOCK TYPES (for fallback scenarios) ====
+    else if (b.type === "tool_use") {
+      // Skip tool_use blocks - these should be handled via AIMessage.tool_calls property
+      // Gemini expects function calls in a different format
+      debugLog(`Skipping tool_use block (handled via tool_calls)`, {
+        name: b.name
+      });
+      continue;
+    } else if (b.type === "thinking" || b.type === "redacted_thinking") {
+      // Skip Anthropic thinking blocks - Gemini has its own thought mechanism
+      // and doesn't support Anthropic's thinking format
+      debugLog(`Skipping ${b.type} block (Anthropic-specific)`, {});
+      continue;
+    } else if (b.type === "tool_result") {
+      // Convert tool_result to text for Gemini
+      // Tool results in Gemini are handled differently (via ToolMessage -> FunctionResponse)
+      const resultContent = typeof b.content === "string"
+        ? b.content
+        : JSON.stringify(b.content);
+      parts.push({ text: `[Tool Result: ${b.tool_use_id || 'unknown'}]\n${resultContent}` });
+      debugLog(`Converted tool_result to text`, { tool_use_id: b.tool_use_id });
+    } else {
+      // Skip unknown block types with a warning instead of throwing
+      debugLog(`Skipping unknown content block type: ${b.type}`, { block: b });
+      continue;
+    }
+  }
+
+  return parts;
 }
 
 /**
@@ -152,7 +194,7 @@ function convertToolCallToPart(toolCall: ToolCall): PartWithThoughtSignature {
  * @param toolCallIdToNameMap - Optional map from tool_call_id to tool name (for fallback)
  */
 function convertToolMessageToPart(
-  message: BaseMessage, 
+  message: BaseMessage,
   toolCallIdToNameMap?: Map<string, string>
 ): PartWithThoughtSignature {
   // Parse content if it's a string that looks like JSON
@@ -169,7 +211,7 @@ function convertToolMessageToPart(
   // Google API requires response to be an object
   // If responseContent is not an object, wrap it in { output: ... }
   let responseObject: Record<string, unknown>;
-  
+
   if (responseContent === null || responseContent === undefined) {
     responseObject = { output: null };
   } else if (typeof responseContent === "object" && !Array.isArray(responseContent)) {
@@ -182,7 +224,7 @@ function convertToolMessageToPart(
 
   // Get tool name - try multiple sources
   let toolName = (message as any).name;
-  
+
   // If name is not set, try to get it from tool_call_id map
   if (!toolName && toolCallIdToNameMap) {
     const toolCallId = (message as any).tool_call_id;
@@ -195,8 +237,8 @@ function convertToolMessageToPart(
   if (!toolName) {
     debugLog(` WARNING: ToolMessage has no name!`, {
       tool_call_id: (message as any).tool_call_id,
-      contentPreview: typeof message.content === 'string' 
-        ? message.content.slice(0, 100) 
+      contentPreview: typeof message.content === 'string'
+        ? message.content.slice(0, 100)
         : JSON.stringify(message.content).slice(0, 100),
     });
     // Use "unknown_tool" as fallback - Google API requires non-empty name
@@ -228,7 +270,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
   // 1. Extract System Messages
   const systemMessages: BaseMessage[] = [];
   const chatMessages: BaseMessage[] = [];
-  
+
   for (const msg of messages) {
     if (isSystemMessage(msg)) {
       systemMessages.push(msg);
@@ -236,7 +278,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
       chatMessages.push(msg);
     }
   }
-  
+
   if (systemMessages.length > 0) {
     const systemParts = systemMessages.flatMap((msg) =>
       convertContentToParts(msg.content)
@@ -277,8 +319,8 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
         name: (m as any).name,
         tool_call_id: (m as any).tool_call_id,
         hasThoughtSignature: !!metadata?.thoughtSignature,
-        thoughtSignaturePreview: metadata?.thoughtSignature 
-          ? (metadata.thoughtSignature as string).slice(0, 30) + '...' 
+        thoughtSignaturePreview: metadata?.thoughtSignature
+          ? (metadata.thoughtSignature as string).slice(0, 30) + '...'
           : undefined,
       };
     }),
@@ -303,7 +345,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
       const metadata = message.response_metadata as Record<string, unknown> | undefined;
       const rawSignature = metadata?.["thoughtSignature"];
       const thoughtSignature = validateAndFixThoughtSignature(rawSignature);
-      
+
       if (rawSignature && !thoughtSignature) {
         debugLog(` WARNING: Invalid thoughtSignature detected and removed`, {
           rawSignatureType: typeof rawSignature,
@@ -334,8 +376,13 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
         for (let tcIndex = 0; tcIndex < message.tool_calls.length; tcIndex++) {
           const toolCall = message.tool_calls[tcIndex];
           const fcPart = convertToolCallToPart(toolCall);
-          
-          // Only attach signature to the FIRST functionCall (parallel FC behavior)
+
+          // =========================================================================
+          // GEMINI 3 REQUIREMENT: ALL functionCall parts must have thoughtSignature
+          // - First FC: Use real signature if available, otherwise dummy
+          // - Subsequent FCs: Always use dummy signature
+          // Without signature on ALL FCs, API returns 400 INVALID_ARGUMENT error
+          // =========================================================================
           if (tcIndex === 0) {
             if (thoughtSignature) {
               fcPart.thoughtSignature = thoughtSignature;
@@ -346,7 +393,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
                 signaturePreview: thoughtSignature.slice(0, 50) + '...',
               });
             } else {
-              // No signature - attach dummy signature to FIRST functionCall only
+              // No signature - attach dummy signature
               fcPart.thoughtSignature = "skip_thought_signature_validator";
               debugLog(` Attached dummy signature to first functionCall`, {
                 messageIndex: i,
@@ -356,18 +403,20 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
               });
             }
           } else {
-            // Subsequent parallel FCs should NOT have signature
-            debugLog(` No signature for parallel functionCall (index > 0)`, {
+            // CRITICAL FIX: Subsequent parallel FCs ALSO need signature (dummy)
+            fcPart.thoughtSignature = "skip_thought_signature_validator";
+            debugLog(` Attached dummy signature to parallel functionCall (index > 0)`, {
               messageIndex: i,
               toolCallIndex: tcIndex,
               toolName: toolCall.name,
+              dummySignature: "skip_thought_signature_validator",
             });
           }
-          
+
           parts.push(fcPart);
         }
       }
-      
+
       // If no tool calls but has signature (e.g., text response with signature)
       // attach to the last text part or create a dummy part
       if ((!message.tool_calls || message.tool_calls.length === 0) && thoughtSignature) {
@@ -388,8 +437,8 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
         tool_call_id: (message as any).tool_call_id,
         resolvedName: (toolPart.functionResponse as any)?.name,
         contentType: typeof message.content,
-        contentPreview: typeof message.content === 'string' 
-          ? message.content.slice(0, 200) 
+        contentPreview: typeof message.content === 'string'
+          ? message.content.slice(0, 200)
           : JSON.stringify(message.content).slice(0, 200),
         convertedPart: JSON.stringify(toolPart).slice(0, 500),
       });
@@ -406,7 +455,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
       if (!lastContent.parts) {
         lastContent.parts = [];
       }
-      
+
       // =========================================================================
       // CRITICAL: When merging AIMessages with functionCalls, we need to ensure
       // that the first functionCall of each "batch" (from each original AIMessage)
@@ -417,10 +466,10 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
       // When we merge, we're combining sequential AIMessages, so each batch's
       // first FC should have a signature.
       // =========================================================================
-      
+
       // Check if we're merging functionCalls into existing content that already has functionCalls
       const existingHasFunctionCalls = lastContent.parts.some(p => (p as PartWithThoughtSignature).functionCall);
-      
+
       if (currentHasFunctionCalls && existingHasFunctionCalls) {
         // We're merging functionCalls from different AIMessages
         // The first FC of the new batch should already have signature (attached above)
@@ -437,7 +486,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
           firstNewFC.thoughtSignature = "skip_thought_signature_validator";
         }
       }
-      
+
       debugLog(` MERGING parts into existing content`, {
         contentIndex: contents.length - 1,
         existingPartsCount: lastContent.parts.length,
@@ -450,7 +499,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
         existingHasFunctionCalls,
         newPartsWithSignature: parts.filter(p => p.thoughtSignature).length,
       });
-      
+
       lastContent.parts.push(...parts);
     } else {
       contents.push({
@@ -483,10 +532,10 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
   for (let cIdx = 0; cIdx < contents.length; cIdx++) {
     const content = contents[cIdx];
     if (content.role !== "model" || !content.parts) continue;
-    
+
     for (let pIdx = 0; pIdx < content.parts.length; pIdx++) {
       const part = content.parts[pIdx] as PartWithThoughtSignature;
-      
+
       if (part.functionCall && !part.thoughtSignature) {
         // This FC doesn't have signature - add dummy
         part.thoughtSignature = "skip_thought_signature_validator";
@@ -506,7 +555,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
   for (let cIdx = 0; cIdx < contents.length; cIdx++) {
     const content = contents[cIdx];
     debugLog(` contents[${cIdx}] role=${content.role}, parts=${content.parts?.length ?? 0}`);
-    
+
     if (content.parts) {
       for (let pIdx = 0; pIdx < content.parts.length; pIdx++) {
         const part = content.parts[pIdx] as PartWithThoughtSignature;
@@ -514,7 +563,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
           contentIndex: cIdx,
           partIndex: pIdx,
         };
-        
+
         if (part.text !== undefined) {
           partInfo.type = 'text';
           partInfo.textPreview = part.text.slice(0, 50);
@@ -524,10 +573,10 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
           partInfo.type = 'functionCall';
           partInfo.functionName = part.functionCall.name;
           partInfo.hasThoughtSignature = !!part.thoughtSignature;
-          partInfo.thoughtSignaturePreview = part.thoughtSignature 
+          partInfo.thoughtSignaturePreview = part.thoughtSignature
             ? (part.thoughtSignature as string).slice(0, 30) + '...'
             : 'MISSING!';
-          
+
           // CRITICAL: Check if this functionCall is missing signature
           if (!part.thoughtSignature) {
             debugLog(` ⚠️ MISSING SIGNATURE at contents[${cIdx}].parts[${pIdx}]`, {
@@ -540,7 +589,7 @@ export function convertMessagesToGooglePayload(messages: BaseMessage[]): {
           partInfo.type = 'functionResponse';
           partInfo.functionName = (part.functionResponse as any).name;
         }
-        
+
         // Only log functionCall parts for brevity
         if (part.functionCall) {
           debugLog(`   parts[${pIdx}]:`, partInfo);
