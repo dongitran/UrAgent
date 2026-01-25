@@ -40,6 +40,7 @@ let isInitialized = false;
 let initError: Error | null = null;
 let lastRefreshTime = 0;
 let isRefreshing = false;
+let initPromise: Promise<boolean> | null = null;
 
 // Default cache TTL: 10 seconds
 const DEFAULT_CACHE_TTL_MS = 10000;
@@ -203,11 +204,17 @@ export async function initDynamicConfig(): Promise<boolean> {
  * Get a configuration value
  * First checks MongoDB config (if loaded), then falls back to process.env
  * Triggers background refresh if cache is expired
+ * Auto-initializes on first call (non-blocking)
  *
  * @param key - The configuration key (e.g., "GOOGLE_API_KEY")
  * @returns The configuration value or undefined if not found
  */
 export function getConfig(key: string): string | undefined {
+    // Lazy initialization: trigger init on first call (non-blocking)
+    if (!isInitialized && !initPromise && isConfigFromMongoDBEnabled()) {
+        initPromise = initDynamicConfig().catch(() => false);
+    }
+
     // Trigger background refresh if cache expired
     if (isInitialized && isConfigFromMongoDBEnabled() && isCacheExpired()) {
         triggerBackgroundRefresh();
