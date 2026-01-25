@@ -4,6 +4,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createLogger, LogLevel } from "../logger.js";
 import { logAIMessage, summarizeResponse, extractTokenUsage } from "@openswe/shared/logger-hub-client";
+import { getGoogleApiKeyManager } from "../llms/google-api-key-manager.js";
 
 const logger = createLogger(LogLevel.INFO, "LLMCommentGenerator");
 
@@ -54,7 +55,7 @@ export function getApiKeyForProvider(provider: string): string | undefined {
     case "anthropic":
       return process.env.ANTHROPIC_API_KEY;
     case "google-genai":
-      return process.env.GOOGLE_API_KEY;
+      return getGoogleApiKeyManager().getNextKey();
     default:
       return undefined;
   }

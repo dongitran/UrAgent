@@ -13,6 +13,7 @@ import { decryptSecret } from "@openswe/shared/crypto";
 import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
 import { ChatGoogleGenAI, ThinkingConfig } from "./google-genai/index.js";
 import { ChatAnthropicFiltered } from "./anthropic/chat-anthropic-filtered.js";
+import { getGoogleApiKeyManager } from "./google-api-key-manager.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -316,10 +317,10 @@ export class ModelManager {
         });
       }
 
-      // Use per-task API key if available, otherwise fall back to global
+      // Use per-task API key if available, otherwise use key rotation
       const googleApiKey = (taskConfig?.provider === "google-genai" ? taskConfig.apiKey : null)
         || apiKey
-        || process.env.GOOGLE_API_KEY;
+        || getGoogleApiKeyManager().getNextKey();
 
       logger.info("Using custom ChatGoogleGenAI with thought signature support", {
         modelName,
