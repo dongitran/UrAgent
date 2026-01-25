@@ -11,6 +11,7 @@ import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createShellExecutor } from "./shell-executor/index.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { SandboxProviderType } from "./sandbox-provider/types.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "Tree");
 
@@ -23,7 +24,7 @@ export const FAILED_TO_GENERATE_TREE_MESSAGE =
  * Example: "applications/kpi-tool-api,applications/kpi-tool-web"
  */
 function getExcludePaths(): string[] {
-  const excludePathsEnv = process.env.CODEBASE_TREE_EXCLUDE_PATHS?.trim();
+  const excludePathsEnv = getConfig("CODEBASE_TREE_EXCLUDE_PATHS")?.trim();
   if (!excludePathsEnv) {
     return [];
   }
@@ -36,7 +37,7 @@ function getExcludePaths(): string[] {
  * Example: "package.json,yarn.lock,.gitignore"
  */
 function getExcludeFiles(): string[] {
-  const excludeFilesEnv = process.env.CODEBASE_TREE_EXCLUDE_FILES?.trim();
+  const excludeFilesEnv = getConfig("CODEBASE_TREE_EXCLUDE_FILES")?.trim();
   if (!excludeFilesEnv) {
     return [];
   }
@@ -288,7 +289,7 @@ export async function getCodebaseTree(
       hasTargetRepository: !!targetRepository,
     });
 
-    const skipFiles = process.env.CODEBASE_TREE_SKIP_FILES === 'true';
+    const skipFiles = getConfig("CODEBASE_TREE_SKIP_FILES") === 'true';
 
     // Use fallback command directly (tree is not available in E2B sandbox)
     // This uses git ls-files which is always available in git repos
@@ -313,7 +314,7 @@ export async function getCodebaseTree(
     }
 
     // --- CHECK IF SKILLS ARE EXPECTED BUT MISSING ---
-    let skillsExpected = !!(process.env.SKILLS_REPOSITORY_OWNER && process.env.SKILLS_REPOSITORY_NAME);
+    let skillsExpected = !!(getConfig("SKILLS_REPOSITORY_OWNER") && getConfig("SKILLS_REPOSITORY_NAME"));
 
     // Also check config and state for skills repo
     if (!skillsExpected) {
@@ -377,7 +378,7 @@ export async function getCodebaseTree(
  */
 async function getCodebaseTreeLocal(config: GraphConfig): Promise<string> {
   try {
-    const skipFiles = process.env.CODEBASE_TREE_SKIP_FILES === 'true';
+    const skipFiles = getConfig("CODEBASE_TREE_SKIP_FILES") === 'true';
     const executor = createShellExecutor(config);
 
     // Use fallback command directly (tree may not be available)

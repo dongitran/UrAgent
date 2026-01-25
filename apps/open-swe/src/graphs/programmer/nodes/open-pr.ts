@@ -51,6 +51,7 @@ import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { postGitHubIssueComment, generateNaturalComment } from "../../../utils/github/plan.js";
 import { createShellExecutor } from "../../../utils/shell-executor/index.js";
 import { isRunCancelled } from "../../../utils/run-cancellation.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -248,7 +249,7 @@ export async function openPullRequest(
     );
   }
 
-  if (process.env.SKIP_CI_UNTIL_LAST_COMMIT === "true") {
+  if (getConfig("SKIP_CI_UNTIL_LAST_COMMIT") === "true") {
     await pushEmptyCommitWithInstance(state.targetRepository, sandboxInstance, config, {
       githubInstallationToken,
     });

@@ -6,11 +6,13 @@ import {
 } from "@langchain/core/messages";
 import { getMessageContentString } from "@openswe/shared/messages";
 import { traceable } from "langsmith/traceable";
+import { getConfig, getConfigNumber } from "@openswe/shared/dynamic-config";
 
 // Summarize conversation history when token count exceeds this threshold
-// Configurable via MAX_INTERNAL_TOKENS env variable, default 40k
+// Configurable via MAX_INTERNAL_TOKENS config, default 40k
+// Note: This is evaluated once at module load. Use getMaxInternalTokens() for dynamic values.
 export const MAX_INTERNAL_TOKENS = parseInt(
-  process.env.MAX_INTERNAL_TOKENS || "40000",
+  getConfig("MAX_INTERNAL_TOKENS") || "40000",
   10
 );
 
@@ -24,12 +26,13 @@ export const MAX_INTERNAL_TOKENS = parseInt(
 export function getMaxInternalTokens(task?: string): number {
   if (task) {
     const taskUpper = task.toUpperCase();
-    const perTaskValue = process.env[`${taskUpper}_MAX_INTERNAL_TOKENS`];
-    if (perTaskValue) {
-      return parseInt(perTaskValue, 10);
+    const perTaskValue = getConfigNumber(`${taskUpper}_MAX_INTERNAL_TOKENS`);
+    if (perTaskValue !== undefined) {
+      return perTaskValue;
     }
   }
-  return MAX_INTERNAL_TOKENS;
+  // Re-read global value for dynamic updates
+  return getConfigNumber("MAX_INTERNAL_TOKENS", 40000) ?? 40000;
 }
 
 /**
@@ -40,16 +43,13 @@ export function getMaxInternalTokens(task?: string): number {
  * @param task - Task name (e.g., "planner", "programmer", "summarizer")
  */
 export function getCheckContextSizeTokens(task?: string): number {
-  const globalValue = parseInt(
-    process.env.CHECK_CONTEXT_SIZE_TOKENS || "60000",
-    10
-  );
+  const globalValue = getConfigNumber("CHECK_CONTEXT_SIZE_TOKENS", 60000) ?? 60000;
 
   if (task) {
     const taskUpper = task.toUpperCase();
-    const perTaskValue = process.env[`${taskUpper}_CHECK_CONTEXT_SIZE_TOKENS`];
-    if (perTaskValue) {
-      return parseInt(perTaskValue, 10);
+    const perTaskValue = getConfigNumber(`${taskUpper}_CHECK_CONTEXT_SIZE_TOKENS`);
+    if (perTaskValue !== undefined) {
+      return perTaskValue;
     }
   }
   return globalValue;

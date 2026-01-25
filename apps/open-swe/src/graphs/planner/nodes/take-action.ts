@@ -43,6 +43,7 @@ import { processToolCallContent } from "../../../utils/tool-output-processing.js
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { isRunCancelled } from "../../../utils/run-cancellation.js";
 import { normalizeToolCallArgs } from "../../../utils/normalize-tool-args.js";
+import { getConfigNumber } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -393,11 +394,9 @@ export async function takeActions(
     ...allStateUpdates,
   };
 
-  // Priority: ENV var > config > default (75)
-  // ENV var allows runtime adjustment without recompilation
-  const envMaxContextActions = process.env.MAX_CONTEXT_ACTIONS
-    ? parseInt(process.env.MAX_CONTEXT_ACTIONS, 10)
-    : undefined;
+  // Priority: Dynamic config > config > default (75)
+  // Dynamic config allows runtime adjustment without recompilation
+  const envMaxContextActions = getConfigNumber("MAX_CONTEXT_ACTIONS");
   const maxContextActions = envMaxContextActions ?? config.configurable?.maxContextActions ?? 75;
   const maxActionsCount = maxContextActions * 2;
   // Exclude hidden messages, and messages that are not AI messages or tool messages.

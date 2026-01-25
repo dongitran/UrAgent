@@ -28,14 +28,15 @@ import {
   extractTokenUsage,
   createErrorDetails,
 } from "@openswe/shared/logger-hub-client";
+import { getConfig as getDynamicConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
-// Debug logging controlled by GEMINI_DEBUG env var
-const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+// Debug logging controlled by GEMINI_DEBUG config
+const GEMINI_DEBUG = () => getDynamicConfig("GEMINI_DEBUG") === 'true';
 
 function debugLog(message: string, data?: Record<string, unknown>): void {
-  if (GEMINI_DEBUG) {
+  if (GEMINI_DEBUG()) {
     logger.debug(message, data);
   }
 }

@@ -18,12 +18,13 @@
 
 import { GoogleGenAI, type GoogleGenAIOptions, type HttpOptions } from "@google/genai";
 import { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
+import { getConfig as getDynamicConfig } from "@openswe/shared/dynamic-config";
 
-// Debug flag - controlled via GEMINI_DEBUG env var
-const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+// Debug flag - controlled via GEMINI_DEBUG config
+const GEMINI_DEBUG = () => getDynamicConfig("GEMINI_DEBUG") === 'true';
 
 function debugLog(message: string, data?: Record<string, unknown>) {
-  if (GEMINI_DEBUG) {
+  if (GEMINI_DEBUG()) {
     console.error(`[Gemini Debug] ${message}`, data ?? {});
   }
 }
@@ -47,21 +48,21 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     const errorName = error.name.toLowerCase();
-    
+
     // Abort errors (timeout, cancelled requests)
-    if (errorName === 'aborterror' || 
-        message.includes('abort') || 
-        message.includes('aborted') ||
-        message.includes('operation was aborted')) {
+    if (errorName === 'aborterror' ||
+      message.includes('abort') ||
+      message.includes('aborted') ||
+      message.includes('operation was aborted')) {
       return true;
     }
     // Network errors
-    if (message.includes('fetch failed') || 
-        message.includes('network') ||
-        message.includes('econnreset') ||
-        message.includes('econnrefused') ||
-        message.includes('etimedout') ||
-        message.includes('socket hang up')) {
+    if (message.includes('fetch failed') ||
+      message.includes('network') ||
+      message.includes('econnreset') ||
+      message.includes('econnrefused') ||
+      message.includes('etimedout') ||
+      message.includes('socket hang up')) {
       return true;
     }
     // Rate limit errors (429)
@@ -331,14 +332,14 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     const params = this.invocationParams(options);
     const { contents, systemInstruction } =
       convertMessagesToGooglePayload(messages);
-    
+
     // Use tools from options first, then fall back to bound tools
     const toolsToUse = options.tools ?? this.boundTools;
     const tools = this._formatTools(toolsToUse);
 
     // Use tool_choice from options first, then fall back to bound tool_choice
     const toolChoiceToUse = options.tool_choice ?? this.boundToolChoice;
-    
+
     // Handle tool_choice - convert to Google GenAI toolConfig format
     const toolConfig = convertToolChoiceToConfig(toolChoiceToUse, options.toolConfig);
 
@@ -374,7 +375,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        
+
         if (isRetryableError(error) && attempt < MAX_RETRIES - 1) {
           const delay = calculateRetryDelay(attempt);
           console.error(`[Gemini Retry] _generate attempt ${attempt + 1}/${MAX_RETRIES} failed, retrying in ${delay}ms`, {
@@ -405,14 +406,14 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     const params = this.invocationParams(options);
     const { contents, systemInstruction } =
       convertMessagesToGooglePayload(messages);
-    
+
     // Use tools from options first, then fall back to bound tools
     const toolsToUse = options.tools ?? this.boundTools;
     const tools = this._formatTools(toolsToUse);
 
     // Use tool_choice from options first, then fall back to bound tool_choice
     const toolChoiceToUse = options.tool_choice ?? this.boundToolChoice;
-    
+
     // Handle tool_choice - convert to Google GenAI toolConfig format
     const toolConfig = convertToolChoiceToConfig(toolChoiceToUse, options.toolConfig);
 
@@ -453,7 +454,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     // We cannot retry during stream iteration because chunks already yielded cannot be rolled back
     let stream: AsyncIterable<any> | undefined;
     let lastError: Error | undefined;
-    
+
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         // Initialize stream - this is where most network errors occur
@@ -465,7 +466,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         break; // Success, exit retry loop
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        
+
         if (isRetryableError(error) && attempt < MAX_RETRIES - 1) {
           const delay = calculateRetryDelay(attempt);
           console.error(`[Gemini Retry] _streamResponseChunks init attempt ${attempt + 1}/${MAX_RETRIES} failed, retrying in ${delay}ms`, {
@@ -492,7 +493,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     // This is critical because LangChain's concat() may concatenate signatures incorrectly
     let lastThoughtSignature: string | undefined;
     let accumulatedChunk: ChatGenerationChunk | undefined;
-    
+
     // Iterate stream - NO retry here because we can't rollback already-yielded chunks
     for await (const chunk of stream) {
       const generationChunk = convertGoogleStreamChunkToLangChainChunk(chunk);
@@ -505,13 +506,13 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
             signaturePreview: chunkSignature.slice(0, 50) + '...',
           });
         }
-        
+
         // Track accumulated chunk to check final response_metadata
         if (accumulatedChunk === undefined) {
           accumulatedChunk = generationChunk;
         } else {
           accumulatedChunk = accumulatedChunk.concat(generationChunk);
-          
+
           // CRITICAL: After concat, the signature may be corrupted (concatenated)
           // Override with the last known good signature
           if (lastThoughtSignature && accumulatedChunk.message.response_metadata) {
@@ -525,7 +526,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
             }
           }
         }
-        
+
         yield generationChunk;
         await runManager?.handleLLMNewToken(
           generationChunk.text ?? "",
@@ -544,7 +545,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
     if (accumulatedChunk) {
       const finalMetadata = accumulatedChunk.message.response_metadata;
       const aiMessage = accumulatedChunk.message as AIMessageChunk;
-      
+
       // Final validation: ensure the signature is not corrupted
       if (finalMetadata?.thoughtSignature && lastThoughtSignature) {
         const finalSignature = finalMetadata.thoughtSignature as string;
@@ -556,11 +557,11 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
           finalMetadata["thoughtSignature"] = lastThoughtSignature;
         }
       }
-      
+
       debugLog(`Stream completed - final accumulated chunk`, {
         hasResponseMetadata: !!finalMetadata,
         hasThoughtSignature: !!finalMetadata?.thoughtSignature,
-        thoughtSignaturePreview: finalMetadata?.thoughtSignature 
+        thoughtSignaturePreview: finalMetadata?.thoughtSignature
           ? (finalMetadata.thoughtSignature as string).slice(0, 50) + '...'
           : undefined,
         hasToolCalls: (aiMessage.tool_calls?.length ?? 0) > 0,
@@ -612,7 +613,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
       boundToolChoice: boundInstance.boundToolChoice,
       has_queuedMethodOperations: !!(boundInstance as any)._queuedMethodOperations,
     });
-    
+
     return boundInstance;
   }
 
@@ -809,11 +810,11 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
 
       // Handle LangChain Tool (BindToolsInput) - can be StructuredTool or plain object with schema
       const lcTool = tool as BindToolsInput;
-      
+
       const isStructured = isStructuredTool(lcTool);
       const hasNameProp = 'name' in lcTool;
       const hasSchemaProp = 'schema' in lcTool;
-      
+
       debugLog(`_formatTools: Tool ${i} type check`, {
         isStructuredTool: isStructured,
         hasNameProp,
@@ -821,7 +822,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         willUseStructuredToolBranch: isStructured,
         willUsePlainToolBranch: !isStructured && hasNameProp && hasSchemaProp,
       });
-      
+
       // Check if it's a StructuredTool (has _call method) or a plain tool definition object
       if (isStructured) {
         // StructuredTool - use its schema directly
@@ -830,7 +831,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
           name: lcTool.name,
           schemaIsZod,
         });
-        
+
         const schema = schemaIsZod
           ? toJsonSchema(lcTool.schema)
           : lcTool.schema;
@@ -844,7 +845,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
         // Plain tool definition object with { name, description, schema }
         // This is the format used by LangChain's bindTools when passing tool definitions
         const toolDef = lcTool as { name: string; description?: string; schema: any };
-        
+
         const schemaIsZod = isInteropZodSchema(toolDef.schema);
         debugLog(`_formatTools processing plain tool definition`, {
           name: toolDef.name,
@@ -867,7 +868,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
             debugLog(`_formatTools: Using schema as-is (not Zod)`);
             schema = toolDef.schema;
           }
-          
+
           debugLog(`_formatTools schema converted`, {
             name: toolDef.name,
             convertedSchemaType: typeof schema,
@@ -888,7 +889,7 @@ export class ChatGoogleGenAI extends BaseChatModel<ChatGoogleGenAICallOptions> {
           description: toolDef.description || '',
           parameters: schema as Schema,
         });
-        debugLog(`_formatTools: Added plain tool definition`, { 
+        debugLog(`_formatTools: Added plain tool definition`, {
           name: toolDef.name,
           functionDeclarationsCountNow: functionDeclarations.length,
         });

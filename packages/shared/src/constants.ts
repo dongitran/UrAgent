@@ -1,3 +1,5 @@
+import { getConfig } from "./dynamic-config.js";
+
 export const TIMEOUT_SEC = 60; // 1 minute
 
 // Sandbox root directories for different providers
@@ -6,14 +8,14 @@ export const E2B_SANDBOX_ROOT_DIR = "/home/user";
 
 // Legacy constant - defaults to Daytona path for backward compatibility
 // Use getSandboxRootDir() for provider-aware path resolution
-export const SANDBOX_ROOT_DIR = process.env.SANDBOX_ROOT_DIR || DAYTONA_SANDBOX_ROOT_DIR;
+export const SANDBOX_ROOT_DIR = getConfig("SANDBOX_ROOT_DIR") || DAYTONA_SANDBOX_ROOT_DIR;
 
 export const DAYTONA_IMAGE_NAME = "daytonaio/langchain-open-swe:0.1.0";
 export const DAYTONA_SNAPSHOT_NAME =
-  process.env.DAYTONA_SNAPSHOT_NAME || "open-swe-vcpu2-mem4-disk5";
+  getConfig("DAYTONA_SNAPSHOT_NAME") || "open-swe-vcpu2-mem4-disk5";
 // E2B template name - default to "base" which is E2B's default template
 export const E2B_TEMPLATE_NAME =
-  process.env.E2B_TEMPLATE || "base";
+  getConfig("E2B_TEMPLATE") || "base";
 
 /**
  * Get the sandbox root directory based on provider type
@@ -32,7 +34,7 @@ export function getSandboxRootDir(providerType?: string): string {
     // Local mode doesn't use sandbox root dir, but return Daytona path as fallback
     return DAYTONA_SANDBOX_ROOT_DIR;
   }
-  
+
   // 'multi' should never be passed here - caller should use sandbox.providerType
   // which returns the actual provider type ('daytona' or 'e2b')
   if (providerType === 'multi') {
@@ -41,9 +43,9 @@ export function getSandboxRootDir(providerType?: string): string {
       "Use sandbox.providerType to get the actual provider type after sandbox creation."
     );
   }
-  
+
   // Auto-detect from environment (only when providerType not specified)
-  const envProvider = process.env.SANDBOX_PROVIDER?.toLowerCase();
+  const envProvider = getConfig("SANDBOX_PROVIDER")?.toLowerCase();
   if (envProvider === 'e2b') {
     return E2B_SANDBOX_ROOT_DIR;
   }
@@ -55,7 +57,7 @@ export function getSandboxRootDir(providerType?: string): string {
       "You must pass the actual providerType from sandbox instance (state.sandboxProviderType)."
     );
   }
-  
+
   // Default to Daytona (when SANDBOX_PROVIDER is 'daytona' or not set)
   return DAYTONA_SANDBOX_ROOT_DIR;
 }

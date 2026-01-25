@@ -19,6 +19,7 @@ import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getSkillsRepoPrompt, getSkillsFirstStep } from "../../../utils/skills-prompt.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
+import { getConfig, getConfigNumber } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "CheckContextSize");
 
@@ -29,15 +30,12 @@ const getContextSizeThreshold = () => getCheckContextSizeTokens("programmer");
 
 // Estimated tokens for tool definitions (~10-15K depending on tools enabled)
 // Tools vary by config so we use a fixed estimate
-const TOOLS_OVERHEAD_TOKENS = parseInt(
-    process.env.TOOLS_OVERHEAD_TOKENS || "12000",
-    10
-);
+const TOOLS_OVERHEAD_TOKENS = getConfigNumber("TOOLS_OVERHEAD_TOKENS", 12000) ?? 12000;
 
 // Logger Hub configuration for context size monitoring
-const getLoggerHubUrl = () => process.env.LOGGER_HUB_URL || "";
-const getLoggerHubApiKey = () => process.env.LOGGER_HUB_API_KEY || "";
-const isLoggerHubEnabled = () => process.env.LOGGER_HUB_ENABLED !== "false" && !!getLoggerHubUrl();
+const getLoggerHubUrl = () => getConfig("LOGGER_HUB_URL") || "";
+const getLoggerHubApiKey = () => getConfig("LOGGER_HUB_API_KEY") || "";
+const isLoggerHubEnabled = () => getConfig("LOGGER_HUB_ENABLED") !== "false" && !!getLoggerHubUrl();
 
 /**
  * Calculate tokens for the FULL system prompt payload.

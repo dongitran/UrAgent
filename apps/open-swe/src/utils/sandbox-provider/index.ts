@@ -57,6 +57,7 @@ import {
 import { DaytonaSandboxProvider, getDaytonaProvider } from "./daytona-provider.js";
 import { E2BSandboxProvider, getE2BProvider } from "./e2b-provider.js";
 import { getKeyManager, MultiProviderKeyManager } from "./key-manager.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.DEBUG, "SandboxProviderFactory");
 
@@ -64,8 +65,8 @@ const logger = createLogger(LogLevel.DEBUG, "SandboxProviderFactory");
  * Determine provider type from environment
  */
 function getProviderTypeFromEnv(): SandboxProviderType {
-  const envProvider = process.env.SANDBOX_PROVIDER?.toLowerCase();
-  
+  const envProvider = getConfig("SANDBOX_PROVIDER")?.toLowerCase();
+
   switch (envProvider) {
     case 'e2b':
       return SandboxProviderType.E2B;
@@ -76,10 +77,10 @@ function getProviderTypeFromEnv(): SandboxProviderType {
     case 'daytona':
     default:
       // Default to Daytona if DAYTONA_API_KEY is set, otherwise check E2B
-      if (process.env.DAYTONA_API_KEY) {
+      if (getConfig("DAYTONA_API_KEY")) {
         return SandboxProviderType.DAYTONA;
       }
-      if (process.env.E2B_API_KEY) {
+      if (getConfig("E2B_API_KEY")) {
         return SandboxProviderType.E2B;
       }
       return SandboxProviderType.DAYTONA;
@@ -95,25 +96,25 @@ function getProviderTypeFromEnv(): SandboxProviderType {
 class MultiSandboxProvider implements ISandboxProvider {
   private keyManager: MultiProviderKeyManager;
   private providerCache: Map<string, ISandboxProvider> = new Map();
-  
+
   readonly name = 'multi';
-  
+
   constructor() {
     this.keyManager = getKeyManager();
-    
+
     const stats = this.keyManager.getStats();
     logger.info("[MULTI] Provider initialized", {
       providers: stats.map(s => ({ provider: s.provider, keyCount: s.totalKeys })),
       totalKeys: this.keyManager.getTotalKeyCount(),
     });
   }
-  
+
   /**
    * Get or create a provider instance for a specific provider type and API key
    */
   private getProviderInstance(providerType: SandboxProviderType, apiKey: string): ISandboxProvider {
     const cacheKey = `${providerType}:${apiKey.substring(0, 8)}`;
-    
+
     let provider = this.providerCache.get(cacheKey);
     if (!provider) {
       if (providerType === SandboxProviderType.DAYTONA) {
@@ -125,22 +126,22 @@ class MultiSandboxProvider implements ISandboxProvider {
       }
       this.providerCache.set(cacheKey, provider);
     }
-    
+
     return provider;
   }
-  
+
   async create(options?: CreateSandboxOptions): Promise<ISandbox> {
     const totalKeys = this.keyManager.getTotalKeyCount();
     let lastError: Error | undefined;
-    
+
     // Import constants for provider-specific defaults
     const { DAYTONA_SNAPSHOT_NAME, E2B_TEMPLATE_NAME } = await import("@openswe/shared/constants");
-    
+
     // Try up to totalKeys times (each key once)
     for (let attempt = 0; attempt < totalKeys; attempt++) {
       // Get next provider and key from round-robin rotation
       const { provider: providerType, apiKey, index } = this.keyManager.getNext();
-      
+
       // CRITICAL: Determine correct template/user based on selected provider
       // Do NOT use options.template as it may be wrong for this provider
       let providerOptions: CreateSandboxOptions;
@@ -159,7 +160,7 @@ class MultiSandboxProvider implements ISandboxProvider {
       } else {
         providerOptions = options || {};
       }
-      
+
       logger.info("[MULTI] Creating sandbox", {
         provider: providerType,
         keyIndex: index,
@@ -168,12 +169,12 @@ class MultiSandboxProvider implements ISandboxProvider {
         attempt: attempt + 1,
         maxAttempts: totalKeys,
       });
-      
+
       const provider = this.getProviderInstance(providerType, apiKey);
-      
+
       try {
         const sandbox = await provider.create(providerOptions);
-        
+
         logger.info("[MULTI] Sandbox created successfully", {
           provider: providerType,
           keyIndex: index,
@@ -181,62 +182,62 @@ class MultiSandboxProvider implements ISandboxProvider {
           template: providerOptions.template,
           attempts: attempt + 1,
         });
-        
+
         return sandbox;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        
+
         logger.warn("[MULTI] Failed to create sandbox, trying next key", {
           provider: providerType,
           keyIndex: index,
           attempt: attempt + 1,
           error: lastError.message,
         });
-        
+
         // Continue to next key
       }
     }
-    
+
     // All keys failed
     logger.error("[MULTI] All keys exhausted, sandbox creation failed", {
       totalAttempts: totalKeys,
       lastError: lastError?.message,
     });
-    
+
     throw lastError ?? new Error("Failed to create sandbox after trying all available keys");
   }
-  
+
   async get(sandboxId: string): Promise<ISandbox> {
     // Try to determine provider from sandbox ID format
     // Daytona IDs are UUIDs, E2B IDs have specific format
     const isE2BId = sandboxId.includes('-') && !sandboxId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
-    
+
     // Try E2B first if it looks like E2B ID, otherwise try Daytona
-    const providersToTry = isE2BId 
+    const providersToTry = isE2BId
       ? [SandboxProviderType.E2B, SandboxProviderType.DAYTONA]
       : [SandboxProviderType.DAYTONA, SandboxProviderType.E2B];
-    
+
     let lastError: Error | undefined;
-    
+
     for (const providerType of providersToTry) {
       const stats = this.keyManager.getStats().find(s => s.provider === providerType);
       if (!stats) continue;
-      
+
       // Try each key for this provider
       for (let i = 0; i < stats.totalKeys; i++) {
         const keyEntry = this.keyManager.getKey(providerType, i);
         if (!keyEntry) continue;
-        
+
         try {
           const provider = this.getProviderInstance(providerType, keyEntry.apiKey);
           const sandbox = await provider.get(sandboxId);
-          
+
           logger.debug("[MULTI] Found sandbox", {
             sandboxId,
             provider: providerType,
             keyIndex: i,
           });
-          
+
           return sandbox;
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
@@ -244,27 +245,27 @@ class MultiSandboxProvider implements ISandboxProvider {
         }
       }
     }
-    
+
     throw lastError ?? new Error(`Sandbox not found: ${sandboxId}`);
   }
-  
+
   async stop(sandboxId: string): Promise<void> {
     const sandbox = await this.get(sandboxId);
     await sandbox.stop();
   }
-  
+
   async delete(sandboxId: string): Promise<boolean> {
     // Similar to get(), try all providers
     const providersToTry = [SandboxProviderType.DAYTONA, SandboxProviderType.E2B];
-    
+
     for (const providerType of providersToTry) {
       const stats = this.keyManager.getStats().find(s => s.provider === providerType);
       if (!stats) continue;
-      
+
       for (let i = 0; i < stats.totalKeys; i++) {
         const keyEntry = this.keyManager.getKey(providerType, i);
         if (!keyEntry) continue;
-        
+
         try {
           const provider = this.getProviderInstance(providerType, keyEntry.apiKey);
           const result = await provider.delete(sandboxId);
@@ -281,22 +282,22 @@ class MultiSandboxProvider implements ISandboxProvider {
         }
       }
     }
-    
+
     return false;
   }
-  
+
   async list(): Promise<SandboxInfo[]> {
     const allSandboxes: SandboxInfo[] = [];
-    
+
     // List from all providers and keys
     for (const providerType of [SandboxProviderType.DAYTONA, SandboxProviderType.E2B]) {
       const stats = this.keyManager.getStats().find(s => s.provider === providerType);
       if (!stats) continue;
-      
+
       for (let i = 0; i < stats.totalKeys; i++) {
         const keyEntry = this.keyManager.getKey(providerType, i);
         if (!keyEntry) continue;
-        
+
         try {
           const provider = this.getProviderInstance(providerType, keyEntry.apiKey);
           const sandboxes = await provider.list();
@@ -310,10 +311,10 @@ class MultiSandboxProvider implements ISandboxProvider {
         }
       }
     }
-    
+
     return allSandboxes;
   }
-  
+
   /**
    * Get key manager for external access (stats, etc.)
    */
@@ -340,20 +341,20 @@ function getMultiProvider(): MultiSandboxProvider {
  */
 export function getSandboxProvider(config?: Partial<SandboxProviderConfig>): ISandboxProvider {
   const providerType = config?.type || getProviderTypeFromEnv();
-  
+
   logger.debug("Getting sandbox provider", { providerType });
-  
+
   switch (providerType) {
     case SandboxProviderType.E2B:
       return getE2BProvider(config?.e2b);
-    
+
     case SandboxProviderType.MULTI:
       return getMultiProvider();
-    
+
     case SandboxProviderType.LOCAL:
       // For local mode, we don't need a provider - handled separately
       throw new Error("Local mode should be handled by isLocalMode() check, not through provider");
-    
+
     case SandboxProviderType.DAYTONA:
     default:
       return getDaytonaProvider(config?.daytona);
@@ -365,17 +366,17 @@ export function getSandboxProvider(config?: Partial<SandboxProviderConfig>): ISa
  */
 export function createSandboxProvider(config: SandboxProviderConfig): ISandboxProvider {
   logger.debug("Creating new sandbox provider", { type: config.type });
-  
+
   switch (config.type) {
     case SandboxProviderType.E2B:
       return new E2BSandboxProvider(config.e2b);
-    
+
     case SandboxProviderType.MULTI:
       return new MultiSandboxProvider();
-    
+
     case SandboxProviderType.LOCAL:
       throw new Error("Local mode should be handled by isLocalMode() check, not through provider");
-    
+
     case SandboxProviderType.DAYTONA:
     default:
       return new DaytonaSandboxProvider(config.daytona);
@@ -388,18 +389,18 @@ export function createSandboxProvider(config: SandboxProviderConfig): ISandboxPr
 export function isProviderAvailable(type: SandboxProviderType): boolean {
   switch (type) {
     case SandboxProviderType.DAYTONA:
-      return !!process.env.DAYTONA_API_KEY;
-    
+      return !!getConfig("DAYTONA_API_KEY");
+
     case SandboxProviderType.E2B:
-      return !!process.env.E2B_API_KEY;
-    
+      return !!getConfig("E2B_API_KEY");
+
     case SandboxProviderType.MULTI:
       // Multi requires at least one key from any provider
-      return !!process.env.DAYTONA_API_KEY || !!process.env.E2B_API_KEY;
-    
+      return !!getConfig("DAYTONA_API_KEY") || !!getConfig("E2B_API_KEY");
+
     case SandboxProviderType.LOCAL:
       return true;
-    
+
     default:
       return false;
   }
@@ -410,7 +411,7 @@ export function isProviderAvailable(type: SandboxProviderType): boolean {
  */
 export function getAvailableProviders(): SandboxProviderType[] {
   const available: SandboxProviderType[] = [];
-  
+
   if (isProviderAvailable(SandboxProviderType.DAYTONA)) {
     available.push(SandboxProviderType.DAYTONA);
   }
@@ -421,6 +422,6 @@ export function getAvailableProviders(): SandboxProviderType[] {
     available.push(SandboxProviderType.MULTI);
   }
   available.push(SandboxProviderType.LOCAL);
-  
+
   return available;
 }

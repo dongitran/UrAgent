@@ -4,18 +4,22 @@
  * Manages multiple Google API keys with simple round-robin rotation.
  * Similar pattern to sandbox-provider/key-manager.ts but simplified for LLM usage.
  * 
+ * Now uses dynamic config from MongoDB for GOOGLE_API_KEY, enabling
+ * realtime key rotation without app restart.
+ * 
  * Usage:
  * ```typescript
  * const manager = getGoogleApiKeyManager();
  * const apiKey = manager.getNextKey();
  * ```
  * 
- * Environment:
+ * Environment/MongoDB Config:
  * - GOOGLE_API_KEY: Single key or comma-separated keys
  *   Example: "key1,key2,key3"
  */
 
 import { createLogger, LogLevel } from "../logger.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.DEBUG, "GoogleApiKeyManager");
 
@@ -34,31 +38,41 @@ export interface GoogleApiKeyManagerStats {
  * 
  * Handles simple round-robin rotation between multiple API keys.
  * Thread-safe for single-threaded Node.js environment.
+ * 
+ * Now reads from dynamic config (MongoDB) with auto-refresh.
  */
 export class GoogleApiKeyManager {
     private keys: string[] = [];
     private currentIndex: number = 0;
     private totalCalls: number = 0;
+    private lastEnvValue: string = '';
 
     constructor() {
-        this.loadKeysFromEnv();
+        this.loadKeysFromConfig();
     }
 
     /**
-     * Load and parse API keys from environment variable
+     * Load and parse API keys from dynamic config (MongoDB or process.env)
      * Keys can be comma-separated for multiple accounts
      */
-    private loadKeysFromEnv(): void {
-        const envValue = process.env.GOOGLE_API_KEY || '';
+    private loadKeysFromConfig(): void {
+        const envValue = getConfig("GOOGLE_API_KEY") || '';
+
+        // Only reload if the config value has changed
+        if (envValue === this.lastEnvValue && this.keys.length > 0) {
+            return;
+        }
+
+        this.lastEnvValue = envValue;
         this.keys = this.parseKeys(envValue);
 
-        logger.info("[GoogleApiKeyManager] Initialized", {
+        logger.info("[GoogleApiKeyManager] Keys loaded from config", {
             keyCount: this.keys.length,
             maskedKeys: this.keys.map(k => this.maskKey(k)),
         });
 
         if (this.keys.length === 0) {
-            logger.warn("[GoogleApiKeyManager] No API keys found! Set GOOGLE_API_KEY environment variable");
+            logger.warn("[GoogleApiKeyManager] No API keys found! Set GOOGLE_API_KEY in MongoDB or environment");
         }
     }
 
@@ -89,9 +103,12 @@ export class GoogleApiKeyManager {
      * @throws Error if no keys are available
      */
     getNextKey(): string {
+        // Reload keys from config (picks up changes from MongoDB)
+        this.loadKeysFromConfig();
+
         if (this.keys.length === 0) {
             throw new Error(
-                "No Google API keys available. Set GOOGLE_API_KEY environment variable."
+                "No Google API keys available. Set GOOGLE_API_KEY in MongoDB config or environment variable."
             );
         }
 
@@ -117,6 +134,7 @@ export class GoogleApiKeyManager {
      * Useful for retrying with a specific key
      */
     getKey(index: number): string | null {
+        this.loadKeysFromConfig();
         if (index >= 0 && index < this.keys.length) {
             return this.keys[index];
         }
@@ -127,6 +145,7 @@ export class GoogleApiKeyManager {
      * Get total number of keys
      */
     getKeyCount(): number {
+        this.loadKeysFromConfig();
         return this.keys.length;
     }
 
@@ -134,6 +153,7 @@ export class GoogleApiKeyManager {
      * Check if multiple keys are configured
      */
     hasMultipleKeys(): boolean {
+        this.loadKeysFromConfig();
         return this.keys.length > 1;
     }
 
@@ -141,6 +161,7 @@ export class GoogleApiKeyManager {
      * Get statistics for monitoring
      */
     getStats(): GoogleApiKeyManagerStats {
+        this.loadKeysFromConfig();
         return {
             totalKeys: this.keys.length,
             currentIndex: this.currentIndex,
@@ -155,16 +176,18 @@ export class GoogleApiKeyManager {
     reset(): void {
         this.currentIndex = 0;
         this.totalCalls = 0;
+        this.lastEnvValue = '';
         logger.debug("[GoogleApiKeyManager] State reset");
     }
 
     /**
-     * Reload keys from environment (useful if env vars change)
+     * Reload keys from config (useful if config changes)
      */
     reload(): void {
-        this.loadKeysFromEnv();
+        this.lastEnvValue = ''; // Force reload
+        this.loadKeysFromConfig();
         this.reset();
-        logger.info("[GoogleApiKeyManager] Keys reloaded from environment");
+        logger.info("[GoogleApiKeyManager] Keys reloaded from config");
     }
 }
 

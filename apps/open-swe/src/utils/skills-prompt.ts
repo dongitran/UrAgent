@@ -3,6 +3,8 @@
  * Skills are cloned into .skills folder inside main repo for relative path access.
  * NOTE: Skill files are already listed in codebase_tree - no need for 'ls' command.
  */
+import { getConfig } from "@openswe/shared/dynamic-config";
+
 export const SKILLS_REPO_PROMPT_TEMPLATE = `
     <skills_repository>
         <location>.skills/{SKILLS_SUBFOLDER}</location>
@@ -26,16 +28,17 @@ export const SKILLS_FIRST_STEP_TEMPLATE = `
         - **DO NOT view directory** - filenames are already visible in codebase_tree, directly read the files
         - **ALWAYS read**: coding-standards/SKILL.md (mandatory for all tasks)
         - **If backend task** (API, NestJS, services, *-api projects): Also read backend-patterns/SKILL.md
+        - **Also read** any \`<project-name>.md\` skill file matching the project you're working in (e.g., urcard-integration-api.md for urcard-integration-api project)
         - **Directly read skill files** (no directory listing): view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"`;
 
 /**
- * Get the skills repo prompt section - only returns content if configured via env vars.
+ * Get the skills repo prompt section - only returns content if configured via env vars or dynamic config.
  * @param subfolderPath Optional subfolder path override.
  */
 export function getSkillsRepoPrompt(subfolderPath?: string): string {
-    const envOwner = process.env.SKILLS_REPOSITORY_OWNER;
-    const envRepo = process.env.SKILLS_REPOSITORY_NAME;
-    const envPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+    const envOwner = getConfig("SKILLS_REPOSITORY_OWNER");
+    const envRepo = getConfig("SKILLS_REPOSITORY_NAME");
+    const envPath = getConfig("SKILLS_REPOSITORY_PATH")?.trim();
 
     if (envOwner && envRepo) {
         const skillsSubfolder = subfolderPath ?? envPath ?? "";
@@ -49,9 +52,9 @@ export function getSkillsRepoPrompt(subfolderPath?: string): string {
  * Get the skills first step prompt for Planner.
  */
 export function getSkillsFirstStep(subfolderPath?: string): string {
-    const envOwner = process.env.SKILLS_REPOSITORY_OWNER;
-    const envRepo = process.env.SKILLS_REPOSITORY_NAME;
-    const envPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+    const envOwner = getConfig("SKILLS_REPOSITORY_OWNER");
+    const envRepo = getConfig("SKILLS_REPOSITORY_NAME");
+    const envPath = getConfig("SKILLS_REPOSITORY_PATH")?.trim();
 
     if (envOwner && envRepo) {
         const skillsSubfolder = subfolderPath ?? envPath ?? "";
@@ -65,5 +68,5 @@ export function getSkillsFirstStep(subfolderPath?: string): string {
  * Helper to check if skills repo is configured.
  */
 export function isSkillsRepoConfigured(): boolean {
-    return !!(process.env.SKILLS_REPOSITORY_OWNER && process.env.SKILLS_REPOSITORY_NAME);
+    return !!(getConfig("SKILLS_REPOSITORY_OWNER") && getConfig("SKILLS_REPOSITORY_NAME"));
 }
