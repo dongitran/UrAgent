@@ -4,10 +4,16 @@
  * This module allows configuration to be stored in MongoDB, enabling config changes
  * without requiring Docker image rebuilds (which take ~3 minutes).
  *
+ * Features:
+ * - Automatic refresh every CONFIG_CACHE_TTL_MS (default: 10 seconds)
+ * - Fallback to process.env when MongoDB value not found
+ * - Non-blocking background refresh
+ *
  * Environment Variables:
  * - CONFIG_FROM_MONGODB: Set to "true" to enable loading config from MongoDB
  * - CONFIG_MONGODB_URI: MongoDB connection string
  * - CONFIG_COLLECTION: Collection name to read config from (default: "uragent-urcard-config")
+ * - CONFIG_CACHE_TTL_MS: Cache TTL in milliseconds (default: 10000 = 10 seconds)
  *
  * Usage:
  *   import { getConfig, initDynamicConfig } from "@openswe/shared/dynamic-config";
@@ -16,6 +22,7 @@
  *   await initDynamicConfig();
  *
  *   // Get config value (MongoDB first, then process.env fallback)
+ *   // Config auto-refreshes every 10 seconds in background
  *   const apiKey = getConfig("GOOGLE_API_KEY");
  *
  * MongoDB Document Structure:
@@ -31,6 +38,11 @@
 let mongoConfig: Record<string, string> | null = null;
 let isInitialized = false;
 let initError: Error | null = null;
+let lastRefreshTime = 0;
+let isRefreshing = false;
+
+// Default cache TTL: 10 seconds
+const DEFAULT_CACHE_TTL_MS = 10000;
 
 /**
  * Check if dynamic config from MongoDB is enabled
@@ -51,6 +63,92 @@ function getConfigMongoDBUri(): string {
  */
 function getConfigCollection(): string {
     return process.env.CONFIG_COLLECTION || "uragent-urcard-config";
+}
+
+/**
+ * Get cache TTL in milliseconds
+ */
+function getCacheTTL(): number {
+    const ttl = parseInt(process.env.CONFIG_CACHE_TTL_MS || "", 10);
+    return isNaN(ttl) ? DEFAULT_CACHE_TTL_MS : ttl;
+}
+
+/**
+ * Check if cache is expired
+ */
+function isCacheExpired(): boolean {
+    return Date.now() - lastRefreshTime > getCacheTTL();
+}
+
+/**
+ * Load config from MongoDB (internal function)
+ */
+async function loadFromMongoDB(): Promise<Record<string, string> | null> {
+    const mongoUri = getConfigMongoDBUri();
+    if (!mongoUri) {
+        return null;
+    }
+
+    try {
+        // Dynamic import to avoid requiring mongodb when not needed
+        const { MongoClient } = await import("mongodb");
+
+        const client = new MongoClient(mongoUri, {
+            serverSelectionTimeoutMS: 5000,
+            connectTimeoutMS: 5000,
+        });
+
+        await client.connect();
+
+        const db = client.db();
+        const collection = db.collection(getConfigCollection());
+
+        // Load the default config document (using string _id)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configDoc = await collection.findOne({ _id: "default" } as any);
+
+        await client.close();
+
+        if (configDoc) {
+            const config: Record<string, string> = {};
+            for (const [key, value] of Object.entries(configDoc)) {
+                if (key !== "_id" && key !== "updatedAt" && key !== "updatedBy" && typeof value === "string") {
+                    config[key] = value;
+                }
+            }
+            return config;
+        }
+
+        return null;
+    } catch (error) {
+        console.error("[DynamicConfig] Refresh failed:", error instanceof Error ? error.message : error);
+        return null;
+    }
+}
+
+/**
+ * Background refresh config (non-blocking)
+ */
+function triggerBackgroundRefresh(): void {
+    if (isRefreshing || !isConfigFromMongoDBEnabled()) {
+        return;
+    }
+
+    isRefreshing = true;
+
+    loadFromMongoDB()
+        .then((newConfig) => {
+            if (newConfig) {
+                mongoConfig = newConfig;
+                lastRefreshTime = Date.now();
+            }
+        })
+        .catch(() => {
+            // Silently ignore - keep using cached config
+        })
+        .finally(() => {
+            isRefreshing = false;
+        });
 }
 
 /**
@@ -80,34 +178,12 @@ export async function initDynamicConfig(): Promise<boolean> {
     try {
         console.log("[DynamicConfig] Loading config from MongoDB...");
 
-        // Dynamic import to avoid requiring mongodb when not needed
-        const { MongoClient } = await import("mongodb");
+        const config = await loadFromMongoDB();
 
-        const client = new MongoClient(mongoUri, {
-            serverSelectionTimeoutMS: 5000, // 5 second timeout
-            connectTimeoutMS: 5000,
-        });
-
-        await client.connect();
-
-        const db = client.db(); // Uses database from connection string
-        const collection = db.collection(getConfigCollection());
-
-        // Load the default config document (using string _id)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const configDoc = await collection.findOne({ _id: "default" } as any);
-
-        await client.close();
-
-        if (configDoc) {
-            // Extract all string values from the document (excluding _id and metadata)
-            mongoConfig = {};
-            for (const [key, value] of Object.entries(configDoc)) {
-                if (key !== "_id" && key !== "updatedAt" && key !== "updatedBy" && typeof value === "string") {
-                    mongoConfig[key] = value;
-                }
-            }
-            console.log(`[DynamicConfig] Loaded ${Object.keys(mongoConfig).length} config keys from MongoDB`);
+        if (config) {
+            mongoConfig = config;
+            lastRefreshTime = Date.now();
+            console.log(`[DynamicConfig] Loaded ${Object.keys(mongoConfig).length} config keys (TTL: ${getCacheTTL()}ms)`);
         } else {
             console.warn("[DynamicConfig] No config document found in MongoDB - using process.env only");
         }
@@ -126,11 +202,17 @@ export async function initDynamicConfig(): Promise<boolean> {
 /**
  * Get a configuration value
  * First checks MongoDB config (if loaded), then falls back to process.env
+ * Triggers background refresh if cache is expired
  *
  * @param key - The configuration key (e.g., "GOOGLE_API_KEY")
  * @returns The configuration value or undefined if not found
  */
 export function getConfig(key: string): string | undefined {
+    // Trigger background refresh if cache expired
+    if (isInitialized && isConfigFromMongoDBEnabled() && isCacheExpired()) {
+        triggerBackgroundRefresh();
+    }
+
     // Check MongoDB config first (if loaded)
     if (mongoConfig && key in mongoConfig) {
         return mongoConfig[key];
@@ -172,6 +254,25 @@ export function getConfigBoolean(key: string, defaultValue?: boolean): boolean |
 }
 
 /**
+ * Force refresh config from MongoDB (blocking)
+ * Use this when you need to ensure latest config
+ */
+export async function forceRefreshConfig(): Promise<boolean> {
+    if (!isConfigFromMongoDBEnabled()) {
+        return false;
+    }
+
+    const newConfig = await loadFromMongoDB();
+    if (newConfig) {
+        mongoConfig = newConfig;
+        lastRefreshTime = Date.now();
+        console.log(`[DynamicConfig] Force refreshed ${Object.keys(mongoConfig).length} config keys`);
+        return true;
+    }
+    return false;
+}
+
+/**
  * Check if dynamic config has been initialized
  */
 export function isConfigInitialized(): boolean {
@@ -200,10 +301,30 @@ export function getMongoConfigKeys(): string[] {
 }
 
 /**
+ * Get cache status (for debugging)
+ */
+export function getCacheStatus(): {
+    isExpired: boolean;
+    lastRefreshTime: number;
+    ttlMs: number;
+    ageMs: number;
+} {
+    return {
+        isExpired: isCacheExpired(),
+        lastRefreshTime,
+        ttlMs: getCacheTTL(),
+        ageMs: Date.now() - lastRefreshTime,
+    };
+}
+
+/**
  * Reset the config state (for testing purposes)
  */
 export function resetConfigState(): void {
     mongoConfig = null;
     isInitialized = false;
     initError = null;
+    lastRefreshTime = 0;
+    isRefreshing = false;
 }
+
