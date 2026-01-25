@@ -5,24 +5,20 @@
  * This is necessary for Daytona free tier which limits to 2 concurrent sandboxes.
  *
  * Usage:
- * - Set MAX_CONCURRENT_SANDBOXES env var to limit (0 = unlimited)
+ * - Set MAX_CONCURRENT_SANDBOXES config to limit (0 = unlimited)
  * - Call acquireSlot() before creating a sandbox
  * - Call releaseSlot() when sandbox is deleted
  */
 
 import { createLogger, LogLevel } from "./logger.js";
+import { getConfigNumber } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "SandboxConcurrency");
 
-// Configuration from environment
-const MAX_CONCURRENT_SANDBOXES = parseInt(
-    process.env.MAX_CONCURRENT_SANDBOXES || "0",
-    10
-);
-const SLOT_CHECK_INTERVAL_MS = parseInt(
-    process.env.SANDBOX_SLOT_CHECK_INTERVAL_MS || "10000",
-    10
-);
+// Configuration from dynamic config (MongoDB with fallback to process.env)
+const MAX_CONCURRENT_SANDBOXES = getConfigNumber("MAX_CONCURRENT_SANDBOXES", 0) ?? 0;
+const SLOT_CHECK_INTERVAL_MS = getConfigNumber("SANDBOX_SLOT_CHECK_INTERVAL_MS", 10000) ?? 10000;
+
 
 /**
  * SandboxConcurrencyManager - Singleton class for managing sandbox concurrency

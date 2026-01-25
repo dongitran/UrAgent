@@ -24,6 +24,7 @@ import { createShellExecutor } from "../shell-executor/index.js";
 import { shouldCreateIssue } from "../should-create-issue.js";
 import { ISandbox } from "../sandbox-provider/types.js";
 import { isRunCancelled } from "../run-cancellation.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -324,7 +325,7 @@ export async function stashAndClearChanges(
 function constructCommitMessage(): string {
   const baseCommitMessage = "Apply patch";
   const skipCiString = "[skip ci]";
-  const vercelSkipCi = process.env.SKIP_CI_UNTIL_LAST_COMMIT === "true";
+  const vercelSkipCi = getConfig("SKIP_CI_UNTIL_LAST_COMMIT") === "true";
   if (vercelSkipCi) {
     return `${baseCommitMessage} ${skipCiString}`;
   }

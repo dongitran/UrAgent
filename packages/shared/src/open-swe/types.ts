@@ -8,6 +8,7 @@ import {
 } from "@langchain/langgraph/web";
 import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
 import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
+import { getConfig } from "../dynamic-config.js";
 import {
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
@@ -259,9 +260,9 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
     default: () => ({
-      owner: process.env.DEFAULT_REPOSITORY_OWNER || "",
-      repo: process.env.DEFAULT_REPOSITORY_NAME || "",
-      branch: process.env.DEFAULT_BRANCH || "main",
+      owner: getConfig("DEFAULT_REPOSITORY_OWNER") || "",
+      repo: getConfig("DEFAULT_REPOSITORY_NAME") || "",
+      branch: getConfig("DEFAULT_BRANCH") || "main",
     }),
   }),
   /**
@@ -273,14 +274,14 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
     default: () => {
-      // Only return if env vars are set
-      const owner = process.env.SKILLS_REPOSITORY_OWNER;
-      const repo = process.env.SKILLS_REPOSITORY_NAME;
+      // Only return if config vars are set
+      const owner = getConfig("SKILLS_REPOSITORY_OWNER");
+      const repo = getConfig("SKILLS_REPOSITORY_NAME");
       if (owner && repo) {
         return {
           owner,
           repo,
-          branch: process.env.SKILLS_REPOSITORY_BRANCH || "main",
+          branch: getConfig("SKILLS_REPOSITORY_BRANCH") || "main",
         };
       }
       return undefined;

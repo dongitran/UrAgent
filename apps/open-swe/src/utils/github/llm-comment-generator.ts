@@ -5,6 +5,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createLogger, LogLevel } from "../logger.js";
 import { logAIMessage, summarizeResponse, extractTokenUsage } from "@openswe/shared/logger-hub-client";
 import { getGoogleApiKeyManager } from "../llms/google-api-key-manager.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "LLMCommentGenerator");
 
@@ -23,10 +24,10 @@ function sleep(ms: number): Promise<void> {
  * Get the summarizer model configuration from environment
  */
 export function getSummarizerModelConfig(): { provider: string; modelName: string } {
-  const provider = process.env.LLM_PROVIDER || "openai";
+  const provider = getConfig("LLM_PROVIDER") || "openai";
   const providerPrefix = provider === "google-genai" ? "GOOGLE" : provider.toUpperCase();
   const taskEnvKey = `${providerPrefix}_SUMMARIZER_MODEL`;
-  const taskEnvValue = process.env[taskEnvKey];
+  const taskEnvValue = getConfig(taskEnvKey);
 
   if (taskEnvValue) {
     return { provider, modelName: taskEnvValue };
@@ -51,9 +52,9 @@ export function getSummarizerModelConfig(): { provider: string; modelName: strin
 export function getApiKeyForProvider(provider: string): string | undefined {
   switch (provider) {
     case "openai":
-      return process.env.OPENAI_API_KEY;
+      return getConfig("OPENAI_API_KEY");
     case "anthropic":
-      return process.env.ANTHROPIC_API_KEY;
+      return getConfig("ANTHROPIC_API_KEY");
     case "google-genai":
       return getGoogleApiKeyManager().getNextKey();
     default:
@@ -128,7 +129,7 @@ export async function generateCommentWithLLM(
           apiKey,
           temperature: 0.8,
           maxTokens: 5000,
-          ...(process.env.OPENAI_BASE_URL ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } } : {}),
+          ...(getConfig("OPENAI_BASE_URL") ? { configuration: { baseURL: getConfig("OPENAI_BASE_URL") } } : {}),
         });
         response = await model.invoke([new HumanMessage(prompt)]);
         generatedText = typeof response.content === 'string'

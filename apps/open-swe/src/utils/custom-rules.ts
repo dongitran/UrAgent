@@ -11,6 +11,7 @@ import { join } from "path";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
 import { ISandbox } from "./sandbox-provider/types.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "CustomRules");
 
@@ -220,7 +221,7 @@ async function getCustomRulesLocal(
     }
 
     // Try to read rules from .skills directory
-    const skillsPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+    const skillsPath = getConfig("SKILLS_REPOSITORY_PATH")?.trim();
     const skillsBaseDir = join(workingDirectory, ".skills");
     const skillsSearchDirs = [skillsBaseDir];
     if (skillsPath) {
@@ -275,7 +276,7 @@ export async function getCustomRulesWithSandboxInstance(
     }
 
     // Prepare commands for root and skills subfolder
-    const skillsPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+    const skillsPath = getConfig("SKILLS_REPOSITORY_PATH")?.trim();
 
     const fileNames = ["AGENT.md", "CLAUDE.md", "CURSOR.md", "RULES.md"];
     const locations = [rootDir];

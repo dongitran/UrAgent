@@ -8,6 +8,7 @@ import {
 import { RequestSource } from "../../constants.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { generateInitialComment } from "../../utils/github/initial-comment.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 class IssueWebhookHandler extends WebhookHandlerBase {
   constructor() {
@@ -63,9 +64,9 @@ class IssueWebhookHandler extends WebhookHandlerBase {
         issueBody: payload.issue.body || "",
       };
 
-      // Use DEFAULT_BRANCH from env if set, otherwise fallback to GitHub's default_branch
-      const baseBranch = process.env.DEFAULT_BRANCH || payload.repository?.default_branch || "main";
-      
+      // Use DEFAULT_BRANCH from config if set, otherwise fallback to GitHub's default_branch
+      const baseBranch = getConfig("DEFAULT_BRANCH") || payload.repository?.default_branch || "main";
+
       const runInput = {
         messages: [
           this.createHumanMessage(
@@ -89,9 +90,9 @@ class IssueWebhookHandler extends WebhookHandlerBase {
       // Create config object with Claude Opus 4.1 model configuration for max labels
       const configurable: Partial<GraphConfig["configurable"]> = isMaxLabel
         ? {
-            plannerModelName: "anthropic:claude-opus-4-1",
-            programmerModelName: "anthropic:claude-opus-4-1",
-          }
+          plannerModelName: "anthropic:claude-opus-4-1",
+          programmerModelName: "anthropic:claude-opus-4-1",
+        }
         : {};
 
       const { runId, threadId } = await this.createRun(context, {

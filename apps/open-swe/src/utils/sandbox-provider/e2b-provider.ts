@@ -38,6 +38,8 @@ import {
 
 const logger = createLogger(LogLevel.DEBUG, "E2BSandboxProvider");
 
+import { getConfig } from "@openswe/shared/dynamic-config";
+
 // Retry configuration
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 5000;
@@ -663,11 +665,11 @@ export class E2BSandboxProvider implements ISandboxProvider {
     domain?: string;
   }) {
     // Support multiple comma-separated keys for round-robin
-    const keyString = config?.apiKey || process.env.E2B_API_KEY || '';
-    this.apiKeys = keyString.split(',').map(k => k.trim()).filter(k => k.length > 0);
+    const keyString = config?.apiKey || getConfig("E2B_API_KEY") || '';
+    this.apiKeys = keyString.split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
 
-    // Use E2B_TEMPLATE env var, then config, then 'base' as default
-    this.defaultTemplate = process.env.E2B_TEMPLATE || config?.defaultTemplate || 'base';
+    // Use E2B_TEMPLATE config, then config, then 'base' as default
+    this.defaultTemplate = getConfig("E2B_TEMPLATE") || config?.defaultTemplate || 'base';
     this._domain = config?.domain; // Reserved for future use
 
     if (this.apiKeys.length === 0) {

@@ -14,6 +14,7 @@ import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
 import { ChatGoogleGenAI, ThinkingConfig } from "./google-genai/index.js";
 import { ChatAnthropicFiltered } from "./anthropic/chat-anthropic-filtered.js";
 import { getGoogleApiKeyManager } from "./google-api-key-manager.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -61,7 +62,7 @@ const DEFAULT_FALLBACK_ORDER: Provider[] = ["anthropic", "google-genai"];
  * Format: comma-separated provider names, e.g., "anthropic,google-genai"
  */
 function parseActiveFallbackOrder(): Provider[] {
-  const envValue = process.env.LLM_FALLBACK_ORDER;
+  const envValue = getConfig("LLM_FALLBACK_ORDER");
   if (!envValue) {
     return DEFAULT_FALLBACK_ORDER;
   }
@@ -87,7 +88,7 @@ function parseActiveFallbackOrder(): Provider[] {
  */
 function getFallbackOrder(): Provider[] {
   const multiProviderEnabled =
-    process.env.LLM_MULTI_PROVIDER_ENABLED === "true";
+    getConfig("LLM_MULTI_PROVIDER_ENABLED") === "true";
 
   if (multiProviderEnabled) {
     // Multi-provider mode: use configured fallback order
@@ -95,7 +96,7 @@ function getFallbackOrder(): Provider[] {
   }
 
   // Single provider mode: only use the configured provider
-  const provider = (process.env.LLM_PROVIDER || "anthropic") as Provider;
+  const provider = (getConfig("LLM_PROVIDER") || "anthropic") as Provider;
   return [provider];
 }
 
@@ -167,8 +168,8 @@ export class ModelManager {
     const userLogin =
       (graphConfig.configurable as any)?.langgraph_auth_user?.display_name ||
       (graphConfig.configurable as any)?.["x-github-user-login"] ||
-      process.env.DEFAULT_GITHUB_INSTALLATION_NAME;
-    const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+      getConfig("DEFAULT_GITHUB_INSTALLATION_NAME");
+    const secretsEncryptionKey = getConfig("SECRETS_ENCRYPTION_KEY");
 
     if (!secretsEncryptionKey) {
       throw new Error(
@@ -218,14 +219,14 @@ export class ModelManager {
     baseUrl?: string;
   } | null {
     const taskUpper = task.toUpperCase();
-    const taskProvider = process.env[`${taskUpper}_PROVIDER`] as Provider | undefined;
+    const taskProvider = getConfig(`${taskUpper}_PROVIDER`) as Provider | undefined;
 
     if (!taskProvider) return null;
 
     return {
       provider: taskProvider,
-      apiKey: process.env[`${taskUpper}_API_KEY`],
-      baseUrl: process.env[`${taskUpper}_BASE_URL`],
+      apiKey: getConfig(`${taskUpper}_API_KEY`),
+      baseUrl: getConfig(`${taskUpper}_BASE_URL`),
     };
   }
 
@@ -351,9 +352,9 @@ export class ModelManager {
       // Use per-task API key and base URL if available, otherwise fall back to global
       const anthropicApiKey = (taskConfig?.provider === "anthropic" ? taskConfig.apiKey : null)
         || apiKey
-        || process.env.ANTHROPIC_API_KEY;
+        || getConfig("ANTHROPIC_API_KEY");
       const anthropicBaseUrl = (taskConfig?.provider === "anthropic" ? taskConfig.baseUrl : null)
-        || process.env.ANTHROPIC_BASE_URL;
+        || getConfig("ANTHROPIC_BASE_URL");
 
       const anthropicModel = new ChatAnthropicFiltered({
         model: modelName,
@@ -385,8 +386,8 @@ export class ModelManager {
       max_retries: MAX_RETRIES,
       ...(apiKey ? { apiKey } : {}),
       // Support custom base URL for OpenAI (LiteLLM gateway)
-      ...(provider === "openai" && process.env.OPENAI_BASE_URL
-        ? { configuration: { baseURL: process.env.OPENAI_BASE_URL } }
+      ...(provider === "openai" && getConfig("OPENAI_BASE_URL")
+        ? { configuration: { baseURL: getConfig("OPENAI_BASE_URL") } }
         : {}),
       ...(modelName.includes("gpt-5")
         ? {
@@ -402,8 +403,8 @@ export class ModelManager {
     logger.debug("Initializing model", {
       provider,
       modelName,
-      hasCustomBaseUrl: provider === "openai" && !!process.env.OPENAI_BASE_URL,
-      baseUrl: provider === "openai" ? process.env.OPENAI_BASE_URL : undefined,
+      hasCustomBaseUrl: provider === "openai" && !!getConfig("OPENAI_BASE_URL"),
+      baseUrl: provider === "openai" ? getConfig("OPENAI_BASE_URL") : undefined,
     });
 
     return await initChatModel(modelName, modelOptions);
@@ -531,7 +532,7 @@ export class ModelManager {
     const modelName = modelNameParts.join(":");
 
     if (provider === "google-genai") {
-      const envTemp = process.env.GOOGLE_TEMPERATURE;
+      const envTemp = getConfig("GOOGLE_TEMPERATURE");
       if (envTemp) {
         return parseFloat(envTemp);
       }
@@ -653,7 +654,7 @@ export class ModelManager {
     const taskName = task.toUpperCase();
     const envKey = `${providerPrefix}_${taskName}_MODEL`;
 
-    const envValue = process.env[envKey];
+    const envValue = getConfig(envKey);
     if (envValue) {
       logger.info(`Using model from env ${envKey}: ${envValue}`);
       return envValue;

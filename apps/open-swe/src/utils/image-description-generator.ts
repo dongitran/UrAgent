@@ -8,6 +8,7 @@ import {
     summarizeResponse,
     extractTokenUsage,
 } from "@openswe/shared/logger-hub-client";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "ImageDescriptionGenerator");
 
@@ -79,9 +80,9 @@ export async function generateImageDescription(
         const durationMs = Date.now() - startTime;
 
         // Log to Logger Hub (fire and forget)
-        const provider = process.env.LLM_PROVIDER || 'unknown';
+        const provider = getConfig("LLM_PROVIDER") || 'unknown';
         const providerPrefix = provider === 'google-genai' ? 'GOOGLE' : provider.toUpperCase();
-        const modelName = process.env[`${providerPrefix}_ROUTER_MODEL`] || 'unknown';
+        const modelName = getConfig(`${providerPrefix}_ROUTER_MODEL`) || 'unknown';
         logAIMessage({
             threadId: config.configurable?.thread_id || 'unknown',
             runId: config.configurable?.run_id,
@@ -126,9 +127,9 @@ export async function generateImageDescription(
         const durationMs = Date.now() - startTime;
 
         // Log error to Logger Hub
-        const provider = process.env.LLM_PROVIDER || 'unknown';
+        const provider = getConfig("LLM_PROVIDER") || 'unknown';
         const providerPrefix = provider === 'google-genai' ? 'GOOGLE' : provider.toUpperCase();
-        const modelName = process.env[`${providerPrefix}_ROUTER_MODEL`] || 'unknown';
+        const modelName = getConfig(`${providerPrefix}_ROUTER_MODEL`) || 'unknown';
         logAIMessage({
             threadId: config.configurable?.thread_id || 'unknown',
             runId: config.configurable?.run_id,

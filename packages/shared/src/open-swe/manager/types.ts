@@ -2,6 +2,7 @@ import { MessagesZodState } from "@langchain/langgraph";
 import { TargetRepository, TaskPlan, AgentSession } from "../types.js";
 import { z } from "zod";
 import { withLangGraph } from "@langchain/langgraph/zod";
+import { getConfig } from "../../dynamic-config.js";
 
 export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
@@ -23,10 +24,10 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
     reducer: {
       schema: z.custom<TargetRepository>(),
       fn: (_state, update) => {
-        // If default repository is configured in env, always use it (ignore client input)
-        const defaultOwner = process.env.DEFAULT_REPOSITORY_OWNER;
-        const defaultRepo = process.env.DEFAULT_REPOSITORY_NAME;
-        const defaultBranch = process.env.DEFAULT_BRANCH;
+        // If default repository is configured in config, always use it (ignore client input)
+        const defaultOwner = getConfig("DEFAULT_REPOSITORY_OWNER");
+        const defaultRepo = getConfig("DEFAULT_REPOSITORY_NAME");
+        const defaultBranch = getConfig("DEFAULT_BRANCH");
 
         // Debug logging
         console.log("[ManagerGraphState] targetRepository reducer called", {
@@ -42,10 +43,10 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
           // When DEFAULT_BRANCH is set, ALWAYS use it (ignore client branch)
           // This ensures the agent always works on the configured base branch
           // When DEFAULT_BRANCH is NOT set, use client's branch or fallback to "main"
-          const branch = defaultBranch 
-            ? defaultBranch 
+          const branch = defaultBranch
+            ? defaultBranch
             : (update?.branch || "main");
-          
+
           const result = {
             owner: defaultOwner,
             repo: defaultRepo,
@@ -60,9 +61,9 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
       },
     },
     default: () => ({
-      owner: process.env.DEFAULT_REPOSITORY_OWNER || "",
-      repo: process.env.DEFAULT_REPOSITORY_NAME || "",
-      branch: process.env.DEFAULT_BRANCH || "main",
+      owner: getConfig("DEFAULT_REPOSITORY_OWNER") || "",
+      repo: getConfig("DEFAULT_REPOSITORY_NAME") || "",
+      branch: getConfig("DEFAULT_BRANCH") || "main",
     }),
   }),
   /**

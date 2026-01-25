@@ -20,6 +20,7 @@ import {
   GitCommitOptions,
   SandboxProviderType,
 } from "./types.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.DEBUG, "DaytonaSandboxProvider");
 
@@ -236,7 +237,7 @@ ${delimiter}`;
 
       // Always clone base branch first to ensure local base branch exists for git diff
       // This matches the behavior of the old code that worked correctly
-      const baseBranch = options.baseBranch || process.env.DEFAULT_BRANCH || 'main';
+      const baseBranch = options.baseBranch || getConfig("DEFAULT_BRANCH") || 'main';
 
       logger.info("[DAYTONA] Cloning base branch first", {
         sandboxId: this.id,
@@ -366,11 +367,11 @@ export class DaytonaSandboxProvider implements ISandboxProvider {
     defaultUser?: string;
   }) {
     // Support multiple comma-separated keys for round-robin
-    const keyString = config?.apiKey || process.env.DAYTONA_API_KEY || '';
+    const keyString = config?.apiKey || getConfig("DAYTONA_API_KEY") || '';
     this.apiKeys = keyString.split(',').map(k => k.trim()).filter(k => k.length > 0);
-    this.apiUrl = config?.apiUrl || process.env.DAYTONA_API_URL;
+    this.apiUrl = config?.apiUrl || getConfig("DAYTONA_API_URL");
 
-    this.defaultSnapshot = config?.defaultSnapshot || process.env.DAYTONA_SNAPSHOT_NAME || 'daytona-small';
+    this.defaultSnapshot = config?.defaultSnapshot || getConfig("DAYTONA_SNAPSHOT_NAME") || 'daytona-small';
     this.defaultUser = config?.defaultUser || 'daytona';
 
     logger.debug("[DAYTONA] Provider initialized", {

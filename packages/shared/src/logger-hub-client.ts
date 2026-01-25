@@ -109,15 +109,17 @@ export interface TokenUsage {
     cacheCreationTokens?: number;
 }
 
-// Configuration from environment variables
-const getLoggerHubUrl = () => process.env.LOGGER_HUB_URL || "";
+// Configuration from dynamic config (MongoDB with fallback to process.env)
+import { getConfig } from "./dynamic-config.js";
 
-const getLoggerHubApiKey = () => process.env.LOGGER_HUB_API_KEY || "";
+const getLoggerHubUrl = () => getConfig("LOGGER_HUB_URL") || "";
+
+const getLoggerHubApiKey = () => getConfig("LOGGER_HUB_API_KEY") || "";
 
 const getLoggerHubCollection = () =>
-    process.env.LOGGER_HUB_COLLECTION || "uragent-urtest-ai-messages";
+    getConfig("LOGGER_HUB_COLLECTION") || "uragent-urtest-ai-messages";
 
-const isLoggerHubEnabled = () => process.env.LOGGER_HUB_ENABLED !== "false" && !!getLoggerHubUrl();
+const isLoggerHubEnabled = () => getConfig("LOGGER_HUB_ENABLED") !== "false" && !!getLoggerHubUrl();
 
 /**
  * Log an AI message to Logger Hub

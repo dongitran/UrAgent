@@ -15,6 +15,7 @@ import { INITIALIZE_NODE_ID, CustomNodeEvent } from "@openswe/shared/open-swe/cu
 import { LocalSandbox } from "./sandbox-provider/local-provider.js";
 import { isRunCancelled } from "./run-cancellation.js";
 import { sandboxConcurrencyManager } from "./sandbox-concurrency.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.DEBUG, "Sandbox");
 
@@ -43,15 +44,15 @@ export async function ensureSkillsRepository(
   // Try to get skills repo from state, config, or fallback to env vars
   let skillsRepo = skillsRepoFromState || configurable?.skillsRepository;
 
-  // Fallback to env vars if not provided in state or config
+  // Fallback to config vars if not provided in state or config
   if (!skillsRepo) {
-    const envOwner = process.env.SKILLS_REPOSITORY_OWNER;
-    const envRepo = process.env.SKILLS_REPOSITORY_NAME;
+    const envOwner = getConfig("SKILLS_REPOSITORY_OWNER");
+    const envRepo = getConfig("SKILLS_REPOSITORY_NAME");
     if (envOwner && envRepo) {
       skillsRepo = {
         owner: envOwner,
         repo: envRepo,
-        branch: process.env.SKILLS_REPOSITORY_BRANCH || "main",
+        branch: getConfig("SKILLS_REPOSITORY_BRANCH") || "main",
       };
     }
   }
@@ -137,7 +138,7 @@ export async function ensureSkillsRepository(
       }
 
       // Apply sparse checkout if SKILLS_REPOSITORY_PATH is set to keep only needed subfolder
-      const skillsSubPath = process.env.SKILLS_REPOSITORY_PATH?.trim();
+      const skillsSubPath = getConfig("SKILLS_REPOSITORY_PATH")?.trim();
       if (skillsSubPath) {
         try {
           logger.info("SKILLS REPO: Applying sparse checkout", { path: skillsSubPath });

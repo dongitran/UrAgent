@@ -79,14 +79,15 @@ import {
   generateLoopWarningPrompt,
 } from "../../../../utils/loop-detection.js";
 import { isRunCancelled } from "../../../../utils/run-cancellation.js";
+import { getConfig } from "@openswe/shared/dynamic-config";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
-// Debug logging controlled by GEMINI_DEBUG env var
-const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+// Debug logging controlled by GEMINI_DEBUG config
+const isGeminiDebugEnabled = () => getConfig("GEMINI_DEBUG") === 'true';
 
 function debugLog(message: string, data?: Record<string, unknown>): void {
-  if (GEMINI_DEBUG) {
+  if (isGeminiDebugEnabled()) {
     logger.debug(message, data);
   }
 }

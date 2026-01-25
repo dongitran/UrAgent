@@ -15,12 +15,13 @@ import {
 } from "@langchain/core/messages";
 import type { ToolCall } from "@langchain/core/messages/tool";
 import type { Content, PartWithThoughtSignature } from "../types.js";
+import { getConfig as getDynamicConfig } from "@openswe/shared/dynamic-config";
 
-// Debug flag - controlled via GEMINI_DEBUG env var
-const GEMINI_DEBUG = process.env.GEMINI_DEBUG === 'true';
+// Debug flag - controlled via GEMINI_DEBUG config
+const GEMINI_DEBUG = () => getDynamicConfig("GEMINI_DEBUG") === 'true';
 
 function debugLog(message: string, data?: Record<string, unknown>) {
-  if (GEMINI_DEBUG) {
+  if (GEMINI_DEBUG()) {
     console.error(`[Gemini Debug] ${message}`, data ?? {});
   }
 }
