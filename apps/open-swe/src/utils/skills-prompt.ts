@@ -23,7 +23,10 @@ export const SKILLS_REPO_PROMPT_TEMPLATE = `
 export const SKILLS_FIRST_STEP_TEMPLATE = `
     0. **CHECK .skills FOLDER FIRST**: Skills contain project-specific guidelines crucial for understanding the codebase.
         - Skill files are already listed in codebase_tree under .skills/ (look for "_:" arrays)
-        - Read relevant skill files: view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"`;
+        - **DO NOT view directory** - filenames are already visible in codebase_tree, directly read the files
+        - **ALWAYS read**: coding-standards/SKILL.md (mandatory for all tasks)
+        - **If backend task** (API, NestJS, services, *-api projects): Also read backend-patterns/SKILL.md
+        - **Directly read skill files** (no directory listing): view path=".skills/{SKILLS_SUBFOLDER}/<filename>.md"`;
 
 /**
  * Get the skills repo prompt section - only returns content if configured via env vars.
