@@ -93,8 +93,9 @@ export async function initDynamicConfig(): Promise<boolean> {
         const db = client.db(); // Uses database from connection string
         const collection = db.collection(getConfigCollection());
 
-        // Load the default config document
-        const configDoc = await collection.findOne({ _id: "default" as unknown });
+        // Load the default config document (using string _id)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const configDoc = await collection.findOne({ _id: "default" } as any);
 
         await client.close();
 
