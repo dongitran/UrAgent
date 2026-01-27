@@ -1,5 +1,3 @@
-import { getConfig } from "./dynamic-config.js";
-
 export const TIMEOUT_SEC = 60; // 1 minute
 
 // Sandbox root directories for different providers
@@ -8,14 +6,12 @@ export const E2B_SANDBOX_ROOT_DIR = "/home/user";
 
 // Legacy constant - defaults to Daytona path for backward compatibility
 // Use getSandboxRootDir() for provider-aware path resolution
-export const SANDBOX_ROOT_DIR = getConfig("SANDBOX_ROOT_DIR") || DAYTONA_SANDBOX_ROOT_DIR;
+export const SANDBOX_ROOT_DIR = DAYTONA_SANDBOX_ROOT_DIR;
 
 export const DAYTONA_IMAGE_NAME = "daytonaio/langchain-open-swe:0.1.0";
-export const DAYTONA_SNAPSHOT_NAME =
-  getConfig("DAYTONA_SNAPSHOT_NAME") || "open-swe-vcpu2-mem4-disk5";
+export const DAYTONA_SNAPSHOT_NAME = "open-swe-vcpu2-mem4-disk5";
 // E2B template name - default to "base" which is E2B's default template
-export const E2B_TEMPLATE_NAME =
-  getConfig("E2B_TEMPLATE") || "base";
+export const E2B_TEMPLATE_NAME = "base";
 
 /**
  * Get the sandbox root directory based on provider type
@@ -45,7 +41,7 @@ export function getSandboxRootDir(providerType?: string): string {
   }
 
   // Auto-detect from environment (only when providerType not specified)
-  const envProvider = getConfig("SANDBOX_PROVIDER")?.toLowerCase();
+  const envProvider = process.env.SANDBOX_PROVIDER?.toLowerCase();
   if (envProvider === 'e2b') {
     return E2B_SANDBOX_ROOT_DIR;
   }
